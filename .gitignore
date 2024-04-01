@@ -1,2 +1,6 @@
 tmp
 hsa.egg-info
+__pycache__
+data
+logs
+results
