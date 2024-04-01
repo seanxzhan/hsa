@@ -50,7 +50,7 @@ save_every = 100
 multires = 2
 pt_sample_res = 64        # point_sampling
 
-expt_id = 0
+expt_id = 1
 
 OVERFIT = args.of
 overfit_idx = args.of_idx
@@ -200,7 +200,11 @@ def train_one_itr(it, all_fg_part_indices,
                                          each_part_feat, dim=-1)
     modified_embed = batch_embed * parts_mask
 
-    occs1 = model(transformed_points,
+    points_mask = torch.ones_like(transformed_points).to(device, torch.float32)
+    if len(masked_indices) != 0:
+        points_mask[:, rand_indices] = 0
+
+    occs1 = model(transformed_points * points_mask,
                   modified_embed)
     pred_values1, _ = torch.max(occs1, dim=-1, keepdim=True)
     loss1 = loss_f(pred_values1, modified_values)
@@ -369,14 +373,12 @@ if args.test:
                                              each_part_feat, dim=-1)
         modified_embed = batch_embed * parts_mask
 
-        # mask = torch.ones((1, 3)).to(device, torch.float32)
-        # mask[:, 2] = 0
+        points_mask = torch.ones_like(transformed_points).to(device, torch.float32)
+        if len(masked_indices) != 0:
+            points_mask[:, masked_indices] = 0
 
-        pred_values = model(transformed_points, modified_embed)
+        pred_values = model(transformed_points * points_mask, modified_embed)
         pred_values, _ = torch.max(pred_values, dim=-1, keepdim=True)
-
-        # pred_values = model(query_points,
-        #                     batch_embed.unsqueeze(1).expand(-1, query_points.shape[1], -1))
 
     if args.mask:
         mag = 1
