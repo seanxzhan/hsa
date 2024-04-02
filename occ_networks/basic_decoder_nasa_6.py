@@ -56,7 +56,7 @@ class SDFDecoder(torch.nn.Module):
         self.feature_dims = feature_dims
         self.nets = torch.nn.ModuleList()
 
-        for i in range(48):
+        for i in range(21):
             self.nets.append(SmallMLPs(input_dims,
                                        feature_dims,
                                        internal_dims,

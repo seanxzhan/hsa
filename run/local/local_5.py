@@ -8,7 +8,7 @@ import trimesh
 import argparse
 import numpy as np
 from tqdm import tqdm
-from occ_networks.basic_decoder_nasa_3 import SDFDecoder
+from occ_networks.basic_decoder_nasa_5 import SDFDecoder
 from utils import misc, visualize, transform, ops, reconstruct
 from data_prep import preprocess_data_0
 from typing import Dict, List
@@ -50,7 +50,7 @@ save_every = 100
 multires = 2
 pt_sample_res = 64        # point_sampling
 
-expt_id = 3
+expt_id = 5
 
 OVERFIT = args.of
 overfit_idx = args.of_idx

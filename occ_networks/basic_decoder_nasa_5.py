@@ -56,7 +56,7 @@ class SDFDecoder(torch.nn.Module):
         self.feature_dims = feature_dims
         self.nets = torch.nn.ModuleList()
 
-        for i in range(48):
+        for i in range(21):
             self.nets.append(SmallMLPs(input_dims,
                                        feature_dims,
                                        internal_dims,
@@ -64,10 +64,10 @@ class SDFDecoder(torch.nn.Module):
                                        output_dims,
                                        multires))
         
-        for i, mlp in enumerate(self.nets):
-            if i not in list(range(num_parts)):
-                for _, param in mlp.named_parameters():
-                    param.requires_grad = False
+        # for i, mlp in enumerate(self.nets):
+        #     if i not in [6, 13, 18]:
+        #         for param in mlp.parameters():
+        #             param.requires_grad = False
 
     def forward(self, points, features, mask=None):
         batch_size, _, n_points, _ = points.shape

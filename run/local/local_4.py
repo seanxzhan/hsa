@@ -8,7 +8,7 @@ import trimesh
 import argparse
 import numpy as np
 from tqdm import tqdm
-from occ_networks.basic_decoder_nasa import SDFDecoder
+from occ_networks.basic_decoder_nasa_4 import SDFDecoder
 from utils import misc, visualize, transform, ops, reconstruct
 from data_prep import preprocess_data_0
 from typing import Dict, List

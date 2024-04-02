@@ -1,6 +1,6 @@
 #!/bin/bash
 
-ARGS=(0 2)
+ARGS=(2 3 4 5 6)
 echo "Running local experiments: ${ARGS[@]}"
 
 for arg in "${ARGS[@]}"
