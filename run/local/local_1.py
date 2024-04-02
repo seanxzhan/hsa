@@ -43,7 +43,7 @@ if args.of:
     assert args.of_idx != None
 
 device = 'cuda'
-lr = 5e-3
+lr = 3e-3
 laplacian_weight = 0.1
 iterations = 3001
 save_every = 100
@@ -176,7 +176,8 @@ np.random.seed(319)
 def train_one_itr(it, all_fg_part_indices, 
                   transformed_points, values,
                   part_nodes, batch_embed, batch_empty_parts):
-    num_parts_to_mask = 1
+    num_parts_to_mask = np.random.randint(1, num_parts)
+    # num_parts_to_mask = 1
     rand_indices = np.random.choice(num_parts, num_parts_to_mask,
                                     replace=False)
 
@@ -282,10 +283,6 @@ if args.test:
         anno_id = model_idx_to_anno_id[model_idx]
     model_id = misc.anno_id_to_model_id(partnet_index_path)[anno_id]
     print(f"anno id: {anno_id}, model id: {model_id}")
-    if not args.mask:
-        print("reconstructing...")
-    else:
-        print(f"masking parts: {args.parts}")
 
     checkpoint = torch.load(os.path.join(ckpt_dir, f'model_{it}.pt'))
     model.load_state_dict(checkpoint['model_state_dict'])
@@ -365,6 +362,11 @@ if args.test:
                 masked_indices = torch.Tensor(parts).to(device, torch.long)
         else:
             masked_indices = torch.Tensor([]).to(device, torch.long)
+
+        if not args.mask:
+            print("reconstructing...")
+        else:
+            print(f"masking parts: {masked_indices.cpu().numpy().tolist()}")
 
         parts_mask = torch.ones((batch_embed.shape[0], num_parts)).to(device, torch.float32)
         if len(masked_indices) != 0:
@@ -492,214 +494,3 @@ if args.test:
 
     exit(0)
 
-
-def get_shifted_obbs(anno_id, part_idx, shift):
-    # TODO: this part idx should be changed to a list of part indices
-    part_obbs = []
-
-    with open(f'data/{cat_name}_part_name_to_new_id_0_{ds_start}_{ds_end}.json', 'r') as f:
-        unique_name_to_new_id = json.load(f)
-
-    _, _, orig_obbs, _, name_to_obb_indices, _, _, _ =\
-        preprocess_data_0.merge_partnet_after_merging(anno_id)
-
-    unique_names = list(unique_name_to_new_id.keys())
-    model_part_names = list(name_to_obb_indices.keys())
-    
-    for i, un in enumerate(unique_names):
-        if not un in model_part_names:
-            part_obbs.append([])
-            continue
-        part_obb_indices = name_to_obb_indices[un]
-        part_obbs.append([orig_obbs[poi] for poi in part_obb_indices])
-
-    # len equals the number of bounding boxes for this part class
-    orig_part_obbs = part_obbs[part_idx]
-
-    def shift_orig_obb(orig_obb):
-        extents, xform = orig_obb
-        extents = np.array(extents)
-        xform = np.array(xform)
-        shift_mat = np.zeros_like(xform)
-        shift_mat[:3, 3] = shift.cpu().numpy()
-        new_xform = xform + shift_mat
-        return (extents, new_xform)
-    
-    # same length as orig_part_obbs
-    shifted_orig_part_obbs = [shift_orig_obb(x) for x in orig_part_obbs]
-
-    # convert each shifted obb to compact representation
-    compact_shifted_obbs =\
-        preprocess_data_0.condense_obbs(shifted_orig_part_obbs)
-
-    return compact_shifted_obbs, shifted_orig_part_obbs
-
-
-def build_adj_matrix(col, adj_to_build, adj_to_look_up):
-    # find the rows for which col is one
-    # this value must exist and must be unique
-    # exist: the tree has no islands, so the node must be connected 
-    # unique: one child node only has one parent
-    if col == 0:
-        return 
-    row = torch.argwhere(adj_to_look_up[:, col] == 1).flatten()[0]
-    adj_to_build[row, col] = 1
-    build_adj_matrix(row, adj_to_build, adj_to_look_up)
-
-
-exit(0)
-if args.asb:
-    # assembly shape from coarse parts
-    it = args.it
-    results_dir = os.path.join(results_dir, 'assembly')
-    misc.check_dir(results_dir)
-
-    model_indices = [0, 1, 2]
-    part_indices = [0, 18, 6]
-    shifts = [
-        torch.Tensor([0, 0, 0]).to(device),
-        torch.Tensor([0, -0.25, 0]).to(device),
-        torch.Tensor([0, 0.1, 0]).to(device)
-    ]
-    # shifts = [
-    #     torch.Tensor([0, 0, 0]).to(device),
-    #     torch.Tensor([0, 0, 0]).to(device),
-    #     torch.Tensor([0, 0, 0]).to(device)
-    # ]
-
-    all_part_num_obbs = []
-    obbs_of_interest = [[]] * num_parts
-    asb_node_features = torch.zeros((num_union_nodes,
-                                     preprocess_data_dense_graph.OBB_REP_SIZE))
-    asb_part_nodes = torch.zeros((num_parts, num_union_nodes))
-    asb_adj = torch.zeros((num_union_nodes, num_union_nodes))
-    for i, idx in enumerate(model_indices):
-        anno_id = model_idx_to_anno_id[idx]
-        part_idx = part_indices[i]
-        compact_shifted_obbs, shifted_orig_part_obbs =\
-            get_shifted_obbs(anno_id, part_idx, shifts[i])
-        # get the original obbs for visualization
-        obbs_of_interest[part_idx] = shifted_orig_part_obbs
-        # model part nodes
-        asb_part_nodes[part_idx] = part_nodes[idx][part_idx]
-        # indices in union nodes
-        union_node_indices =\
-            torch.argwhere(part_nodes[idx][part_idx] == 1).flatten()
-        asb_node_features[union_node_indices] = compact_shifted_obbs
-        
-        # given union_node_indices of the part of interest, 
-        # recursively build an adjacency matrix
-        # TODO: a probabilistic graphical model should take care of this part
-        #   i.e. infer connections based on the geometry of the bounding boxes
-        for uni in union_node_indices:
-            build_adj_matrix(uni, asb_adj, adj[idx])
-
-    # build a tree that is a subset of the union tree (dense graph)
-    # using the bounding boxes
-    node_names = np.load(f'data/{cat_name}_union_node_names.npy')
-    recon_root = preprocess_data_dense_graph.recon_tree(cat_name,
-                                                        asb_adj.numpy(),
-                                                        node_names)
-    UniqueDotExporter(recon_root,
-                      indent=0,
-                      nodenamefunc=lambda node: node.name,
-                      nodeattrfunc=lambda node: "shape=box",).to_picture(
-                          os.path.join(results_dir, 'asb_tree.png'))
-
-    asb_node_features = asb_node_features.unsqueeze(0).to(device)
-    asb_part_nodes = asb_part_nodes.unsqueeze(0).to(device)
-    asb_adj = asb_adj.unsqueeze(0).to(device)
-
-    # NOTE: VERY IMPORTANT
-    # WHY do we want to infer the hierarchy? 
-    # this hierarchy can be make the shape more cohesive
-    # experiment: user draws bounding boxes, without hierarchy, shapes are disconnected
-    # with hierarchy, network optimizes the extrinsics (xform) of bounding boxes
-    # somewhere in the network, xform needs to be conditioned on the hierarchy!!!
-
-    checkpoint = torch.load(os.path.join(ckpt_dir, f'model_{it}.pt'))
-    model.load_state_dict(checkpoint['model_state_dict'])
-    optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-    
-    gt_color = [31, 119, 180, 255]
-    mesh_pred_path = os.path.join(results_dir, 'mesh_pred.png')
-    obbs_path = os.path.join(results_dir, 'obbs.png')
-    lst_paths = [
-        obbs_path,
-        mesh_pred_path]
-
-    query_points = reconstruct.make_query_points(pt_sample_res)
-    query_points = torch.from_numpy(query_points).to(device, torch.float32)
-    query_points = query_points.unsqueeze(0)
-
-    with torch.no_grad():
-        if args.mask:
-            # parts = [args.part]
-            parts = args.parts
-            parts = [int(x) for x in parts]
-            if args.recon_one_part:
-                # only reconstruct part specified by parts
-                masked_indices = list(set(range(num_parts)) - set(parts))
-                masked_indices = torch.Tensor(masked_indices).to(device, torch.long)
-            if args.recon_the_rest:
-                # don't reconstruct stuff in masked_indices
-                masked_indices = torch.Tensor(parts).to(device, torch.long)
-        else:
-            masked_indices = torch.Tensor([]).to(device, torch.long)
-
-        asb_part_nodes_mask = torch.ones_like(asb_part_nodes).to(device, torch.long)
-        if len(masked_indices) != 0:
-            asb_part_nodes_mask[:, masked_indices] = 0
-        modified_part_nodes = asb_part_nodes_mask * asb_part_nodes
-        modified_part_nodes = torch.sum(modified_part_nodes, dim=1)
-
-        batch_vec = torch.arange(start=0, end=1).to(device)
-        batch_vec = torch.repeat_interleave(batch_vec, num_union_nodes)
-        pred_values = model(query_points,
-                            asb_node_features,
-                            asb_adj,
-                            modified_part_nodes,
-                            batch_vec)
-
-    if args.mask:
-        mag = 1
-    else:
-        mag = 0.8
-
-    sdf_grid = torch.reshape(
-        pred_values,
-        (1, pt_sample_res, pt_sample_res, pt_sample_res))
-    sdf_grid = torch.permute(sdf_grid, (0, 2, 1, 3))
-    vertices, faces =\
-        kaolin.ops.conversions.voxelgrids_to_trianglemeshes(sdf_grid)
-    vertices = kaolin.ops.pointcloud.center_points(
-        vertices[0].unsqueeze(0), normalize=True).squeeze(0)
-    pred_vertices = vertices.cpu().numpy()
-    pred_faces = faces[0].cpu().numpy()
-    pred_mesh = trimesh.Trimesh(pred_vertices, pred_faces)
-    pred_mesh.export(os.path.join(results_dir, 'mesh_pred.obj'))
-    visualize.save_mesh_vis(pred_mesh, mesh_pred_path,
-                            mag=mag, white_bg=False)
-    
-    masked_indices = masked_indices.cpu().numpy()
-    unmasked_indices = list(set(range(num_parts)) - set(masked_indices))
-
-    obbs_of_interest = [obbs_of_interest[x] for x in unmasked_indices]
-    import itertools
-    obbs_of_interest = list(itertools.chain(*obbs_of_interest))
-
-    visualize.save_obbs_vis(obbs_of_interest,
-                            obbs_path, mag=0.8, white_bg=False)
-    
-    if not args.mask:
-        visualize.stitch_imges(
-            os.path.join(results_dir,f'assembly_results.png'),
-            image_paths=lst_paths,
-            adj=200)
-    else:
-        # parts_str contains all the parts that are MASKED OUT
-        parts_str = '-'.join([str(x) for x in masked_indices])
-        visualize.stitch_imges(
-            os.path.join(results_dir,f'assembly_results_mask_{parts_str}.png'),
-            image_paths=lst_paths,
-            adj=200)
