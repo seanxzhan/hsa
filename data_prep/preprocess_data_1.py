@@ -717,4 +717,4 @@ def convert_flat_list_to_fg_part_indices(part_num_indices, all_indices):
 
 
 if __name__ == "__main__":
-    export_data(train_ids, save_data=True, start=0, end=10)
+    export_data(train_ids, save_data=True, start=0, end=2000)

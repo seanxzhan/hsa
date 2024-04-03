@@ -1,5 +1,6 @@
 import os
 import re
+from PIL import Image
 
 
 def check_dir(directory):
@@ -24,3 +25,13 @@ def anno_id_to_model_id(anno_info_path):
         out[tokens[0]] = tokens[3]
     
     return out
+
+
+def save_fig(plt, title, img_path, rotate=False, transparent=False):
+    plt.title(title)
+    plt.savefig(img_path, bbox_inches='tight', pad_inches=0, dpi=150, 
+                transparent=transparent)
+    if rotate:
+        im = Image.open(img_path)
+        im = im.rotate(90)
+        im.save(img_path)
