@@ -1,5 +1,5 @@
 # part classes, includes specified number of shape with variable parts
-# NOTE: obb xform is not consistent throughout shapes
+# NOTE: obb xform is consistent throughout shapes
 
 import os
 import json
@@ -12,6 +12,7 @@ import trimesh
 import numpy as np
 from tqdm import tqdm
 from anytree import RenderTree, AnyNode, findall_by_attr, PreOrderIter
+import trimesh.bounds
 from utils import tree, misc, visualize, ops, transform
 from utils.tree import OriNode, AMNode
 from data_prep import gather_hdf5
@@ -111,9 +112,75 @@ def build_obbs(anno_id, part_info: Dict):
             count += 1
         mesh = trimesh.util.concatenate(meshes)
         obb: trimesh.primitives.Box = mesh.bounding_box_oriented
-        ext_xform = (
-            np.array(obb.primitive.extents),
-            np.array(obb.primitive.transform))
+        # ext_xform = (
+        #     np.array(obb.primitive.extents),
+        #     np.array(obb.primitive.transform))
+
+        ext = np.array(obb.primitive.extents)
+        xform = np.array(obb.primitive.transform)
+
+        # world axes
+        ref_x_axis = np.array([1, 0, 0])
+        ref_z_axis = np.array([0, 1, 0])
+
+        orig_x_axis = xform[:3, :3][:, 0]
+        orig_y_axis = xform[:3, :3][:, 1]
+        orig_z_axis = xform[:3, :3][:, 2]
+
+        lst_axes = [orig_x_axis, orig_y_axis, orig_z_axis]
+        lst_exts = [ext[0], ext[1], ext[2]]
+        
+        # book keep new extents and xforms
+        new_ext = np.array([0, 0, 0], dtype=np.float32)
+        new_xform = np.eye(4)
+        new_xform[:3, 3] = xform[:3, 3]     # set translation
+        
+        # first, get the axis that aligns with world z (up)
+        dot_out = []
+        for ax in lst_axes:
+            dot_out.append(np.abs(np.dot(ax, ref_z_axis)))
+        which_aligns = np.argmax(dot_out)
+        if np.dot(lst_axes[which_aligns], ref_z_axis) >= 0:
+            new_xform[:3, 1] = lst_axes[which_aligns]
+        else:
+            new_xform[:3, 1] = -lst_axes[which_aligns]
+        new_ext[1] = lst_exts[which_aligns]
+        del lst_axes[which_aligns]
+        del lst_exts[which_aligns]
+
+        # next, get the axis that aligns with world x (right)
+        dot_out = []
+        for ax in lst_axes:
+            dot_out.append(np.abs(np.dot(ax, ref_x_axis)))
+        which_aligns = np.argmax(dot_out)
+        if np.dot(lst_axes[which_aligns], ref_x_axis) >= 0:
+            new_xform[:3, 0] = lst_axes[which_aligns]
+        else:
+            new_xform[:3, 0] = -lst_axes[which_aligns]
+        new_ext[0] = lst_exts[which_aligns]
+        del lst_axes[which_aligns]
+        del lst_exts[which_aligns]
+
+        # take from what's left in the axes and exts lists
+        new_xform[:3, 2] = lst_axes[0]
+        new_ext[2] = lst_exts[0]
+
+        # check handedness, flip an axis if necessary
+        if np.dot(np.cross(new_xform[:3, 0], new_xform[:3, 1]),
+                  new_xform[:3, 2]) < 0:
+            new_xform[:3, 2] = -new_xform[:3, 2]
+
+        # ext_xform = (ext, xform,
+        #              orig_x_axis,
+        #              orig_y_axis,
+        #              orig_z_axis,
+        #              xform[:3, 3])
+        ext_xform = (new_ext, new_xform,
+                     new_xform[:3, 0],
+                     new_xform[:3, 1],
+                     new_xform[:3, 2],
+                     new_xform[:3, 3])
+
         obbs.append(ext_xform)
         name_to_obbs[name] = ext_xform
     
@@ -401,10 +468,22 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
     print("gathering shape information")
     for id_pair in tqdm(split_ids[start:end]):
         anno_id = id_pair['anno_id']
+        
+        # # peek the bounding box xforms
+        # if anno_id not in ['3069', '36520', '36545', '40105']:
+        #     continue
+
         unique_names, part_map,\
             obbs, entire_mesh, name_to_obbs, obb_indices_to_ori_ids,\
             root_node =\
                 merge_partnet_after_merging(anno_id)
+        
+        # # peek the bounding box xforms
+        # print(anno_id)
+        # visualize.save_obbs_vis(obbs, f'data_prep/tmp/{anno_id}_obb_corrected.png',
+        #                         white_bg=False, mag=0.7, show_coord=True,
+        #                         name_to_obbs=name_to_obbs)
+
         each_shape_unique_names.append(unique_names)
         all_unique_names = list(set(all_unique_names) | set(unique_names))
         all_names_to_ori_ids_and_objs.append(part_map)
@@ -415,6 +494,8 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
         all_root_nodes.append(root_node)
     all_unique_names = sorted(all_unique_names)
     num_parts = len(all_unique_names)
+
+    # exit(0)
 
     # make frequency map
     name_freq = {}
@@ -435,7 +516,7 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
     for i, un in enumerate(all_unique_names):
         unique_name_to_new_id[un] = i
     with open(
-        f'data/{cat_name}_part_name_to_new_id_1_{start}_{end}.json',
+        f'data/{cat_name}_part_name_to_new_id_2_{start}_{end}.json',
         'w') as f:
         json.dump(unique_name_to_new_id, f)
     
@@ -456,7 +537,7 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
         all_new_ids_to_objs[split_ids[start+i]['anno_id']] = new_ids_to_objs
 
     with open(
-        f'data/{cat_name}_train_new_ids_to_objs_1_{start}_{end}.json',
+        f'data/{cat_name}_train_new_ids_to_objs_2_{start}_{end}.json',
         'w') as f:
         json.dump(all_new_ids_to_objs, f)
 
@@ -474,7 +555,7 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
                       indent=0,
                       nodenamefunc=lambda node: node.name,
                       nodeattrfunc=lambda node: "shape=box",).to_picture(
-                          f"data_prep/tmp/tree_union_class_1_{start}_{end}.png")
+                          f"data_prep/tmp/tree_union_class_2_{start}_{end}.png")
     num_union_nodes_class = sum(1 for _ in PreOrderIter(union_root_part))
     print("num_union_nodes_class: ", num_union_nodes_class)
 
@@ -493,7 +574,7 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
             make_edges(child)
     make_edges(union_root_part)
 
-    np.save(f'data/{cat_name}_union_node_names_1_{start}_{end}.npy',
+    np.save(f'data/{cat_name}_union_node_names_2_{start}_{end}.npy',
             union_node_names)
     
     # reconstruct a tree from adj
@@ -503,7 +584,7 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
                       nodenamefunc=lambda node: node.name,
                       nodeattrfunc=lambda node: "shape=box",
                       ).to_picture(
-                          f"data_prep/tmp/recon_tree_union_1_{start}_{end}.png")
+                          f"data_prep/tmp/recon_tree_union_2_{start}_{end}.png")
 
     print("making dense graphs")
     all_node_features = []
@@ -526,8 +607,9 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
         all_part_nodes.append(part_nodes)
         all_xforms.append(xforms)
         all_extents.append(extents)
-
-    fn = f'data/{cat_name}_train_{pt_sample_res}_1_{start}_{end}.hdf5'
+    
+    # exit(0)
+    fn = f'data/{cat_name}_train_{pt_sample_res}_2_{start}_{end}.hdf5'
     hdf5_file = h5py.File(fn, 'w')
     hdf5_file.create_dataset(
         'part_num_indices', [num_shapes, num_parts],

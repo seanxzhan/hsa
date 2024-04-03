@@ -152,20 +152,34 @@ def save_mesh_vis(trimesh_obj, out_path, mesh_y_rot=-45, mag=1,
 
 
 def save_obbs_vis(obbs, out_path, mesh_y_rot=-45, mag=1,
-                  white_bg=False, save_img=True):
+                  white_bg=False, save_img=True, show_coord=False,
+                  name_to_obbs=None):
     """obbs: a list of tuples x, where x = (extents, transform)
     """
+    if name_to_obbs is None:    
+        obb_meshes = []
+        for x in obbs:
+            obb_mesh = trimesh.creation.box(extents=x[0], transform=x[1])
+            # obb_mesh.visual.face_colors = [100, 100, 100, 255]
+            obb_meshes.append(obb_mesh)
 
-    obb_meshes = []
-    for x in obbs:
-        obb_mesh = trimesh.creation.box(extents=x[0], transform=x[1])
-        # obb_mesh.visual.face_colors = [100, 100, 100, 255]
-        obb_meshes.append(obb_mesh)
-
-    material = pyrender.MetallicRoughnessMaterial(
-        baseColorFactor=[0.12, 0.46, 0.70, 0.4],  alphaMode='BLEND')
-    obb_meshes = [pyrender.Mesh.from_trimesh(x, smooth=False, material=material)
-                  for x in obb_meshes]
+            material = pyrender.MetallicRoughnessMaterial(
+                baseColorFactor=[0.12, 0.46, 0.70, 0.4],  alphaMode='BLEND')
+            obb_meshes = [pyrender.Mesh.from_trimesh(x, smooth=False, material=material)
+                        for x in obb_meshes]
+    else:
+        obb_meshes = []
+        for name, obb in name_to_obbs.items():
+            if name == 'leg':
+                base_color = [0.70, 0.46, 0.12, 0.4]
+            else:
+                base_color = [0.12, 0.46, 0.70, 0.4]
+            obb_meshes.append(
+                pyrender.Mesh.from_trimesh(
+                    trimesh.creation.box(extents=obb[0], transform=obb[1]),
+                    smooth=False,
+                    material=pyrender.MetallicRoughnessMaterial(
+                        baseColorFactor=base_color, alphaMode='BLEND')))
 
     rotation_mat_y = np.identity(4)
     rot = R.from_euler('y', mesh_y_rot, degrees=True).as_matrix()
@@ -191,6 +205,44 @@ def save_obbs_vis(obbs, out_path, mesh_y_rot=-45, mag=1,
     edge_meshes = [pyrender.Mesh.from_trimesh(x, smooth=False, material=material)
                   for x in edge_meshes]
     for x in edge_meshes: scene.add(x, pose=rotation_mat_y)
+
+    if show_coord:
+        coord_meshes = []
+        for obb in obbs:
+
+            rad = 0.01
+            h = 0.1
+
+            translation = trimesh.transformations.translation_matrix(obb[5])
+
+            transx = trimesh.transformations.translation_matrix([h/2, 0, 0])
+            transy = trimesh.transformations.translation_matrix([0, h/2, 0])
+            transz = trimesh.transformations.translation_matrix([0, 0, h/2])
+
+            rotx = trimesh.geometry.align_vectors([0,0,1], obb[2])
+            roty = trimesh.geometry.align_vectors([0,0,1], obb[3])
+            rotz = trimesh.geometry.align_vectors([0,0,1], obb[4])
+
+            x_xform = np.dot(translation, rotx @ transz)
+            y_xform = np.dot(translation, roty @ transz)
+            z_xform = np.dot(translation, rotz @ transz)
+
+            x_cylinder = trimesh.creation.cylinder(rad, h, transform=x_xform)
+            x_cylinder.visual.vertex_colors = [255, 0, 0]
+
+            y_cylinder = trimesh.creation.cylinder(rad, h, transform=y_xform)
+            y_cylinder.visual.vertex_colors = [0, 255, 0]
+
+            z_cylinder = trimesh.creation.cylinder(rad, h, transform=z_xform)
+            z_cylinder.visual.vertex_colors = [0, 0, 255]
+
+            coord_meshes.append(x_cylinder)
+            coord_meshes.append(y_cylinder)
+            coord_meshes.append(z_cylinder)
+
+        coord_meshes = [pyrender.Mesh.from_trimesh(x, smooth=True)
+                       for x in coord_meshes]
+        for x in coord_meshes: scene.add(x, pose=rotation_mat_y)
 
     # add camera
     mag = mag

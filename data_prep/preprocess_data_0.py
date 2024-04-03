@@ -1,3 +1,5 @@
+# part classes, generates 170 shapes each with only 3 parts
+
 import os
 import json
 import copy
