@@ -10,7 +10,7 @@ import numpy as np
 from tqdm import tqdm
 from occ_networks.basic_decoder_nasa_9 import SDFDecoder
 from utils import misc, visualize, transform, ops, reconstruct
-from data_prep import preprocess_data_1
+from data_prep import preprocess_data_2
 from typing import Dict, List
 from anytree.exporter import UniqueDotExporter
 
@@ -50,7 +50,7 @@ save_every = 100
 multires = 2
 pt_sample_res = 64        # point_sampling
 
-expt_id = 10
+expt_id = 11
 
 OVERFIT = args.of
 overfit_idx = args.of_idx
@@ -74,14 +74,14 @@ cat_name = 'Chair'
 cat_id = name_to_cat[cat_name]
 # cat_id = '03636649'
 
-train_new_ids_to_objs_path = f'data/{cat_name}_train_new_ids_to_objs_1_{ds_start}_{ds_end}.json'
+train_new_ids_to_objs_path = f'data/{cat_name}_train_new_ids_to_objs_2_{ds_start}_{ds_end}.json'
 with open(train_new_ids_to_objs_path, 'r') as f:
     train_new_ids_to_objs: Dict = json.load(f)
 model_idx_to_anno_id = {}
 for model_idx, anno_id in enumerate(train_new_ids_to_objs.keys()):
     model_idx_to_anno_id[model_idx] = anno_id
 
-train_data_path = f'data/{cat_name}_train_{pt_sample_res}_1_{ds_start}_{ds_end}.hdf5'
+train_data_path = f'data/{cat_name}_train_{pt_sample_res}_2_{ds_start}_{ds_end}.hdf5'
 train_data = h5py.File(train_data_path, 'r')
 if OVERFIT:
     part_num_indices = train_data['part_num_indices'][overfit_idx:overfit_idx+1]
@@ -106,7 +106,7 @@ num_points = transformed_points.shape[2]
 num_shapes, num_parts = part_num_indices.shape
 all_fg_part_indices = []
 for i in range(num_shapes):
-    indices = preprocess_data_1.convert_flat_list_to_fg_part_indices(
+    indices = preprocess_data_2.convert_flat_list_to_fg_part_indices(
         part_num_indices[i], all_indices[i])
     all_fg_part_indices.append(np.array(indices, dtype=object))
 
@@ -176,8 +176,8 @@ np.random.seed(319)
 def train_one_itr(it, all_fg_part_indices, 
                   transformed_points, values,
                   batch_part_nodes, batch_embed, batch_empty_parts):
-    num_parts_to_mask = np.random.randint(1, num_parts)
-    # num_parts_to_mask = 1
+    # num_parts_to_mask = np.random.randint(1, num_parts)
+    num_parts_to_mask = 24
     rand_indices = np.random.choice(num_parts, num_parts_to_mask,
                                     replace=False)
 
@@ -250,11 +250,11 @@ if args.train:
             batch_loss += loss
         avg_batch_loss = batch_loss / batch_size
             
-        if (it) % 100 == 0 or it == (iterations - 1):
+        if (it) % 1 == 0 or it == (iterations - 1):
             info = f'Iteration {it} - loss: {avg_batch_loss:.8f}'
             print(info)
 
-        if (it) % 1000 == 0 or it == (iterations - 1):
+        if (it) % 500 == 0 or it == (iterations - 1):
             torch.save({
                 'epoch': it,
                 'model_state_dict': model.state_dict(),
@@ -307,9 +307,9 @@ if args.test:
 
     unique_part_names, name_to_ori_ids_and_objs,\
         orig_obbs, entire_mesh, name_to_obbs, obb_indices_to_ori_ids, _ =\
-        preprocess_data_1.merge_partnet_after_merging(anno_id)
+        preprocess_data_2.merge_partnet_after_merging(anno_id)
 
-    with open(f'data/{cat_name}_part_name_to_new_id_1_{ds_start}_{ds_end}.json', 'r') as f:
+    with open(f'data/{cat_name}_part_name_to_new_id_2_{ds_start}_{ds_end}.json', 'r') as f:
         unique_name_to_new_id = json.load(f)
 
     part_obbs = []
@@ -394,7 +394,7 @@ if args.test:
         #                     modified_embed).masked_fill(empty_parts==1,
         #                                                 torch.tensor(float('-inf')))
         pred_values = model(transformed_points * points_mask,
-                        modified_embed)
+                            modified_embed)
         pred_values, _ = torch.max(pred_values, dim=-1, keepdim=True)
 
     if args.mask:

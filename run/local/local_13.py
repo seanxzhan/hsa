@@ -8,9 +8,9 @@ import trimesh
 import argparse
 import numpy as np
 from tqdm import tqdm
-from occ_networks.basic_decoder_nasa_9 import SDFDecoder
+from occ_networks.basic_decoder_nasa import SDFDecoder
 from utils import misc, visualize, transform, ops, reconstruct
-from data_prep import preprocess_data_1
+from data_prep import preprocess_data_3
 from typing import Dict, List
 from anytree.exporter import UniqueDotExporter
 
@@ -24,7 +24,7 @@ parser.add_argument('--mask', action="store_true")
 parser.add_argument('--recon_one_part', '--ro', action="store_true")
 parser.add_argument('--recon_the_rest', '--rt', action="store_true")
 # parser.add_argument('--part', type=int)
-parser.add_argument('--parts', '--p', nargs='+')
+parser.add_argument('--parts', '--p', nargs='+') 
 parser.add_argument('--it', type=int)
 parser.add_argument('--asb', action="store_true")
 parser.add_argument('--of', action="store_true", default=False)
@@ -50,7 +50,7 @@ save_every = 100
 multires = 2
 pt_sample_res = 64        # point_sampling
 
-expt_id = 10
+expt_id = 13
 
 OVERFIT = args.of
 overfit_idx = args.of_idx
@@ -60,7 +60,7 @@ if OVERFIT:
     batch_size = 1
 
 ds_start = 0
-ds_end = 2000
+ds_end = 170
 
 shapenet_dir = '/datasets/ShapeNetCore'
 partnet_dir = '/datasets/PartNet'
@@ -74,14 +74,14 @@ cat_name = 'Chair'
 cat_id = name_to_cat[cat_name]
 # cat_id = '03636649'
 
-train_new_ids_to_objs_path = f'data/{cat_name}_train_new_ids_to_objs_1_{ds_start}_{ds_end}.json'
+train_new_ids_to_objs_path = f'data/{cat_name}_train_new_ids_to_objs_3_{ds_start}_{ds_end}.json'
 with open(train_new_ids_to_objs_path, 'r') as f:
     train_new_ids_to_objs: Dict = json.load(f)
 model_idx_to_anno_id = {}
 for model_idx, anno_id in enumerate(train_new_ids_to_objs.keys()):
     model_idx_to_anno_id[model_idx] = anno_id
 
-train_data_path = f'data/{cat_name}_train_{pt_sample_res}_1_{ds_start}_{ds_end}.hdf5'
+train_data_path = f'data/{cat_name}_train_{pt_sample_res}_3_{ds_start}_{ds_end}.hdf5'
 train_data = h5py.File(train_data_path, 'r')
 if OVERFIT:
     part_num_indices = train_data['part_num_indices'][overfit_idx:overfit_idx+1]
@@ -102,11 +102,11 @@ else:
     transformed_points = train_data['transformed_points']
     empty_parts = train_data['empty_parts']
 
-num_points = transformed_points.shape[2]
+num_points = transformed_points.shape[1]
 num_shapes, num_parts = part_num_indices.shape
 all_fg_part_indices = []
 for i in range(num_shapes):
-    indices = preprocess_data_1.convert_flat_list_to_fg_part_indices(
+    indices = preprocess_data_3.convert_flat_list_to_fg_part_indices(
         part_num_indices[i], all_indices[i])
     all_fg_part_indices.append(np.array(indices, dtype=object))
 
@@ -156,7 +156,7 @@ def load_batch(batch_idx, batch_size):
     return all_fg_part_indices[start:end],\
         torch.from_numpy(transformed_points[start:end]).to(device, torch.float32),\
         torch.from_numpy(values[start:end]).to(device, torch.float32),\
-        torch.from_numpy(part_nodes[start:end]).to(device, torch.long),\
+        None,\
         embeddings(torch.arange(start, end).to(device)),\
         torch.from_numpy(empty_parts[start:end]).to(device, torch.long)
 
@@ -175,7 +175,7 @@ np.random.seed(319)
 
 def train_one_itr(it, all_fg_part_indices, 
                   transformed_points, values,
-                  batch_part_nodes, batch_embed, batch_empty_parts):
+                  part_nodes, batch_embed, batch_empty_parts):
     num_parts_to_mask = np.random.randint(1, num_parts)
     # num_parts_to_mask = 1
     rand_indices = np.random.choice(num_parts, num_parts_to_mask,
@@ -197,26 +197,21 @@ def train_one_itr(it, all_fg_part_indices,
     parts_mask = torch.ones((batch_embed.shape[0], num_parts)).to(device, torch.float32)
     if len(masked_indices) != 0:
         parts_mask[:, rand_indices] = 0
-    # also make dangling bits zero        
-    parts_mask = torch.repeat_interleave(parts_mask * batch_part_nodes.sum(-1),
+    parts_mask = torch.repeat_interleave(parts_mask,
                                          each_part_feat, dim=-1)
     modified_embed = batch_embed * parts_mask
 
-    # transformed_points[..., 3:] is already zero
     points_mask = torch.ones_like(transformed_points).to(device, torch.float32)
     if len(masked_indices) != 0:
         points_mask[:, rand_indices] = 0
 
-    # use masked fill to make sure gradients don't flow to dangling networks
     occs1 = model(transformed_points * points_mask,
-                  modified_embed).masked_fill(batch_empty_parts==1,
-                                              torch.tensor(float('-inf')))
+                  modified_embed)
     pred_values1, _ = torch.max(occs1, dim=-1, keepdim=True)
     loss1 = loss_f(pred_values1, modified_values)
 
     occs2 = model(transformed_points,
-                  batch_embed).masked_fill(batch_empty_parts==1,
-                                           torch.tensor(float('-inf')))
+                  batch_embed)
     pred_values2, _ = torch.max(occs2, dim=-1, keepdim=True)
     loss2 = loss_f(pred_values2, values)
 
@@ -307,9 +302,9 @@ if args.test:
 
     unique_part_names, name_to_ori_ids_and_objs,\
         orig_obbs, entire_mesh, name_to_obbs, obb_indices_to_ori_ids, _ =\
-        preprocess_data_1.merge_partnet_after_merging(anno_id)
+        preprocess_data_3.merge_partnet_after_merging(anno_id)
 
-    with open(f'data/{cat_name}_part_name_to_new_id_1_{ds_start}_{ds_end}.json', 'r') as f:
+    with open(f'data/{cat_name}_part_name_to_new_id_3_{ds_start}_{ds_end}.json', 'r') as f:
         unique_name_to_new_id = json.load(f)
 
     part_obbs = []
@@ -337,27 +332,21 @@ if args.test:
     query_points = query_points.unsqueeze(0)
 
     if not OVERFIT:
-        xforms = torch.from_numpy(xforms[model_idx:model_idx+1]).to(device, torch.float32)
-        part_nodes = torch.from_numpy(part_nodes[model_idx:model_idx+1]).to(device, torch.long)
-    else:
-        xforms = torch.from_numpy(xforms).to(device, torch.float32)
-        part_nodes = torch.from_numpy(part_nodes).to(device, torch.long)
+        xforms = xforms[model_idx:model_idx+1]
 
     bs, num_points, _ = query_points.shape
     transformed_points = torch.zeros((bs,
                                       num_parts,
                                       num_points,
-                                      3)).to(device, torch.float32)
+                                      3)).to(device)    
     for i in range(num_parts):
         pts = query_points[0]
         xform = xforms[0, i]
         hom_pts = torch.cat([pts,
                             torch.ones((num_points, 1)).to(device)],
                             dim=-1).transpose(0, 1)
-        xform_pts = torch.matmul(xform, hom_pts).transpose(0, 1)[:, :3]
+        xform_pts = torch.matmul(torch.tensor(xform).to(device), hom_pts).transpose(0, 1)[:, :3]
         transformed_points[0, i, :, :] = xform_pts
-
-    empty_parts = part_nodes.sum(-1).unsqueeze(-1).expand(-1, -1, num_points).transpose(1, 2)
 
     with torch.no_grad():
         if args.mask:
@@ -382,7 +371,7 @@ if args.test:
         parts_mask = torch.ones((batch_embed.shape[0], num_parts)).to(device, torch.float32)
         if len(masked_indices) != 0:
             parts_mask[:, masked_indices] = 0
-        parts_mask = torch.repeat_interleave(parts_mask * part_nodes.sum(-1),
+        parts_mask = torch.repeat_interleave(parts_mask,
                                              each_part_feat, dim=-1)
         modified_embed = batch_embed * parts_mask
 
@@ -390,11 +379,7 @@ if args.test:
         if len(masked_indices) != 0:
             points_mask[:, masked_indices] = 0
 
-        # pred_values = model(transformed_points * points_mask,
-        #                     modified_embed).masked_fill(empty_parts==1,
-        #                                                 torch.tensor(float('-inf')))
-        pred_values = model(transformed_points * points_mask,
-                        modified_embed)
+        pred_values = model(transformed_points * points_mask, modified_embed)
         pred_values, _ = torch.max(pred_values, dim=-1, keepdim=True)
 
     if args.mask:
@@ -405,6 +390,9 @@ if args.test:
     sdf_grid = torch.reshape(
         pred_values,
         (1, pt_sample_res, pt_sample_res, pt_sample_res))
+    # print(f"sum: {torch.sum(sdf_grid).cpu()},\
+    #       min: {torch.min(sdf_grid).cpu()},\
+    #       max: {torch.max(sdf_grid).cpu()}")
     sdf_grid = torch.permute(sdf_grid, (0, 2, 1, 3))
     vertices, faces =\
         kaolin.ops.conversions.voxelgrids_to_trianglemeshes(sdf_grid)

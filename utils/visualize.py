@@ -163,10 +163,10 @@ def save_obbs_vis(obbs, out_path, mesh_y_rot=-45, mag=1,
             # obb_mesh.visual.face_colors = [100, 100, 100, 255]
             obb_meshes.append(obb_mesh)
 
-            material = pyrender.MetallicRoughnessMaterial(
-                baseColorFactor=[0.12, 0.46, 0.70, 0.4],  alphaMode='BLEND')
-            obb_meshes = [pyrender.Mesh.from_trimesh(x, smooth=False, material=material)
-                        for x in obb_meshes]
+        material = pyrender.MetallicRoughnessMaterial(
+            baseColorFactor=[0.12, 0.46, 0.70, 0.4],  alphaMode='BLEND')
+        obb_meshes = [pyrender.Mesh.from_trimesh(x, smooth=False, material=material)
+                    for x in obb_meshes]
     else:
         obb_meshes = []
         for name, obb in name_to_obbs.items():

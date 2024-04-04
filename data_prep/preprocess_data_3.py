@@ -1,4 +1,4 @@
-# part classes, includes specified number of shape with variable parts
+# part classes, generates 170 shapes each with only 3 parts
 # NOTE: obb xform is consistent throughout shapes
 
 import os
@@ -12,7 +12,6 @@ import trimesh
 import numpy as np
 from tqdm import tqdm
 from anytree import RenderTree, AnyNode, findall_by_attr, PreOrderIter
-import trimesh.bounds
 from utils import tree, misc, visualize, ops, transform
 from utils.tree import OriNode, AMNode
 from data_prep import gather_hdf5
@@ -180,7 +179,7 @@ def build_obbs(anno_id, part_info: Dict):
                      new_xform[:3, 1],
                      new_xform[:3, 2],
                      new_xform[:3, 3])
-
+        
         obbs.append(ext_xform)
         name_to_obbs[name] = ext_xform
     
@@ -468,16 +467,16 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
     print("gathering shape information")
     for id_pair in tqdm(split_ids[start:end]):
         anno_id = id_pair['anno_id']
-        
-        # peek the bounding box xforms
-        if anno_id not in ['3069', '36520', '36545', '40105']:
-            continue
-        print(anno_id)
+
+        # # peek the bounding box xforms
+        # if anno_id not in ['3069', '40105', '36545', '41936']:
+        #     continue
 
         unique_names, part_map,\
             obbs, entire_mesh, name_to_obbs, obb_indices_to_ori_ids,\
             root_node =\
                 merge_partnet_after_merging(anno_id)
+        
         # # peek the bounding box xforms
         # print(anno_id)
         # visualize.save_obbs_vis(obbs, f'data_prep/tmp/{anno_id}_obb_corrected.png',
@@ -516,7 +515,7 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
     for i, un in enumerate(all_unique_names):
         unique_name_to_new_id[un] = i
     with open(
-        f'data/{cat_name}_part_name_to_new_id_2_{start}_{end}.json',
+        f'data/{cat_name}_part_name_to_new_id_3_{start}_{end}.json',
         'w') as f:
         json.dump(unique_name_to_new_id, f)
     
@@ -537,7 +536,7 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
         all_new_ids_to_objs[split_ids[start+i]['anno_id']] = new_ids_to_objs
 
     with open(
-        f'data/{cat_name}_train_new_ids_to_objs_2_{start}_{end}.json',
+        f'data/{cat_name}_train_new_ids_to_objs_3_{start}_{end}.json',
         'w') as f:
         json.dump(all_new_ids_to_objs, f)
 
@@ -555,7 +554,7 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
                       indent=0,
                       nodenamefunc=lambda node: node.name,
                       nodeattrfunc=lambda node: "shape=box",).to_picture(
-                          f"data_prep/tmp/tree_union_class_2_{start}_{end}.png")
+                          f"data_prep/tmp/tree_union_class_0_{start}_{end}.png")
     num_union_nodes_class = sum(1 for _ in PreOrderIter(union_root_part))
     print("num_union_nodes_class: ", num_union_nodes_class)
 
@@ -574,7 +573,7 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
             make_edges(child)
     make_edges(union_root_part)
 
-    np.save(f'data/{cat_name}_union_node_names_2_{start}_{end}.npy',
+    np.save(f'data/{cat_name}_union_node_names_3_{start}_{end}.npy',
             union_node_names)
     
     # reconstruct a tree from adj
@@ -584,7 +583,7 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
                       nodenamefunc=lambda node: node.name,
                       nodeattrfunc=lambda node: "shape=box",
                       ).to_picture(
-                          f"data_prep/tmp/recon_tree_union_2_{start}_{end}.png")
+                          f"data_prep/tmp/recon_tree_union_3_{start}_{end}.png")
 
     print("making dense graphs")
     all_node_features = []
@@ -607,9 +606,8 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
         all_part_nodes.append(part_nodes)
         all_xforms.append(xforms)
         all_extents.append(extents)
-    
-    # exit(0)
-    fn = f'data/{cat_name}_train_{pt_sample_res}_2_{start}_{end}.hdf5'
+
+    fn = f'data/{cat_name}_train_{pt_sample_res}_3_{start}_{end}.hdf5'
     hdf5_file = h5py.File(fn, 'w')
     hdf5_file.create_dataset(
         'part_num_indices', [num_shapes, num_parts],
@@ -802,4 +800,6 @@ def convert_flat_list_to_fg_part_indices(part_num_indices, all_indices):
 
 
 if __name__ == "__main__":
-    export_data(train_ids, save_data=True, start=0, end=10)
+    good_indices = np.load('data/indices_shapes_w_three_parts_0_2000.npy')
+    ids_w_three_parts = [train_ids[x] for x in good_indices]
+    export_data(ids_w_three_parts, save_data=True, start=0, end=len(good_indices))
