@@ -1,3 +1,4 @@
+import torch
 import numpy as np
 from utils import binvox_rw
 from scipy.spatial.transform import Rotation as R
@@ -205,6 +206,17 @@ def transform_points(points, transform, ones_or_zeros='ones'):
         padding = np.zeros((num_points, 1), dtype=np.float32)
     h_points = np.transpose(np.concatenate((points, padding), axis=-1))
     xformed_points = np.transpose(np.matmul(transform, h_points))[:, :3]
+    return xformed_points
+
+
+def transform_points_torch(points, transform):
+    num_points = points.shape[0]
+    padding = torch.ones((num_points, 1)).to('cuda', torch.float32)
+    h_points = torch.concat((torch.from_numpy(points).to('cuda', torch.float32),
+                             padding), dim=-1).transpose(0, 1)
+    xformed_points = torch.matmul(torch.from_numpy(transform).to('cuda', torch.float32),
+                                  h_points).transpose(0, 1)[:, :3]
+    xformed_points = xformed_points.cpu().numpy()
     return xformed_points
 
 

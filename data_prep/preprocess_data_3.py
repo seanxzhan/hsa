@@ -53,6 +53,74 @@ all_colors = all_colors.tolist() * 3
 all_colors = np.array(all_colors)
 
 
+def align_xform(ext, xform):
+    # takes old ext and xform and align the coordinate frames such that the 
+    # y axis points in world up (0, 1, 0), x axis points in world right (1, 0, 0)
+    # world axes
+    ref_x_axis = np.array([1, 0, 0])
+    ref_z_axis = np.array([0, 1, 0])
+
+    orig_x_axis = xform[:3, :3][:, 0]
+    orig_y_axis = xform[:3, :3][:, 1]
+    orig_z_axis = xform[:3, :3][:, 2]
+
+    lst_axes = [orig_x_axis, orig_y_axis, orig_z_axis]
+    lst_exts = [ext[0], ext[1], ext[2]]
+    
+    # book keep new extents and xforms
+    new_ext = np.array([0, 0, 0], dtype=np.float32)
+    new_xform = np.eye(4)
+    new_xform[:3, 3] = xform[:3, 3]     # set translation
+    
+    # first, get the axis that aligns with world z (up)
+    dot_out = []
+    for ax in lst_axes:
+        dot_out.append(np.abs(np.dot(ax, ref_z_axis)))
+    which_aligns = np.argmax(dot_out)
+    if np.dot(lst_axes[which_aligns], ref_z_axis) >= 0:
+        new_xform[:3, 1] = lst_axes[which_aligns]
+    else:
+        new_xform[:3, 1] = -lst_axes[which_aligns]
+    new_ext[1] = lst_exts[which_aligns]
+    del lst_axes[which_aligns]
+    del lst_exts[which_aligns]
+
+    # next, get the axis that aligns with world x (right)
+    dot_out = []
+    for ax in lst_axes:
+        dot_out.append(np.abs(np.dot(ax, ref_x_axis)))
+    which_aligns = np.argmax(dot_out)
+    if np.dot(lst_axes[which_aligns], ref_x_axis) >= 0:
+        new_xform[:3, 0] = lst_axes[which_aligns]
+    else:
+        new_xform[:3, 0] = -lst_axes[which_aligns]
+    new_ext[0] = lst_exts[which_aligns]
+    del lst_axes[which_aligns]
+    del lst_exts[which_aligns]
+
+    # take from what's left in the axes and exts lists
+    new_xform[:3, 2] = lst_axes[0]
+    new_ext[2] = lst_exts[0]
+
+    # check handedness, flip an axis if necessary
+    if np.dot(np.cross(new_xform[:3, 0], new_xform[:3, 1]),
+                new_xform[:3, 2]) < 0:
+        new_xform[:3, 2] = -new_xform[:3, 2]
+
+    # ext_xform = (ext, xform,
+    #              orig_x_axis,
+    #              orig_y_axis,
+    #              orig_z_axis,
+    #              xform[:3, 3])
+    ext_xform = (new_ext, new_xform,
+                    new_xform[:3, 0],
+                    new_xform[:3, 1],
+                    new_xform[:3, 2],
+                    new_xform[:3, 3])
+    
+    return ext_xform
+
+
 def build_obbs(anno_id, part_info: Dict):
     # first, normalize the mesh vertices
     all_mesh_verts = []
@@ -111,75 +179,9 @@ def build_obbs(anno_id, part_info: Dict):
             count += 1
         mesh = trimesh.util.concatenate(meshes)
         obb: trimesh.primitives.Box = mesh.bounding_box_oriented
-        # ext_xform = (
-        #     np.array(obb.primitive.extents),
-        #     np.array(obb.primitive.transform))
-
         ext = np.array(obb.primitive.extents)
         xform = np.array(obb.primitive.transform)
-
-        # world axes
-        ref_x_axis = np.array([1, 0, 0])
-        ref_z_axis = np.array([0, 1, 0])
-
-        orig_x_axis = xform[:3, :3][:, 0]
-        orig_y_axis = xform[:3, :3][:, 1]
-        orig_z_axis = xform[:3, :3][:, 2]
-
-        lst_axes = [orig_x_axis, orig_y_axis, orig_z_axis]
-        lst_exts = [ext[0], ext[1], ext[2]]
-        
-        # book keep new extents and xforms
-        new_ext = np.array([0, 0, 0], dtype=np.float32)
-        new_xform = np.eye(4)
-        new_xform[:3, 3] = xform[:3, 3]     # set translation
-        
-        # first, get the axis that aligns with world z (up)
-        dot_out = []
-        for ax in lst_axes:
-            dot_out.append(np.abs(np.dot(ax, ref_z_axis)))
-        which_aligns = np.argmax(dot_out)
-        if np.dot(lst_axes[which_aligns], ref_z_axis) >= 0:
-            new_xform[:3, 1] = lst_axes[which_aligns]
-        else:
-            new_xform[:3, 1] = -lst_axes[which_aligns]
-        new_ext[1] = lst_exts[which_aligns]
-        del lst_axes[which_aligns]
-        del lst_exts[which_aligns]
-
-        # next, get the axis that aligns with world x (right)
-        dot_out = []
-        for ax in lst_axes:
-            dot_out.append(np.abs(np.dot(ax, ref_x_axis)))
-        which_aligns = np.argmax(dot_out)
-        if np.dot(lst_axes[which_aligns], ref_x_axis) >= 0:
-            new_xform[:3, 0] = lst_axes[which_aligns]
-        else:
-            new_xform[:3, 0] = -lst_axes[which_aligns]
-        new_ext[0] = lst_exts[which_aligns]
-        del lst_axes[which_aligns]
-        del lst_exts[which_aligns]
-
-        # take from what's left in the axes and exts lists
-        new_xform[:3, 2] = lst_axes[0]
-        new_ext[2] = lst_exts[0]
-
-        # check handedness, flip an axis if necessary
-        if np.dot(np.cross(new_xform[:3, 0], new_xform[:3, 1]),
-                  new_xform[:3, 2]) < 0:
-            new_xform[:3, 2] = -new_xform[:3, 2]
-
-        # ext_xform = (ext, xform,
-        #              orig_x_axis,
-        #              orig_y_axis,
-        #              orig_z_axis,
-        #              xform[:3, 3])
-        ext_xform = (new_ext, new_xform,
-                     new_xform[:3, 0],
-                     new_xform[:3, 1],
-                     new_xform[:3, 2],
-                     new_xform[:3, 3])
-        
+        ext_xform = align_xform(ext, xform)
         obbs.append(ext_xform)
         name_to_obbs[name] = ext_xform
     

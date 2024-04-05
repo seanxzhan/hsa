@@ -1,5 +1,6 @@
 # part classes, includes specified number of shape with variable parts
 # NOTE: obb xform is consistent throughout shapes
+# NOTE: further merges some parts
 
 import os
 import json
@@ -17,6 +18,8 @@ from utils import tree, misc, visualize, ops, transform
 from utils.tree import OriNode, AMNode
 from data_prep import gather_hdf5
 from typing import List, Dict
+import queue
+from multiprocessing import Queue, Process
 from torch.nn.utils.rnn import pad_sequence
 from anytree.exporter import UniqueDotExporter
 from collections import defaultdict
@@ -52,6 +55,74 @@ np.random.shuffle(color_indices)
 all_colors = all_colors[color_indices]
 all_colors = all_colors.tolist() * 3
 all_colors = np.array(all_colors)
+
+
+def align_xform(ext, xform):
+    # takes old ext and xform and align the coordinate frames such that the 
+    # y axis points in world up (0, 1, 0), x axis points in world right (1, 0, 0)
+    # world axes
+    ref_x_axis = np.array([1, 0, 0])
+    ref_z_axis = np.array([0, 1, 0])
+
+    orig_x_axis = xform[:3, :3][:, 0]
+    orig_y_axis = xform[:3, :3][:, 1]
+    orig_z_axis = xform[:3, :3][:, 2]
+
+    lst_axes = [orig_x_axis, orig_y_axis, orig_z_axis]
+    lst_exts = [ext[0], ext[1], ext[2]]
+    
+    # book keep new extents and xforms
+    new_ext = np.array([0, 0, 0], dtype=np.float32)
+    new_xform = np.eye(4)
+    new_xform[:3, 3] = xform[:3, 3]     # set translation
+    
+    # first, get the axis that aligns with world z (up)
+    dot_out = []
+    for ax in lst_axes:
+        dot_out.append(np.abs(np.dot(ax, ref_z_axis)))
+    which_aligns = np.argmax(dot_out)
+    if np.dot(lst_axes[which_aligns], ref_z_axis) >= 0:
+        new_xform[:3, 1] = lst_axes[which_aligns]
+    else:
+        new_xform[:3, 1] = -lst_axes[which_aligns]
+    new_ext[1] = lst_exts[which_aligns]
+    del lst_axes[which_aligns]
+    del lst_exts[which_aligns]
+
+    # next, get the axis that aligns with world x (right)
+    dot_out = []
+    for ax in lst_axes:
+        dot_out.append(np.abs(np.dot(ax, ref_x_axis)))
+    which_aligns = np.argmax(dot_out)
+    if np.dot(lst_axes[which_aligns], ref_x_axis) >= 0:
+        new_xform[:3, 0] = lst_axes[which_aligns]
+    else:
+        new_xform[:3, 0] = -lst_axes[which_aligns]
+    new_ext[0] = lst_exts[which_aligns]
+    del lst_axes[which_aligns]
+    del lst_exts[which_aligns]
+
+    # take from what's left in the axes and exts lists
+    new_xform[:3, 2] = lst_axes[0]
+    new_ext[2] = lst_exts[0]
+
+    # check handedness, flip an axis if necessary
+    if np.dot(np.cross(new_xform[:3, 0], new_xform[:3, 1]),
+                new_xform[:3, 2]) < 0:
+        new_xform[:3, 2] = -new_xform[:3, 2]
+
+    # ext_xform = (ext, xform,
+    #              orig_x_axis,
+    #              orig_y_axis,
+    #              orig_z_axis,
+    #              xform[:3, 3])
+    ext_xform = (new_ext, new_xform,
+                    new_xform[:3, 0],
+                    new_xform[:3, 1],
+                    new_xform[:3, 2],
+                    new_xform[:3, 3])
+    
+    return ext_xform
 
 
 def build_obbs(anno_id, part_info: Dict):
@@ -99,7 +170,6 @@ def build_obbs(anno_id, part_info: Dict):
     # part_info: new_am_nodes_modified dictionary
     obbs = []
     name_to_obbs = {}
-    obb_to_ori_ids = None
     count = 0
     # all_mesh_parts = []
     up_to_now = 0
@@ -112,81 +182,15 @@ def build_obbs(anno_id, part_info: Dict):
             count += 1
         mesh = trimesh.util.concatenate(meshes)
         obb: trimesh.primitives.Box = mesh.bounding_box_oriented
-        # ext_xform = (
-        #     np.array(obb.primitive.extents),
-        #     np.array(obb.primitive.transform))
-
         ext = np.array(obb.primitive.extents)
         xform = np.array(obb.primitive.transform)
-
-        # world axes
-        ref_x_axis = np.array([1, 0, 0])
-        ref_z_axis = np.array([0, 1, 0])
-
-        orig_x_axis = xform[:3, :3][:, 0]
-        orig_y_axis = xform[:3, :3][:, 1]
-        orig_z_axis = xform[:3, :3][:, 2]
-
-        lst_axes = [orig_x_axis, orig_y_axis, orig_z_axis]
-        lst_exts = [ext[0], ext[1], ext[2]]
-        
-        # book keep new extents and xforms
-        new_ext = np.array([0, 0, 0], dtype=np.float32)
-        new_xform = np.eye(4)
-        new_xform[:3, 3] = xform[:3, 3]     # set translation
-        
-        # first, get the axis that aligns with world z (up)
-        dot_out = []
-        for ax in lst_axes:
-            dot_out.append(np.abs(np.dot(ax, ref_z_axis)))
-        which_aligns = np.argmax(dot_out)
-        if np.dot(lst_axes[which_aligns], ref_z_axis) >= 0:
-            new_xform[:3, 1] = lst_axes[which_aligns]
-        else:
-            new_xform[:3, 1] = -lst_axes[which_aligns]
-        new_ext[1] = lst_exts[which_aligns]
-        del lst_axes[which_aligns]
-        del lst_exts[which_aligns]
-
-        # next, get the axis that aligns with world x (right)
-        dot_out = []
-        for ax in lst_axes:
-            dot_out.append(np.abs(np.dot(ax, ref_x_axis)))
-        which_aligns = np.argmax(dot_out)
-        if np.dot(lst_axes[which_aligns], ref_x_axis) >= 0:
-            new_xform[:3, 0] = lst_axes[which_aligns]
-        else:
-            new_xform[:3, 0] = -lst_axes[which_aligns]
-        new_ext[0] = lst_exts[which_aligns]
-        del lst_axes[which_aligns]
-        del lst_exts[which_aligns]
-
-        # take from what's left in the axes and exts lists
-        new_xform[:3, 2] = lst_axes[0]
-        new_ext[2] = lst_exts[0]
-
-        # check handedness, flip an axis if necessary
-        if np.dot(np.cross(new_xform[:3, 0], new_xform[:3, 1]),
-                  new_xform[:3, 2]) < 0:
-            new_xform[:3, 2] = -new_xform[:3, 2]
-
-        # ext_xform = (ext, xform,
-        #              orig_x_axis,
-        #              orig_y_axis,
-        #              orig_z_axis,
-        #              xform[:3, 3])
-        ext_xform = (new_ext, new_xform,
-                     new_xform[:3, 0],
-                     new_xform[:3, 1],
-                     new_xform[:3, 2],
-                     new_xform[:3, 3])
-
+        ext_xform = align_xform(ext, xform)
         obbs.append(ext_xform)
         name_to_obbs[name] = ext_xform
     
     entire_mesh_orig = trimesh.util.concatenate(all_mesh_parts)
 
-    return obbs, entire_mesh_orig, name_to_obbs, obb_to_ori_ids
+    return obbs, entire_mesh_orig, name_to_obbs
 
 
 def condense_obbs(obbs):
@@ -273,7 +277,7 @@ def build_dense_graph(union_root: AnyNode, name_to_obbs: Dict, obbs,
     return node_features, adj, part_nodes, xforms, extents
 
 
-def merge_partnet_after_merging(anno_id):
+def merge_partnet_after_merging(anno_id, info=False):
     """Resolves inconsistencies within partnet
     1: result_after_merging misses labels for certain parts
         (parts exist, but annotation doesn't)
@@ -335,9 +339,9 @@ def merge_partnet_after_merging(anno_id):
         nonlocal num_unmatched
         objs_matched_up, _, children_ids = check_objs(node)
         new_node = AMNode(ori_id=node.ori_id,
-                            id=node.id,
-                            objs=node.objs,
-                            name=node.name)
+                          id=node.id,
+                          objs=node.objs,
+                          name=node.name)
         new_node.parent = parent
         new_am_nodes.append(new_node)
         if objs_matched_up:
@@ -360,7 +364,7 @@ def merge_partnet_after_merging(anno_id):
     for pn in unique_part_names:
         parts_info[pn] = []
 
-    def traverse_new_tree(node: AMNode):
+    def build_parts_info_from_tree(node: AMNode):
         if node.is_leaf_node():
             packet = {}
             packet['id'] = node.id
@@ -369,9 +373,12 @@ def merge_partnet_after_merging(anno_id):
             parts_info[node.name].append(packet)
         else:
             for child in node.children:
-                traverse_new_tree(child)
+                build_parts_info_from_tree(child)
     
-    traverse_new_tree(new_am_nodes[0])
+    build_parts_info_from_tree(new_am_nodes[0])
+
+    # with open(f'data_prep/tmp/{anno_id}_parts_info_before.json', 'w') as f:
+    #     json.dump(parts_info, f)
 
     # as of now, issue 1 is resolved. now on to issue 2
 
@@ -379,7 +386,7 @@ def merge_partnet_after_merging(anno_id):
     # for each leaf node in new_am_nodes, check if ori_node n with the same
     # ori_id has more children. if so, modify parts_info by appending 
     # n's children to ori_id(s) list
-    def check_ori_nodes(node: AMNode):
+    def update_parts_info(node: AMNode):
         """takes in node from new_am_tree
         """
         if node.is_leaf_node():
@@ -395,14 +402,98 @@ def merge_partnet_after_merging(anno_id):
                         parts_info[node.name][i] = packet
         else:
             for child in node.children:
-                check_ori_nodes(child)
+                update_parts_info(child)
     
-    check_ori_nodes(new_am_nodes[0])
+    update_parts_info(new_am_nodes[0])
 
-    root_node = new_am_nodes[0]
+    root_node: AMNode = new_am_nodes[0]
+
+    if info:
+        print(RenderTree(root_node))
+        with open(f'data_prep/tmp/{anno_id}_parts_info.json', 'w') as f:
+            json.dump(parts_info, f)
+
+    with open('data_prep/further_merge_info.json', 'r') as f:
+        further_merge_info = json.load(f)
+    further_merge_parents = list(further_merge_info.keys())
+    further_merge_children = []
+    for p, kids in further_merge_info.items():
+        further_merge_children += kids
+
+    merged_parts_info = {}
+    parts_info_keys = list(parts_info.keys())
+
+    def further_merge_parts(merged_root_node: AMNode,
+                            node: AMNode):
+        """merges smaller parts together
+        effectively reconstruct a tree while skipping some nodes
+        """
+        parent = findall_by_attr(merged_root_node, node.parent.id, name="id")[0]
+        node_to_add = AMNode(ori_id=node.ori_id,
+                             id=node.id,
+                             objs=node.objs,
+                             name=node.name)
+        node_to_add.parent = parent
+
+        if node.name not in further_merge_parents:
+            # node isn't a part that needs to have children merged
+            if node.name in parts_info_keys:
+                packet: List = parts_info[node.name]
+                this_node_info = list(filter(lambda x: x["id"] == node.id,
+                                             packet))
+                if node.name not in list(merged_parts_info.keys()):
+                    merged_parts_info[node.name] = this_node_info
+                else:
+                    merged_parts_info[node.name] += this_node_info
+            for child in node.children:
+                further_merge_parts(merged_root_node, child)
+        else:
+            if node.is_leaf_node():
+                merged_parts_info[node.name] = parts_info[node.name]
+                return
+
+            # node is a part that needs to have children merged
+            node_children = node.children
+            # get all children that need to be merged
+            node_children_merge = list(filter(
+                lambda x: x.name in further_merge_children
+                          and x.name in parts_info_keys,
+                node_children))
+            accum_part_info = []
+            for child in node_children_merge:
+                packet: List = parts_info[child.name]
+                this_child_info = list(filter(lambda x: x["id"] == child.id,
+                                              packet))
+                accum_part_info += this_child_info
+            if node.name not in list(merged_parts_info.keys()):
+                merged_parts_info[node.name] = accum_part_info
+            else:
+                merged_parts_info[node.name] += accum_part_info
+
+            # get all descendents that don't need to be merged
+            node_children_no_merge = filter(
+                lambda x: x.name not in further_merge_children, node_children)
+            for child in node_children_no_merge:
+                further_merge_parts(merged_root_node, child)
     
-    obbs, entire_mesh, name_to_obbs, obb_indices_to_ori_ids =\
-        build_obbs(anno_id, parts_info)
+    merged_root_node = AMNode(ori_id=root_node.ori_id,
+                              id=root_node.id,
+                              objs=root_node.objs,
+                              name=root_node.name,)
+    for child in root_node.children:
+        further_merge_parts(merged_root_node, child)
+
+    if info:
+        with open(f'data_prep/tmp/{anno_id}_merged_parts_info.json', 'w') as f:
+            json.dump(merged_parts_info, f)
+        print(RenderTree(merged_root_node))
+    
+    if merged_parts_info == {}:
+        valid = False
+        return None, None, None, None, None, None, anno_id, valid
+
+    # -------- build bounding boxes --------
+    obbs, entire_mesh, name_to_obbs = build_obbs(anno_id, merged_parts_info)
 
     def complete_hier_to_part_class_hier(new_root_node, node_to_add):
         """only add to new node if the name is new in new_root_node
@@ -424,11 +515,17 @@ def merge_partnet_after_merging(anno_id):
             complete_hier_to_part_class_hier(new_root_node, child)
 
     new_root_node = AnyNode(name="chair", obb=None)
-    complete_hier_to_part_class_hier(new_root_node, root_node)
+    complete_hier_to_part_class_hier(new_root_node, merged_root_node)
+
+    if info:
+        print(RenderTree(new_root_node))
+        for pre, _, node in RenderTree(new_root_node):
+            print("%s%s" % (pre, node.name))
+        exit(0)
 
     # map from name to list of ori_ids and list of objs
     name_to_ori_ids_and_objs = {}
-    for name, lst_of_parts in parts_info.items():
+    for name, lst_of_parts in merged_parts_info.items():
         packet = {}
         packet['ori_ids'] = []
         packet['objs'] = []
@@ -437,9 +534,17 @@ def merge_partnet_after_merging(anno_id):
             packet['objs'] += p['objs']
         name_to_ori_ids_and_objs[name] = packet
 
+    unique_part_names = sorted(list(merged_parts_info.keys()))
+
+    valid = True
     return unique_part_names, name_to_ori_ids_and_objs,\
-        obbs, entire_mesh, name_to_obbs, obb_indices_to_ori_ids,\
-        new_root_node
+        obbs, entire_mesh, name_to_obbs, new_root_node,\
+        anno_id, valid
+
+
+def merge_partnet_after_merging_mp(q: Queue, id_pairs):
+    for id_pair in id_pairs:
+        q.put(merge_partnet_after_merging(id_pair['anno_id']))
 
 
 def export_data(split_ids: Dict, save_data=True, start=0, end=0,
@@ -454,48 +559,139 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
     fg_part_indices with convert_fg_part_indices_to_flat_list and 
     convert_flat_list_to_gf_part_indices
     """
-    num_shapes = end - start
-    # get the unique part names for a set of shapes
-    all_unique_names = []
-    all_names_to_ori_ids_and_objs: List[Dict] = []
-    all_obbs = []
-    all_entire_meshes = []
-    # all_name_to_obb_indices = []
-    all_name_to_obbs = []
-    all_obb_indices_to_ori_ids = []
-    each_shape_unique_names = []
-    all_root_nodes = []
-    print("gathering shape information")
-    for id_pair in tqdm(split_ids[start:end]):
-        anno_id = id_pair['anno_id']
+    # num_shapes = end - start
+    # # get the unique part names for a set of shapes
+    # # all_unique_names = []
+    # all_unique_names = set()
+    # all_names_to_ori_ids_and_objs: List[Dict] = []
+    # all_obbs = []
+    # all_entire_meshes = []
+    # # all_name_to_obb_indices = []
+    # all_name_to_obbs = []
+    # each_shape_unique_names = []
+    # all_root_nodes = []
+    # all_valid_anno_ids = []
+    # print("gathering shape information")
+
+    # for id_pair in tqdm(split_ids[start:end]):
+    #     anno_id = id_pair['anno_id']
         
-        # # peek the bounding box xforms
-        # if anno_id not in ['3069', '36520', '36545', '40105']:
-        #     continue
-        # print(anno_id)
+    #     # # peek the bounding box xforms
+    #     # if anno_id not in ['3069', '36520', '36545', '40105']:
+    #     #     continue
+    #     # print(anno_id)
+        
+        
+    #     unique_names, part_map, obbs, entire_mesh, name_to_obbs, root_node,\
+    #         _, valid =\
+    #             merge_partnet_after_merging(anno_id)
+    #     if not valid:
+    #         print("invalid shape: ", anno_id)
+    #         continue
+        
+    #     # # peek the bounding box xforms
+    #     # print(anno_id)
+    #     # visualize.save_obbs_vis(obbs, f'data_prep/tmp/{anno_id}_obb_corrected.png',
+    #     #                         white_bg=False, mag=0.7, show_coord=True,
+    #     #                         name_to_obbs=name_to_obbs)
 
-        unique_names, part_map,\
-            obbs, entire_mesh, name_to_obbs, obb_indices_to_ori_ids,\
-            root_node =\
-                merge_partnet_after_merging(anno_id)
-        # # peek the bounding box xforms
-        # print(anno_id)
-        # visualize.save_obbs_vis(obbs, f'data_prep/tmp/{anno_id}_obb_corrected.png',
-        #                         white_bg=False, mag=0.7, show_coord=True,
-        #                         name_to_obbs=name_to_obbs)
+    #     each_shape_unique_names.append(unique_names)
+    #     all_unique_names.update(set(unique_names))
+    #     all_names_to_ori_ids_and_objs.append(part_map)
+    #     all_obbs.append(obbs)
+    #     all_entire_meshes.append(entire_mesh)
+    #     all_name_to_obbs.append(name_to_obbs)
+    #     all_root_nodes.append(root_node)
+    #     all_valid_anno_ids.append(anno_id)
+    # all_unique_names = sorted(list(all_unique_names))
+    # num_parts = len(all_unique_names)
 
-        each_shape_unique_names.append(unique_names)
-        all_unique_names = list(set(all_unique_names) | set(unique_names))
-        all_names_to_ori_ids_and_objs.append(part_map)
-        all_obbs.append(obbs)
-        all_entire_meshes.append(entire_mesh)
-        all_name_to_obbs.append(name_to_obbs)
-        all_obb_indices_to_ori_ids.append(obb_indices_to_ori_ids)
-        all_root_nodes.append(root_node)
-    all_unique_names = sorted(all_unique_names)
+    dict_each_shape_unique_names = {}
+    all_unique_names = set()
+    dict_all_names_to_ori_ids_and_objs = {}
+    dict_all_obbs = {}
+    dict_all_entire_meshes = {}
+    dict_all_name_to_obbs = {}
+    dict_all_root_nodes = {}
+    dict_all_valid_anno_ids = {}
+
+    def set_dict(book, id_pairs):
+        for pair in id_pairs:
+            anno_id = pair['anno_id']
+            book[anno_id] = None
+
+    set_dict(dict_each_shape_unique_names, split_ids[start:end])
+    set_dict(dict_all_names_to_ori_ids_and_objs, split_ids[start:end])
+    set_dict(dict_all_obbs, split_ids[start:end])
+    set_dict(dict_all_entire_meshes, split_ids[start:end])
+    set_dict(dict_all_name_to_obbs, split_ids[start:end])
+    set_dict(dict_all_root_nodes, split_ids[start:end])
+    set_dict(dict_all_valid_anno_ids, split_ids[start:end])
+
+    num_workers = 8
+    list_of_lists = misc.chunks(split_ids[start:end], num_workers)
+    q = Queue()
+    workers = [
+        Process(target=merge_partnet_after_merging_mp, args=(q, lst))
+        for lst in list_of_lists]
+    for p in workers:
+        p.start()
+    pbar = tqdm(total=len(split_ids[start:end]))
+    while True:
+        flag = True
+        try:
+            unique_names, part_map, obbs, entire_mesh, name_to_obbs, root_node,\
+                anno_id, valid = q.get(True, 1.0)
+        except queue.Empty:
+            flag = False
+        if flag:
+            if valid:
+                dict_each_shape_unique_names[anno_id] = unique_names
+                all_unique_names.update(set(unique_names))
+                dict_all_names_to_ori_ids_and_objs[anno_id] = part_map
+                dict_all_obbs[anno_id] = obbs
+                dict_all_entire_meshes[anno_id] = entire_mesh
+                dict_all_name_to_obbs[anno_id] = name_to_obbs
+                dict_all_root_nodes[anno_id] = root_node
+                dict_all_valid_anno_ids[anno_id] = True
+            else:
+                dict_all_valid_anno_ids[anno_id] = False
+                print("invalid shape: ", anno_id)
+            pbar.update(1)
+        all_exited = True
+        for p in workers:
+            if p.exitcode is None:
+                all_exited = False
+                break
+        if all_exited and q.empty():
+            break
+    pbar.close()
+    for p in workers:
+        p.join()
+    all_unique_names = sorted(list(all_unique_names))
     num_parts = len(all_unique_names)
 
-    # exit(0)
+    each_shape_unique_names = []
+    all_names_to_ori_ids_and_objs = []
+    all_obbs = []
+    all_entire_meshes = []
+    all_name_to_obbs = []
+    all_root_nodes = []
+    all_valid_anno_ids = []
+
+    for k, v in dict_all_valid_anno_ids.items():
+        if v:
+            each_shape_unique_names.append(dict_each_shape_unique_names[k])
+            all_names_to_ori_ids_and_objs.append(dict_all_names_to_ori_ids_and_objs[k])
+            all_obbs.append(dict_all_obbs[k])
+            all_entire_meshes.append(dict_all_entire_meshes[k])
+            all_name_to_obbs.append(dict_all_name_to_obbs[k])
+            all_root_nodes.append(dict_all_root_nodes[k])
+            all_valid_anno_ids.append(k)
+
+    print("number of valid shapes: ", len(all_valid_anno_ids))
+    
+    num_shapes = len(all_valid_anno_ids)
 
     # make frequency map
     name_freq = {}
@@ -516,7 +712,7 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
     for i, un in enumerate(all_unique_names):
         unique_name_to_new_id[un] = i
     with open(
-        f'data/{cat_name}_part_name_to_new_id_2_{start}_{end}.json',
+        f'data/{cat_name}_part_name_to_new_id_4_{start}_{end}.json',
         'w') as f:
         json.dump(unique_name_to_new_id, f)
     
@@ -534,18 +730,16 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
                 ori_ids_to_new_ids[oi] = new_id_for_part
             new_ids_to_objs[new_id_for_part] = objs
         all_ori_ids_to_new_ids.append(ori_ids_to_new_ids)
-        all_new_ids_to_objs[split_ids[start+i]['anno_id']] = new_ids_to_objs
+        all_new_ids_to_objs[all_valid_anno_ids[i]] = new_ids_to_objs
 
     with open(
-        f'data/{cat_name}_train_new_ids_to_objs_2_{start}_{end}.json',
+        f'data/{cat_name}_train_new_ids_to_objs_4_{start}_{end}.json',
         'w') as f:
         json.dump(all_new_ids_to_objs, f)
 
-    max_num_bbox_per_part = 1
-
     if not save_data:
         return unique_name_to_new_id, all_entire_meshes, all_ori_ids_to_new_ids,\
-            max_num_bbox_per_part, all_obbs, all_name_to_obbs, all_obb_indices_to_ori_ids
+            all_obbs, all_name_to_obbs
 
     # # union of trees, based on part classes
     union_root_part = AnyNode(name='chair')
@@ -555,7 +749,7 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
                       indent=0,
                       nodenamefunc=lambda node: node.name,
                       nodeattrfunc=lambda node: "shape=box",).to_picture(
-                          f"data_prep/tmp/tree_union_class_2_{start}_{end}.png")
+                          f"data_prep/tmp/tree_union_class_4_{start}_{end}.png")
     num_union_nodes_class = sum(1 for _ in PreOrderIter(union_root_part))
     print("num_union_nodes_class: ", num_union_nodes_class)
 
@@ -574,7 +768,7 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
             make_edges(child)
     make_edges(union_root_part)
 
-    np.save(f'data/{cat_name}_union_node_names_2_{start}_{end}.npy',
+    np.save(f'data/{cat_name}_union_node_names_4_{start}_{end}.npy',
             union_node_names)
     
     # reconstruct a tree from adj
@@ -584,7 +778,7 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
                       nodenamefunc=lambda node: node.name,
                       nodeattrfunc=lambda node: "shape=box",
                       ).to_picture(
-                          f"data_prep/tmp/recon_tree_union_2_{start}_{end}.png")
+                          f"data_prep/tmp/recon_tree_union_4_{start}_{end}.png")
 
     print("making dense graphs")
     all_node_features = []
@@ -609,70 +803,72 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
         all_extents.append(extents)
     
     # exit(0)
-    fn = f'data/{cat_name}_train_{pt_sample_res}_2_{start}_{end}.hdf5'
-    hdf5_file = h5py.File(fn, 'w')
-    hdf5_file.create_dataset(
-        'part_num_indices', [num_shapes, num_parts],
-        dtype=np.int64)
-    hdf5_file.create_dataset(
-        'all_indices', [num_shapes, ],
-        dtype=h5py.vlen_dtype(np.int64))
-    hdf5_file.create_dataset(
-        'normalized_points', [num_shapes, (pt_sample_res/2)**3, 3],
-        dtype=np.float32)
-    hdf5_file.create_dataset(
-        'values', [num_shapes, (pt_sample_res/2)**3, 1],
-        dtype=np.float32)
-    hdf5_file.create_dataset(
-        'node_features', [num_shapes, num_union_nodes_class, OBB_REP_SIZE],
-        dtype=np.float32)
-    hdf5_file.create_dataset(
-        'adj', [num_shapes, num_union_nodes_class, num_union_nodes_class],
-        dtype=np.float32)
-    hdf5_file.create_dataset(
-        'part_nodes', [num_shapes, num_parts, num_union_nodes_class],
-        dtype=np.int64)
-    hdf5_file.create_dataset(
-        'xforms', [num_shapes, num_parts, 4, 4],
-        dtype=np.float32)
-    hdf5_file.create_dataset(
-        'extents', [num_shapes, num_parts, 3],
-        dtype=np.float32)
-    hdf5_file.create_dataset(
-        'transformed_points', [num_shapes, num_parts, (pt_sample_res/2)**3, 3],
-        dtype=np.float32)
-    hdf5_file.create_dataset(
-        'empty_parts', [num_shapes, (pt_sample_res/2)**3, num_parts],
-        dtype=np.uint8)
+    # fn = f'data/{cat_name}_train_{pt_sample_res}_4_{start}_{end}.hdf5'
+    # hdf5_file = h5py.File(fn, 'w')
+    # hdf5_file.create_dataset(
+    #     'part_num_indices', [num_shapes, num_parts],
+    #     dtype=np.int64)
+    # hdf5_file.create_dataset(
+    #     'all_indices', [num_shapes, ],
+    #     dtype=h5py.vlen_dtype(np.int64))
+    # hdf5_file.create_dataset(
+    #     'normalized_points', [num_shapes, (pt_sample_res/2)**3, 3],
+    #     dtype=np.float32)
+    # hdf5_file.create_dataset(
+    #     'values', [num_shapes, (pt_sample_res/2)**3, 1],
+    #     dtype=np.float32)
+    # hdf5_file.create_dataset(
+    #     'node_features', [num_shapes, num_union_nodes_class, OBB_REP_SIZE],
+    #     dtype=np.float32)
+    # hdf5_file.create_dataset(
+    #     'adj', [num_shapes, num_union_nodes_class, num_union_nodes_class],
+    #     dtype=np.float32)
+    # hdf5_file.create_dataset(
+    #     'part_nodes', [num_shapes, num_parts, num_union_nodes_class],
+    #     dtype=np.int64)
+    # hdf5_file.create_dataset(
+    #     'xforms', [num_shapes, num_parts, 4, 4],
+    #     dtype=np.float32)
+    # hdf5_file.create_dataset(
+    #     'extents', [num_shapes, num_parts, 3],
+    #     dtype=np.float32)
+    # hdf5_file.create_dataset(
+    #     'transformed_points', [num_shapes, num_parts, (pt_sample_res/2)**3, 3],
+    #     dtype=np.float32)
+    # hdf5_file.create_dataset(
+    #     'empty_parts', [num_shapes, (pt_sample_res/2)**3, num_parts],
+    #     dtype=np.uint8)
 
     # TODO: before creating dataset, run get_info_from_voxels with multiprocessing
     #       to parse all shapes
-    print(f"creating dataset: {fn}")
-    for i, id_pair in enumerate(tqdm(split_ids[start:end])):
-        anno_id = id_pair['anno_id']
+    # print(f"creating dataset: {fn}")
+    for i, anno_id in enumerate(all_valid_anno_ids):
+        if i not in [48]:
+            continue
+        print(anno_id)
         out = make_data_for_one(anno_id, unique_name_to_new_id,
                                 all_entire_meshes[i],
                                 all_ori_ids_to_new_ids[i])
-        hdf5_file['part_num_indices'][i] = out['part_num_indices']
-        hdf5_file['all_indices'][i] = out['all_indices']
-        hdf5_file['normalized_points'][i] = out['normalized_points']
-        hdf5_file['values'][i] = out['values']
-        hdf5_file['node_features'][i] = all_node_features[i]
-        hdf5_file['adj'][i] = all_adj[i]
-        hdf5_file['part_nodes'][i] = all_part_nodes[i]
-        hdf5_file['xforms'][i] = all_xforms[i]
-        hdf5_file['extents'][i] = all_extents[i]
+    #     hdf5_file['part_num_indices'][i] = out['part_num_indices']
+    #     hdf5_file['all_indices'][i] = out['all_indices']
+    #     hdf5_file['normalized_points'][i] = out['normalized_points']
+    #     hdf5_file['values'][i] = out['values']
+    #     hdf5_file['node_features'][i] = all_node_features[i]
+    #     hdf5_file['adj'][i] = all_adj[i]
+    #     hdf5_file['part_nodes'][i] = all_part_nodes[i]
+    #     hdf5_file['xforms'][i] = all_xforms[i]
+    #     hdf5_file['extents'][i] = all_extents[i]
 
-        for p in range(num_parts):
-            xform = all_xforms[i][p]
-            pts = out['normalized_points'][0]
-            hdf5_file['transformed_points'][i, p] =\
-                transform.transform_points(pts, xform)
-        hdf5_file['empty_parts'][i] = 1-torch.from_numpy(
-            all_part_nodes[i][0]).sum(1).unsqueeze(1).expand(
-                -1, len(pts)).transpose(0, 1).numpy()
+    #     for p in range(num_parts):
+    #         xform = all_xforms[i][p]
+    #         pts = out['normalized_points'][0]
+    #         hdf5_file['transformed_points'][i, p] =\
+    #             transform.transform_points_torch(pts, xform)
+    #     hdf5_file['empty_parts'][i] = 1-torch.from_numpy(
+    #         all_part_nodes[i][0]).sum(1).unsqueeze(1).expand(
+    #             -1, len(pts)).transpose(0, 1).numpy()
 
-    hdf5_file.close()
+    # hdf5_file.close()
 
 
 def make_data_for_one(anno_id,
@@ -686,6 +882,8 @@ def make_data_for_one(anno_id,
     partnet_points_ply = os.path.join(partnet_point_sample_dir, 'ply-10000.ply')
     labels_path = os.path.join(partnet_point_sample_dir, 'label-10000.txt')
     orig_labels, _, _, _ = ops.parse_labels_txt(labels_path)
+
+    print(ori_ids_to_new_ids)
 
     new_labels = []
     for ol in orig_labels:
@@ -802,18 +1000,39 @@ def convert_flat_list_to_fg_part_indices(part_num_indices, all_indices):
 
 
 if __name__ == "__main__":
-    # export_data(train_ids, save_data=True, start=0, end=10)
+    # export_data(train_ids, save_data=True, start=0, end=50)
 
-    unique_name_to_new_id, all_entire_meshes, all_ori_ids_to_new_ids,\
-        max_num_bbox_per_part, all_obbs, all_name_to_obbs, _ =\
-            export_data(train_ids, save_data=False, start=0, end=10)
+    merge_partnet_after_merging('3249', info=True)
+    exit(0)
 
-    # anno_id = '43941'
-    # model_idx = 3
-    anno_id = '38725'
-    model_idx = 6
-    make_data_for_one(anno_id,
-                      unique_name_to_new_id,
-                      all_entire_meshes[model_idx],
-                      all_ori_ids_to_new_ids[model_idx],
-                      vis=True)
+    # with open('data/Chair_train_new_ids_to_objs_4_0_2000.json', 'r') as f:
+    #     all_obs = json.load(f)
+    # keys = list(all_obs.keys())
+
+    # _, all_entire_meshes, all_ori_ids_to_new_ids,\
+    #         all_obbs, all_name_to_obbs =\
+    #             export_data(train_ids, save_data=False, start=0, end=2000)
+    # np.savez_compressed("data_prep/tmp/data.npz",
+    #                     all_entire_meshes=all_entire_meshes,
+    #                     all_ori_ids_to_new_ids=all_ori_ids_to_new_ids,
+    #                     all_obbs=all_obbs,
+    #                     all_name_to_obbs=all_name_to_obbs)
+
+    # with open(
+    #     f'data/{cat_name}_part_name_to_new_id_4_{0}_{2000}.json',
+    #     'w') as f:
+    #     unique_name_to_new_id = json.load(f)
+
+    # # anno_id = '43941'
+    # # model_idx = 3
+    # anno_id = '38725'
+    # model_idx = 6
+    # model_idx = 47
+    # anno_id = keys[model_idx]
+    # print(anno_id)
+
+    # make_data_for_one(anno_id,
+    #                   unique_name_to_new_id,
+    #                   all_entire_meshes[model_idx],
+    #                   all_ori_ids_to_new_ids[model_idx],
+    #                   vis=True)

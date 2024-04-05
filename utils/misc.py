@@ -35,3 +35,13 @@ def save_fig(plt, title, img_path, rotate=False, transparent=False):
         im = Image.open(img_path)
         im = im.rotate(90)
         im.save(img_path)
+
+
+def chunks(l, n):
+    """Yield n number of sequential chunks from l."""
+    result = []
+    d, r = divmod(len(l), n)
+    for i in range(n):
+        si = (d+1)*(i if i < r else r) + d*(0 if i < r else i - r)
+        result.append(l[si:si+(d+1 if i < r else d)])
+    return result
