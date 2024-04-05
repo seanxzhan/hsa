@@ -448,33 +448,29 @@ def merge_partnet_after_merging(anno_id, info=False):
             for child in node.children:
                 further_merge_parts(merged_root_node, child)
         else:
-            if node.is_leaf_node():
-                merged_parts_info[node.name] = parts_info[node.name]
-                return
+            # if node.is_leaf_node():
+            #     print(node.name)
+            #     merged_parts_info[node.name] = parts_info[node.name]
+            #     return
 
             # node is a part that needs to have children merged
-            node_children = node.children
-            # get all children that need to be merged
-            node_children_merge = list(filter(
-                lambda x: x.name in further_merge_children
-                          and x.name in parts_info_keys,
-                node_children))
+            node_leaf_descs = list(filter(lambda x: x.is_leaf_node(),
+                                          node.descendants))
+            # assumes that all leaf nodes under a mergable parent are merged
             accum_part_info = []
-            for child in node_children_merge:
-                packet: List = parts_info[child.name]
-                this_child_info = list(filter(lambda x: x["id"] == child.id,
-                                              packet))
-                accum_part_info += this_child_info
+            if node.name in list(parts_info.keys()):
+                packet = parts_info[node.name]
+                this_node_info = list(filter(lambda x: x["id"] == node.id, packet))
+                accum_part_info += this_node_info
+            for desc in node_leaf_descs:
+                packet: List = parts_info[desc.name]
+                this_desc_info = list(filter(lambda x: x["id"] == desc.id,
+                                             packet))
+                accum_part_info += this_desc_info
             if node.name not in list(merged_parts_info.keys()):
                 merged_parts_info[node.name] = accum_part_info
             else:
                 merged_parts_info[node.name] += accum_part_info
-
-            # get all descendents that don't need to be merged
-            node_children_no_merge = filter(
-                lambda x: x.name not in further_merge_children, node_children)
-            for child in node_children_no_merge:
-                further_merge_parts(merged_root_node, child)
     
     merged_root_node = AMNode(ori_id=root_node.ori_id,
                               id=root_node.id,
@@ -518,10 +514,9 @@ def merge_partnet_after_merging(anno_id, info=False):
     complete_hier_to_part_class_hier(new_root_node, merged_root_node)
 
     if info:
-        print(RenderTree(new_root_node))
+        # print(RenderTree(new_root_node))
         for pre, _, node in RenderTree(new_root_node):
             print("%s%s" % (pre, node.name))
-        exit(0)
 
     # map from name to list of ori_ids and list of objs
     name_to_ori_ids_and_objs = {}
@@ -533,6 +528,10 @@ def merge_partnet_after_merging(anno_id, info=False):
             packet['ori_ids'] += p['ori_ids']
             packet['objs'] += p['objs']
         name_to_ori_ids_and_objs[name] = packet
+
+    if info:
+        with open(f'data_prep/tmp/{anno_id}_part_map.json', 'w') as f:
+            json.dump(name_to_ori_ids_and_objs, f)
 
     unique_part_names = sorted(list(merged_parts_info.keys()))
 
@@ -628,7 +627,7 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
     set_dict(dict_all_root_nodes, split_ids[start:end])
     set_dict(dict_all_valid_anno_ids, split_ids[start:end])
 
-    num_workers = 8
+    num_workers = 6
     list_of_lists = misc.chunks(split_ids[start:end], num_workers)
     q = Queue()
     workers = [
@@ -803,72 +802,70 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
         all_extents.append(extents)
     
     # exit(0)
-    # fn = f'data/{cat_name}_train_{pt_sample_res}_4_{start}_{end}.hdf5'
-    # hdf5_file = h5py.File(fn, 'w')
-    # hdf5_file.create_dataset(
-    #     'part_num_indices', [num_shapes, num_parts],
-    #     dtype=np.int64)
-    # hdf5_file.create_dataset(
-    #     'all_indices', [num_shapes, ],
-    #     dtype=h5py.vlen_dtype(np.int64))
-    # hdf5_file.create_dataset(
-    #     'normalized_points', [num_shapes, (pt_sample_res/2)**3, 3],
-    #     dtype=np.float32)
-    # hdf5_file.create_dataset(
-    #     'values', [num_shapes, (pt_sample_res/2)**3, 1],
-    #     dtype=np.float32)
-    # hdf5_file.create_dataset(
-    #     'node_features', [num_shapes, num_union_nodes_class, OBB_REP_SIZE],
-    #     dtype=np.float32)
-    # hdf5_file.create_dataset(
-    #     'adj', [num_shapes, num_union_nodes_class, num_union_nodes_class],
-    #     dtype=np.float32)
-    # hdf5_file.create_dataset(
-    #     'part_nodes', [num_shapes, num_parts, num_union_nodes_class],
-    #     dtype=np.int64)
-    # hdf5_file.create_dataset(
-    #     'xforms', [num_shapes, num_parts, 4, 4],
-    #     dtype=np.float32)
-    # hdf5_file.create_dataset(
-    #     'extents', [num_shapes, num_parts, 3],
-    #     dtype=np.float32)
-    # hdf5_file.create_dataset(
-    #     'transformed_points', [num_shapes, num_parts, (pt_sample_res/2)**3, 3],
-    #     dtype=np.float32)
-    # hdf5_file.create_dataset(
-    #     'empty_parts', [num_shapes, (pt_sample_res/2)**3, num_parts],
-    #     dtype=np.uint8)
+    fn = f'data/{cat_name}_train_{pt_sample_res}_4_{start}_{end}.hdf5'
+    hdf5_file = h5py.File(fn, 'w')
+    hdf5_file.create_dataset(
+        'part_num_indices', [num_shapes, num_parts],
+        dtype=np.int64)
+    hdf5_file.create_dataset(
+        'all_indices', [num_shapes, ],
+        dtype=h5py.vlen_dtype(np.int64))
+    hdf5_file.create_dataset(
+        'normalized_points', [num_shapes, (pt_sample_res/2)**3, 3],
+        dtype=np.float32)
+    hdf5_file.create_dataset(
+        'values', [num_shapes, (pt_sample_res/2)**3, 1],
+        dtype=np.float32)
+    hdf5_file.create_dataset(
+        'node_features', [num_shapes, num_union_nodes_class, OBB_REP_SIZE],
+        dtype=np.float32)
+    hdf5_file.create_dataset(
+        'adj', [num_shapes, num_union_nodes_class, num_union_nodes_class],
+        dtype=np.float32)
+    hdf5_file.create_dataset(
+        'part_nodes', [num_shapes, num_parts, num_union_nodes_class],
+        dtype=np.int64)
+    hdf5_file.create_dataset(
+        'xforms', [num_shapes, num_parts, 4, 4],
+        dtype=np.float32)
+    hdf5_file.create_dataset(
+        'extents', [num_shapes, num_parts, 3],
+        dtype=np.float32)
+    hdf5_file.create_dataset(
+        'transformed_points', [num_shapes, num_parts, (pt_sample_res/2)**3, 3],
+        dtype=np.float32)
+    hdf5_file.create_dataset(
+        'empty_parts', [num_shapes, (pt_sample_res/2)**3, num_parts],
+        dtype=np.uint8)
 
     # TODO: before creating dataset, run get_info_from_voxels with multiprocessing
     #       to parse all shapes
-    # print(f"creating dataset: {fn}")
-    for i, anno_id in enumerate(all_valid_anno_ids):
-        if i not in [48]:
-            continue
-        print(anno_id)
+    print(f"creating dataset: {fn}")
+    for i, anno_id in enumerate(tqdm(all_valid_anno_ids)):
+        # print(anno_id)
         out = make_data_for_one(anno_id, unique_name_to_new_id,
                                 all_entire_meshes[i],
                                 all_ori_ids_to_new_ids[i])
-    #     hdf5_file['part_num_indices'][i] = out['part_num_indices']
-    #     hdf5_file['all_indices'][i] = out['all_indices']
-    #     hdf5_file['normalized_points'][i] = out['normalized_points']
-    #     hdf5_file['values'][i] = out['values']
-    #     hdf5_file['node_features'][i] = all_node_features[i]
-    #     hdf5_file['adj'][i] = all_adj[i]
-    #     hdf5_file['part_nodes'][i] = all_part_nodes[i]
-    #     hdf5_file['xforms'][i] = all_xforms[i]
-    #     hdf5_file['extents'][i] = all_extents[i]
+        hdf5_file['part_num_indices'][i] = out['part_num_indices']
+        hdf5_file['all_indices'][i] = out['all_indices']
+        hdf5_file['normalized_points'][i] = out['normalized_points']
+        hdf5_file['values'][i] = out['values']
+        hdf5_file['node_features'][i] = all_node_features[i]
+        hdf5_file['adj'][i] = all_adj[i]
+        hdf5_file['part_nodes'][i] = all_part_nodes[i]
+        hdf5_file['xforms'][i] = all_xforms[i]
+        hdf5_file['extents'][i] = all_extents[i]
 
-    #     for p in range(num_parts):
-    #         xform = all_xforms[i][p]
-    #         pts = out['normalized_points'][0]
-    #         hdf5_file['transformed_points'][i, p] =\
-    #             transform.transform_points_torch(pts, xform)
-    #     hdf5_file['empty_parts'][i] = 1-torch.from_numpy(
-    #         all_part_nodes[i][0]).sum(1).unsqueeze(1).expand(
-    #             -1, len(pts)).transpose(0, 1).numpy()
+        for p in range(num_parts):
+            xform = all_xforms[i][p]
+            pts = out['normalized_points'][0]
+            hdf5_file['transformed_points'][i, p] =\
+                transform.transform_points(pts, xform)
+        hdf5_file['empty_parts'][i] = 1-torch.from_numpy(
+            all_part_nodes[i][0]).sum(1).unsqueeze(1).expand(
+                -1, len(pts)).transpose(0, 1).numpy()
 
-    # hdf5_file.close()
+    hdf5_file.close()
 
 
 def make_data_for_one(anno_id,
@@ -883,12 +880,14 @@ def make_data_for_one(anno_id,
     labels_path = os.path.join(partnet_point_sample_dir, 'label-10000.txt')
     orig_labels, _, _, _ = ops.parse_labels_txt(labels_path)
 
-    print(ori_ids_to_new_ids)
+    # print(ori_ids_to_new_ids)
 
     new_labels = []
     for ol in orig_labels:
         new_labels.append(ori_ids_to_new_ids[ol])
     new_labels = np.array(new_labels)
+
+    # return None
 
     partnet_pcd_orig: trimesh.points.PointCloud = trimesh.load(partnet_points_ply)
 
@@ -1000,14 +999,15 @@ def convert_flat_list_to_fg_part_indices(part_num_indices, all_indices):
 
 
 if __name__ == "__main__":
-    # export_data(train_ids, save_data=True, start=0, end=50)
-
-    merge_partnet_after_merging('3249', info=True)
+    export_data(train_ids, save_data=True, start=0, end=2000)
     exit(0)
 
-    # with open('data/Chair_train_new_ids_to_objs_4_0_2000.json', 'r') as f:
-    #     all_obs = json.load(f)
-    # keys = list(all_obs.keys())
+    # merge_partnet_after_merging('39446', info=True)
+    # exit(0)
+
+    with open('data/Chair_train_new_ids_to_objs_4_0_2000.json', 'r') as f:
+        all_obs = json.load(f)
+    keys = list(all_obs.keys())
 
     # _, all_entire_meshes, all_ori_ids_to_new_ids,\
     #         all_obbs, all_name_to_obbs =\
@@ -1027,9 +1027,9 @@ if __name__ == "__main__":
     # # model_idx = 3
     # anno_id = '38725'
     # model_idx = 6
-    # model_idx = 47
-    # anno_id = keys[model_idx]
-    # print(anno_id)
+    model_idx = 84
+    anno_id = keys[model_idx]
+    print(anno_id)
 
     # make_data_for_one(anno_id,
     #                   unique_name_to_new_id,
