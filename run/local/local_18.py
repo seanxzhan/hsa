@@ -8,7 +8,7 @@ import trimesh
 import argparse
 import numpy as np
 from tqdm import tqdm
-from occ_networks.basic_decoder_nasa_9 import SDFDecoder
+from occ_networks.basic_decoder_nasa_10 import SDFDecoder
 from utils import misc, visualize, transform, ops, reconstruct
 from data_prep import preprocess_data_4
 from typing import Dict, List
@@ -50,7 +50,7 @@ save_every = 100
 multires = 2
 pt_sample_res = 64        # point_sampling
 
-expt_id = 15
+expt_id = 18
 
 OVERFIT = args.of
 overfit_idx = args.of_idx
@@ -175,6 +175,11 @@ def loss_f(pred_values, gt_values):
 torch.manual_seed(319)
 np.random.seed(319)
 
+# for n, p in model.named_parameters():
+#     print(n)
+
+# exit(0)
+
 def train_one_itr(it, all_fg_part_indices, 
                   transformed_points, values,
                   batch_part_nodes, batch_embed, batch_empty_parts):
@@ -182,6 +187,7 @@ def train_one_itr(it, all_fg_part_indices,
     # num_parts_to_mask = 1
     rand_indices = np.random.choice(num_parts, num_parts_to_mask,
                                     replace=False)
+    # rand_indices = np.array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 14, 15, 16])
 
     masked_indices = torch.from_numpy(rand_indices).to(device, torch.long)
     # make gt value mask
@@ -223,6 +229,7 @@ def train_one_itr(it, all_fg_part_indices,
     loss2 = loss_f(pred_values2, values)
 
     loss = loss1 + loss2
+    # loss = loss1
 
     optimizer.zero_grad()
     loss.backward()
@@ -256,7 +263,7 @@ if args.train:
             info = f'Iteration {it} - loss: {avg_batch_loss:.8f}'
             print(info)
 
-        if (it) % 100 == 0 or it == (iterations - 1):
+        if (it) % 500 == 0 or it == (iterations - 1):
             torch.save({
                 'epoch': it,
                 'model_state_dict': model.state_dict(),

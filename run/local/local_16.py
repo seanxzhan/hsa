@@ -50,7 +50,7 @@ save_every = 100
 multires = 2
 pt_sample_res = 64        # point_sampling
 
-expt_id = 15
+expt_id = 16
 
 OVERFIT = args.of
 overfit_idx = args.of_idx
@@ -180,8 +180,9 @@ def train_one_itr(it, all_fg_part_indices,
                   batch_part_nodes, batch_embed, batch_empty_parts):
     num_parts_to_mask = np.random.randint(1, num_parts)
     # num_parts_to_mask = 1
-    rand_indices = np.random.choice(num_parts, num_parts_to_mask,
-                                    replace=False)
+    # rand_indices = np.random.choice(num_parts, num_parts_to_mask,
+    #                                 replace=False)
+    rand_indices = np.array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 14, 15, 16])
 
     masked_indices = torch.from_numpy(rand_indices).to(device, torch.long)
     # make gt value mask
@@ -216,13 +217,14 @@ def train_one_itr(it, all_fg_part_indices,
     pred_values1, _ = torch.max(occs1, dim=-1, keepdim=True)
     loss1 = loss_f(pred_values1, modified_values)
 
-    occs2 = model(transformed_points,
-                  batch_embed).masked_fill(batch_empty_parts==1,
-                                           torch.tensor(float('-inf')))
-    pred_values2, _ = torch.max(occs2, dim=-1, keepdim=True)
-    loss2 = loss_f(pred_values2, values)
+    # occs2 = model(transformed_points,
+    #               batch_embed).masked_fill(batch_empty_parts==1,
+    #                                        torch.tensor(float('-inf')))
+    # pred_values2, _ = torch.max(occs2, dim=-1, keepdim=True)
+    # loss2 = loss_f(pred_values2, values)
 
-    loss = loss1 + loss2
+    # loss = loss1 + loss2
+    loss = loss1
 
     optimizer.zero_grad()
     loss.backward()
