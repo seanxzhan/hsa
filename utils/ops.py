@@ -185,7 +185,8 @@ def bin2sdf(vox_path='', input=None):
     return output
 
 
-def sample_near_sdf_surface(sdf_grid, voxel_grid):
+def sample_near_sdf_surface(sdf_grid, voxel_grid,
+                            use_sdf_values=False):
     # print(np.sum(sdf_grid == 0))
     scale = 5  # Control the sensitivity near the surface
     surface_weights = np.exp(-scale * np.abs(sdf_grid))
@@ -201,8 +202,6 @@ def sample_near_sdf_surface(sdf_grid, voxel_grid):
 
     flat_grid = np.indices(sdf_grid.shape).reshape(3, -1).T
     flat_weights = surface_weights.reshape(-1,)
-    # flat_sdf_values = sdf_grid.reshape(-1,)
-    flat_voxel_values = voxel_grid.reshape(-1,)
 
     num_samples = 10000  # Number of points to sample
     chosen_indices = np.random.choice(flat_grid.shape[0],
@@ -210,7 +209,13 @@ def sample_near_sdf_surface(sdf_grid, voxel_grid):
                                       p=flat_weights,
                                       replace=False)
     sampled_points = flat_grid[chosen_indices]
-    sampled_values = flat_voxel_values[chosen_indices]
+
+    if not use_sdf_values:
+        flat_voxel_values = voxel_grid.reshape(-1,)
+        sampled_values = flat_voxel_values[chosen_indices]
+    else:
+        flat_sdf_values = sdf_grid.reshape(-1,)
+        sampled_values = flat_sdf_values[chosen_indices]
 
     # import matplotlib.pyplot as plt
     # plt.hist(sampled_values, bins=50, color='blue')
