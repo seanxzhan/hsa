@@ -133,3 +133,92 @@ def find_nearest_point(source, target):
     closest_point_indices = np.argmin(distances_squared, axis=1)
 
     return closest_point_indices
+
+
+def bin2sdf(vox_path='', input=None):
+    """Converts voxels into SDF grid field.
+       Negative for inside, positive for outside. Range: (-1, 1)
+
+    Args:
+        input (np.ndarray): voxels of shape (dim, dim, dim)
+
+    Returns:
+        np.ndarray: SDF representation of shape (dim, dim, dim)
+    """
+    assert (vox_path != '') != (input is not None),\
+        "must supply either [vox_path] or [input]"
+
+    if vox_path != '':
+        with open(vox_path, 'rb') as f:
+            voxel_model_dense = binvox_rw.read_as_3d_array(f)
+            input = voxel_model_dense.data.astype(int)
+
+    fill_map = np.zeros(input.shape, dtype=np.bool_)
+    output = np.zeros(input.shape, dtype=np.float16)
+    # fill inside
+    changing_map = input.copy()
+    sdf_in = -1
+    while np.sum(fill_map) != np.sum(input):
+        changing_map_new = ndimage.binary_erosion(changing_map)
+        fill_map[np.where(changing_map_new!=changing_map)] = True
+        output[np.where(changing_map_new!=changing_map)] = sdf_in
+        changing_map = changing_map_new.copy()
+        sdf_in -= 1
+    # fill outside.
+    # No need to fill all of them, since during training,
+    # outside part will be masked.
+    changing_map = input.copy()
+    sdf_out = 1
+    while np.sum(fill_map) != np.size(input):
+        changing_map_new = ndimage.binary_dilation(changing_map)
+        fill_map[np.where(changing_map_new!=changing_map)] = True
+        output[np.where(changing_map_new!=changing_map)] = sdf_out
+        changing_map = changing_map_new.copy()
+        sdf_out += 1
+        # if sdf_out == -sdf_in:
+        #     break
+    # Normalization
+    output[np.where(output < 0)] /= (-sdf_in-1)
+    output[np.where(output > 0)] /= (sdf_out-1)
+
+    output = output.astype(np.float32)
+    return output
+
+
+def sample_near_sdf_surface(sdf_grid, voxel_grid):
+    # print(np.sum(sdf_grid == 0))
+    scale = 5  # Control the sensitivity near the surface
+    surface_weights = np.exp(-scale * np.abs(sdf_grid))
+
+    inside_mask = sdf_grid <= 0
+    outside_mask = sdf_grid > 0
+    num_negative = inside_mask.sum()
+    num_positive = outside_mask.sum()
+    surface_weights[inside_mask] *= (num_positive / num_negative)
+    # surface_weights[outside_mask] *= (num_negative / num_positive)
+
+    surface_weights /= surface_weights.sum()
+
+    flat_grid = np.indices(sdf_grid.shape).reshape(3, -1).T
+    flat_weights = surface_weights.reshape(-1,)
+    # flat_sdf_values = sdf_grid.reshape(-1,)
+    flat_voxel_values = voxel_grid.reshape(-1,)
+
+    num_samples = 10000  # Number of points to sample
+    chosen_indices = np.random.choice(flat_grid.shape[0],
+                                      size=num_samples,
+                                      p=flat_weights,
+                                      replace=False)
+    sampled_points = flat_grid[chosen_indices]
+    sampled_values = flat_voxel_values[chosen_indices]
+
+    # import matplotlib.pyplot as plt
+    # plt.hist(sampled_values, bins=50, color='blue')
+    # plt.title("Histogram of Sampled SDF Values")
+    # plt.xlabel("SDF Value")
+    # plt.ylabel("Frequency")
+    # plt.xlim(-1, 1)
+    # misc.save_fig(plt, '', 'data_prep/tmp/partitioned_hist.png')
+    # plt.close()
+
+    return sampled_points, sampled_values

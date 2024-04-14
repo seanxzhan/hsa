@@ -895,6 +895,10 @@ def make_data_for_one(anno_id,
         anno_id, pt_sample_res, entire_mesh)
     partnet_pcd_in_fg_vox_grid = transform.mesh_space_to_voxel_space_centered(
         fg_binvox_xform, partnet_pcd_orig.vertices)
+    
+    
+
+    partnet_pcd_in_fg_vox_grid
 
     random.seed(319)
     points, values = gather_hdf5.sample_points_values(fg_voxels, pt_sample_res)
@@ -907,7 +911,6 @@ def make_data_for_one(anno_id,
 
     fg_occ_points = points[values.astype('bool').flatten()]
     fg_occ_points_indices = np.where(values >= 0.5)[0]
-    # print(fg_occ_points.shape)
 
     fg_closest_indices = ops.find_nearest_point(
         fg_occ_points,
@@ -1006,30 +1009,32 @@ if __name__ == "__main__":
     # merge_partnet_after_merging('39446', info=True)
     # exit(0)
 
+    # with open('data/Chair_train_new_ids_to_objs_4_0_2000.json', 'r') as f:
+    #     all_obs = json.load(f)
+    # keys = list(all_obs.keys())
+
     unique_name_to_new_id, all_entire_meshes, all_ori_ids_to_new_ids,\
             all_obbs, all_name_to_obbs =\
-                export_data(train_ids, save_data=False, start=0, end=100)
+                export_data(train_ids, save_data=False, start=0, end=10)
     # np.savez_compressed("data_prep/tmp/data.npz",
     #                     all_entire_meshes=all_entire_meshes,
     #                     all_ori_ids_to_new_ids=all_ori_ids_to_new_ids,
     #                     all_obbs=all_obbs,
     #                     all_name_to_obbs=all_name_to_obbs)
 
-    with open('data/Chair_train_new_ids_to_objs_4_0_100.json', 'r') as f:
-        all_obs = json.load(f)
-    keys = list(all_obs.keys())
-
     # with open(
     #     f'data/{cat_name}_part_name_to_new_id_4_{0}_{2000}.json',
-    #     'r') as f:
+    #     'w') as f:
     #     unique_name_to_new_id = json.load(f)
 
     # # anno_id = '43941'
     # # model_idx = 3
     # anno_id = '38725'
     # model_idx = 6
-    model_idx = 2
-    anno_id = keys[model_idx]
+    # model_idx = 84
+    # anno_id = keys[model_idx]
+    model_idx = 1
+    anno_id = '3069'
     print(anno_id)
 
     make_data_for_one(anno_id,

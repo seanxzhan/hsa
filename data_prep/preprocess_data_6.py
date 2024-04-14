@@ -605,6 +605,8 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
     # all_unique_names = sorted(list(all_unique_names))
     # num_parts = len(all_unique_names)
 
+    print("gathering shape information")
+
     dict_each_shape_unique_names = {}
     all_unique_names = set()
     dict_all_names_to_ori_ids_and_objs = {}
@@ -711,7 +713,7 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
     for i, un in enumerate(all_unique_names):
         unique_name_to_new_id[un] = i
     with open(
-        f'data/{cat_name}_part_name_to_new_id_4_{start}_{end}.json',
+        f'data/{cat_name}_part_name_to_new_id_6_{start}_{end}.json',
         'w') as f:
         json.dump(unique_name_to_new_id, f)
     
@@ -732,7 +734,7 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
         all_new_ids_to_objs[all_valid_anno_ids[i]] = new_ids_to_objs
 
     with open(
-        f'data/{cat_name}_train_new_ids_to_objs_4_{start}_{end}.json',
+        f'data/{cat_name}_train_new_ids_to_objs_6_{start}_{end}.json',
         'w') as f:
         json.dump(all_new_ids_to_objs, f)
 
@@ -748,7 +750,7 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
                       indent=0,
                       nodenamefunc=lambda node: node.name,
                       nodeattrfunc=lambda node: "shape=box",).to_picture(
-                          f"data_prep/tmp/tree_union_class_4_{start}_{end}.png")
+                          f"data_prep/tmp/tree_union_class_6_{start}_{end}.png")
     num_union_nodes_class = sum(1 for _ in PreOrderIter(union_root_part))
     print("num_union_nodes_class: ", num_union_nodes_class)
 
@@ -767,7 +769,7 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
             make_edges(child)
     make_edges(union_root_part)
 
-    np.save(f'data/{cat_name}_union_node_names_4_{start}_{end}.npy',
+    np.save(f'data/{cat_name}_union_node_names_6_{start}_{end}.npy',
             union_node_names)
     
     # reconstruct a tree from adj
@@ -777,7 +779,7 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
                       nodenamefunc=lambda node: node.name,
                       nodeattrfunc=lambda node: "shape=box",
                       ).to_picture(
-                          f"data_prep/tmp/recon_tree_union_4_{start}_{end}.png")
+                          f"data_prep/tmp/recon_tree_union_6_{start}_{end}.png")
 
     print("making dense graphs")
     all_node_features = []
@@ -802,7 +804,7 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
         all_extents.append(extents)
     
     # exit(0)
-    fn = f'data/{cat_name}_train_{pt_sample_res}_4_{start}_{end}.hdf5'
+    fn = f'data/{cat_name}_train_{pt_sample_res}_6_{start}_{end}.hdf5'
     hdf5_file = h5py.File(fn, 'w')
     hdf5_file.create_dataset(
         'part_num_indices', [num_shapes, num_parts],
@@ -811,10 +813,10 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
         'all_indices', [num_shapes, ],
         dtype=h5py.vlen_dtype(np.int64))
     hdf5_file.create_dataset(
-        'normalized_points', [num_shapes, (pt_sample_res/2)**3, 3],
+        'normalized_points', [num_shapes, 10000, 3],
         dtype=np.float32)
     hdf5_file.create_dataset(
-        'values', [num_shapes, (pt_sample_res/2)**3, 1],
+        'values', [num_shapes, 10000, 1],
         dtype=np.float32)
     hdf5_file.create_dataset(
         'node_features', [num_shapes, num_union_nodes_class, OBB_REP_SIZE],
@@ -832,40 +834,117 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
         'extents', [num_shapes, num_parts, 3],
         dtype=np.float32)
     hdf5_file.create_dataset(
-        'transformed_points', [num_shapes, num_parts, (pt_sample_res/2)**3, 3],
+        'transformed_points', [num_shapes, num_parts, 10000, 3],
         dtype=np.float32)
     hdf5_file.create_dataset(
-        'empty_parts', [num_shapes, (pt_sample_res/2)**3, num_parts],
+        'empty_parts', [num_shapes, 10000, num_parts],
         dtype=np.uint8)
 
-    # TODO: before creating dataset, run get_info_from_voxels with multiprocessing
-    #       to parse all shapes
-    print(f"creating dataset: {fn}")
-    for i, anno_id in enumerate(tqdm(all_valid_anno_ids)):
-        # print(anno_id)
-        out = make_data_for_one(anno_id, unique_name_to_new_id,
-                                all_entire_meshes[i],
-                                all_ori_ids_to_new_ids[i])
-        hdf5_file['part_num_indices'][i] = out['part_num_indices']
-        hdf5_file['all_indices'][i] = out['all_indices']
-        hdf5_file['normalized_points'][i] = out['normalized_points']
-        hdf5_file['values'][i] = out['values']
-        hdf5_file['node_features'][i] = all_node_features[i]
-        hdf5_file['adj'][i] = all_adj[i]
-        hdf5_file['part_nodes'][i] = all_part_nodes[i]
-        hdf5_file['xforms'][i] = all_xforms[i]
-        hdf5_file['extents'][i] = all_extents[i]
+    valid_anno_id_to_idx = {}
+    for i, x in enumerate(all_valid_anno_ids):
+        valid_anno_id_to_idx[x] = i
 
-        for p in range(num_parts):
-            xform = all_xforms[i][p]
-            pts = out['normalized_points'][0]
-            hdf5_file['transformed_points'][i, p] =\
-                transform.transform_points(pts, xform)
-        hdf5_file['empty_parts'][i] = 1-torch.from_numpy(
-            all_part_nodes[i][0]).sum(1).unsqueeze(1).expand(
-                -1, len(pts)).transpose(0, 1).numpy()
+    # lol: list of lists 
+    lol_anno_ids = misc.chunks(all_valid_anno_ids, num_workers)
+    lol_entire_meshes = misc.chunks(all_entire_meshes, num_workers)
+    lol_ori_ids_to_new_ids = misc.chunks(all_ori_ids_to_new_ids, num_workers)
+
+    n_lists = len(lol_anno_ids)
+    assert n_lists == len(lol_entire_meshes)
+    assert n_lists == len(lol_ori_ids_to_new_ids)
+
+    q = Queue()
+    workers = [
+        Process(target=make_data_for_one_mp,
+                args=(q, lol_anno_ids[i],
+                      unique_name_to_new_id,
+                      lol_entire_meshes[i],
+                      lol_ori_ids_to_new_ids[i]))
+        for i in range(n_lists)
+    ]
+    for p in workers:
+        p.start()
+
+    print(f"creating dataset: {fn}")
+    pbar = tqdm(total=len(all_valid_anno_ids))
+    while True:
+        flag = True
+        try:
+            anno_id, out = q.get(True, 1.0)
+        except queue.Empty:
+            flag = False
+        if flag:
+            idx = valid_anno_id_to_idx[anno_id]
+            hdf5_file['part_num_indices'][idx] = out['part_num_indices']
+            hdf5_file['all_indices'][idx] = out['all_indices']
+            hdf5_file['normalized_points'][idx] = out['normalized_points']
+            hdf5_file['values'][idx] = out['values']
+            hdf5_file['node_features'][idx] = all_node_features[idx]
+            hdf5_file['adj'][idx] = all_adj[idx]
+            hdf5_file['part_nodes'][idx] = all_part_nodes[idx]
+            hdf5_file['xforms'][idx] = all_xforms[idx]
+            hdf5_file['extents'][idx] = all_extents[idx]
+
+            for p in range(num_parts):
+                xform = all_xforms[idx][p]
+                pts = out['normalized_points'][0]
+                hdf5_file['transformed_points'][idx, p] =\
+                    transform.transform_points(pts, xform)
+            hdf5_file['empty_parts'][idx] = 1-torch.from_numpy(
+                all_part_nodes[idx][0]).sum(1).unsqueeze(1).expand(
+                    -1, len(pts)).transpose(0, 1).numpy()
+            
+            pbar.update(1)
+        all_exited = True
+        for p in workers:
+            if p.exitcode is None:
+                all_exited = False
+                break
+        if all_exited and q.empty():
+            break
+    pbar.close()
+    for p in workers:
+        p.join()
 
     hdf5_file.close()
+    
+    # # TODO: before creating dataset, run get_info_from_voxels with multiprocessing
+    # #       to parse all shapes
+    # print(f"creating dataset: {fn}")
+    # for i, anno_id in enumerate(tqdm(all_valid_anno_ids)):
+    #     # print(anno_id)
+    #     out = make_data_for_one(anno_id, unique_name_to_new_id,
+    #                             all_entire_meshes[i],
+    #                             all_ori_ids_to_new_ids[i])
+    #     hdf5_file['part_num_indices'][i] = out['part_num_indices']
+    #     hdf5_file['all_indices'][i] = out['all_indices']
+    #     hdf5_file['normalized_points'][i] = out['normalized_points']
+    #     hdf5_file['values'][i] = out['values']
+    #     hdf5_file['node_features'][i] = all_node_features[i]
+    #     hdf5_file['adj'][i] = all_adj[i]
+    #     hdf5_file['part_nodes'][i] = all_part_nodes[i]
+    #     hdf5_file['xforms'][i] = all_xforms[i]
+    #     hdf5_file['extents'][i] = all_extents[i]
+
+    #     for p in range(num_parts):
+    #         xform = all_xforms[i][p]
+    #         pts = out['normalized_points'][0]
+    #         hdf5_file['transformed_points'][i, p] =\
+    #             transform.transform_points(pts, xform)
+    #     hdf5_file['empty_parts'][i] = 1-torch.from_numpy(
+    #         all_part_nodes[i][0]).sum(1).unsqueeze(1).expand(
+    #             -1, len(pts)).transpose(0, 1).numpy()
+
+    # hdf5_file.close()
+
+
+def make_data_for_one_mp(q: Queue, anno_ids, unique_name_to_new_id,
+                         entire_meshes, ori_ids_to_new_ids_list):
+    for i, anno_id in enumerate(anno_ids):
+        q.put((anno_id, make_data_for_one(anno_id,
+                                unique_name_to_new_id,
+                                entire_meshes[i],
+                                ori_ids_to_new_ids_list[i])))
 
 
 def make_data_for_one(anno_id,
@@ -896,17 +975,23 @@ def make_data_for_one(anno_id,
     partnet_pcd_in_fg_vox_grid = transform.mesh_space_to_voxel_space_centered(
         fg_binvox_xform, partnet_pcd_orig.vertices)
 
-    random.seed(319)
-    points, values = gather_hdf5.sample_points_values(fg_voxels, pt_sample_res)
+    sdf_grid = ops.bin2sdf(input=fg_voxels)
 
-    pv_indices = np.arange(len(points))
-    np.random.seed(319)
-    np.random.shuffle(pv_indices)
-    points = points[pv_indices]
-    values = values[pv_indices]
+    random.seed(319)
+    points, values = ops.sample_near_sdf_surface(sdf_grid, fg_voxels)
+
+    # pv_indices = np.arange(len(points))
+    # np.random.seed(319)
+    # np.random.shuffle(pv_indices)
+    # points = points[pv_indices]
+    # values = values[pv_indices]
 
     fg_occ_points = points[values.astype('bool').flatten()]
-    fg_occ_points_indices = np.where(values >= 0.5)[0]
+    fg_occ_points_indices = np.where(values == 1)[0]
+    # print(fg_occ_points.shape)
+
+    # fg_occ_points = points[np.argwhere(values <= 0).flatten()]
+    # fg_occ_points_indices = np.argwhere(values <= 0).flatten()
     # print(fg_occ_points.shape)
 
     fg_closest_indices = ops.find_nearest_point(
@@ -925,7 +1010,7 @@ def make_data_for_one(anno_id,
         for i in range(len(unique_names)):
             colors[fg_part_indices[i]] = all_colors[i]
         trimesh.points.PointCloud(fg_occ_points, colors).export(
-            'data_prep/tmp/partitioned_occupied_points.ply')
+            'data_prep/tmp/partitioned_occupied_points_6.ply')
     
     # find indices within all points that belong to separate parts
     for i, pi in enumerate(fg_part_indices):
@@ -936,7 +1021,7 @@ def make_data_for_one(anno_id,
         for i in range(len(unique_names)):
             colors[fg_part_indices[i]] = all_colors[i]
         trimesh.points.PointCloud(points, colors).export(
-            'data_prep/tmp/partitioned_all_points.ply')
+            'data_prep/tmp/partitioned_all_points_6.ply')
 
     part_num_indices, all_indices = convert_fg_part_indices_to_flat_list(
         fg_part_indices)
@@ -944,7 +1029,7 @@ def make_data_for_one(anno_id,
     points = points.unsqueeze(0)
     normalized_points = kaolin.ops.pointcloud.center_points(points, normalize=True)
     normalized_points = normalized_points.cpu().numpy()
-    values = values[None, :]
+    values = values[None, :, None]
 
     return {
         'part_num_indices': [part_num_indices],     # 1, num_parts
@@ -1000,27 +1085,27 @@ def convert_flat_list_to_fg_part_indices(part_num_indices, all_indices):
 
 
 if __name__ == "__main__":
-    # export_data(train_ids, save_data=True, start=0, end=2000)
-    # exit(0)
+    export_data(train_ids, save_data=True, start=0, end=2000)
+    exit(0)
 
     # merge_partnet_after_merging('39446', info=True)
     # exit(0)
 
     unique_name_to_new_id, all_entire_meshes, all_ori_ids_to_new_ids,\
             all_obbs, all_name_to_obbs =\
-                export_data(train_ids, save_data=False, start=0, end=100)
+                export_data(train_ids, save_data=False, start=0, end=10)
     # np.savez_compressed("data_prep/tmp/data.npz",
     #                     all_entire_meshes=all_entire_meshes,
     #                     all_ori_ids_to_new_ids=all_ori_ids_to_new_ids,
     #                     all_obbs=all_obbs,
     #                     all_name_to_obbs=all_name_to_obbs)
 
-    with open('data/Chair_train_new_ids_to_objs_4_0_100.json', 'r') as f:
+    with open('data/Chair_train_new_ids_to_objs_6_0_10.json', 'r') as f:
         all_obs = json.load(f)
     keys = list(all_obs.keys())
 
     # with open(
-    #     f'data/{cat_name}_part_name_to_new_id_4_{0}_{2000}.json',
+    #     f'data/{cat_name}_part_name_to_new_id_6_{0}_{100}.json',
     #     'r') as f:
     #     unique_name_to_new_id = json.load(f)
 
