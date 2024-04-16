@@ -252,11 +252,13 @@ if args.train:
             batch_loss += loss
         avg_batch_loss = batch_loss / batch_size
             
-        if (it) % 1 == 0 or it == (iterations - 1):
+        show = 100 if OVERFIT else 1
+        if (it) % show == 0 or it == (iterations - 1):
             info = f'Iteration {it} - loss: {avg_batch_loss:.8f}'
             print(info)
 
-        if (it) % 100 == 0 or it == (iterations - 1):
+        save = 1000 if OVERFIT else 100
+        if (it) % save == 0 or it == (iterations - 1):
             torch.save({
                 'epoch': it,
                 'model_state_dict': model.state_dict(),

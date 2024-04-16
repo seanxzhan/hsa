@@ -8,9 +8,9 @@ import trimesh
 import argparse
 import numpy as np
 from tqdm import tqdm
-from occ_networks.basic_decoder_nasa_24 import SDFDecoder
+from occ_networks.basic_decoder_nasa_9 import SDFDecoder
 from utils import misc, visualize, transform, ops, reconstruct
-from data_prep import preprocess_data_7
+from data_prep import preprocess_data_5
 from typing import Dict, List
 from anytree.exporter import UniqueDotExporter
 
@@ -48,7 +48,7 @@ laplacian_weight = 0.1
 iterations = 3001
 save_every = 100
 multires = 2
-pt_sample_res = 64        # point_sampling
+pt_sample_res = 128        # point_sampling
 
 expt_id = 24
 
@@ -60,7 +60,7 @@ if OVERFIT:
     batch_size = 1
 
 ds_start = 0
-ds_end = 2000
+ds_end = 10
 
 shapenet_dir = '/datasets/ShapeNetCore'
 partnet_dir = '/datasets/PartNet'
@@ -74,14 +74,14 @@ cat_name = 'Chair'
 cat_id = name_to_cat[cat_name]
 # cat_id = '03636649'
 
-train_new_ids_to_objs_path = f'data/{cat_name}_train_new_ids_to_objs_7_{ds_start}_{ds_end}.json'
+train_new_ids_to_objs_path = f'data/{cat_name}_train_new_ids_to_objs_5_{ds_start}_{ds_end}.json'
 with open(train_new_ids_to_objs_path, 'r') as f:
     train_new_ids_to_objs: Dict = json.load(f)
 model_idx_to_anno_id = {}
 for model_idx, anno_id in enumerate(train_new_ids_to_objs.keys()):
     model_idx_to_anno_id[model_idx] = anno_id
 
-train_data_path = f'data/{cat_name}_train_{pt_sample_res}_7_{ds_start}_{ds_end}.hdf5'
+train_data_path = f'data/{cat_name}_train_{pt_sample_res}_5_{ds_start}_{ds_end}.hdf5'
 train_data = h5py.File(train_data_path, 'r')
 if OVERFIT:
     part_num_indices = train_data['part_num_indices'][overfit_idx:overfit_idx+1]
@@ -106,7 +106,7 @@ num_points = transformed_points.shape[2]
 num_shapes, num_parts = part_num_indices.shape
 all_fg_part_indices = []
 for i in range(num_shapes):
-    indices = preprocess_data_7.convert_flat_list_to_fg_part_indices(
+    indices = preprocess_data_5.convert_flat_list_to_fg_part_indices(
         part_num_indices[i], all_indices[i])
     all_fg_part_indices.append(np.array(indices, dtype=object))
 
@@ -134,7 +134,7 @@ print("results dir: ", results_dir)
 each_part_feat = 8
 model = SDFDecoder(num_parts=num_parts,
                    feature_dims=each_part_feat,
-                   internal_dims=128,
+                   internal_dims=64,
                    hidden=5,
                    multires=2).to(device)
 
@@ -175,6 +175,11 @@ def loss_f(pred_values, gt_values):
 torch.manual_seed(319)
 np.random.seed(319)
 
+num_minib = 4
+minib_size = num_points // num_minib
+print(minib_size)
+# exit(0)
+
 def train_one_itr(it, all_fg_part_indices, 
                   transformed_points, values,
                   batch_part_nodes, batch_embed, batch_empty_parts):
@@ -209,25 +214,55 @@ def train_one_itr(it, all_fg_part_indices,
     if len(masked_indices) != 0:
         points_mask[:, rand_indices] = 0
 
+    all_minib_loss = 0
+    for mb in range(num_minib):
+        # print(transformed_points.shape)
+        # print(points_mask.shape)
+        # print(batch_empty_parts.shape)
+        # print(modified_values.shape)
+        # print(values.shape)
+        all_minib_loss += train_one_minib(
+            transformed_points[:, :, mb*minib_size:(mb+1)*minib_size],
+            points_mask[:, :, mb*minib_size:(mb+1)*minib_size],
+            modified_embed,
+            batch_empty_parts[:, mb*minib_size:(mb+1)*minib_size],
+            modified_values[:, mb*minib_size:(mb+1)*minib_size],
+            values[:, mb*minib_size:(mb+1)*minib_size])
+
+    # optimizer.zero_grad()
+    # all_minib_loss.backward()
+    # optimizer.step()
+    # scheduler.step()
+
+    optimizer.step()
+    scheduler.step()
+
+    return all_minib_loss
+
+
+def train_one_minib(transformed_points, points_mask, modified_embed,
+                    batch_empty_parts, modified_values, values):
+    # print(transformed_points.shape)
+    # print(points_mask.shape)
     # use masked fill to make sure gradients don't flow to dangling networks
     occs1 = model(transformed_points * points_mask,
                   modified_embed).masked_fill(batch_empty_parts==1,
-                                              torch.tensor(float('inf')))
-    pred_values1, _ = torch.min(occs1, dim=-1, keepdim=True)
+                                              torch.tensor(float('-inf')))
+    pred_values1, _ = torch.max(occs1, dim=-1, keepdim=True)
     loss1 = loss_f(pred_values1, modified_values)
 
     occs2 = model(transformed_points,
                   batch_embed).masked_fill(batch_empty_parts==1,
-                                           torch.tensor(float('inf')))
-    pred_values2, _ = torch.min(occs2, dim=-1, keepdim=True)
+                                           torch.tensor(float('-inf')))
+    pred_values2, _ = torch.max(occs2, dim=-1, keepdim=True)
     loss2 = loss_f(pred_values2, values)
 
     loss = loss1 + loss2
 
-    optimizer.zero_grad()
-    loss.backward()
-    optimizer.step()
-    scheduler.step()
+    # optimizer.zero_grad()
+    loss.backward(retain_graph=True)
+    # optimizer.step()
+    # scheduler.step()
 
     return loss
 
@@ -242,6 +277,7 @@ if args.train:
                 batch_normalized_points, batch_values,\
                 batch_part_nodes, batch_embed, batch_empty_parts =\
                     load_batch(b, batch_size)
+            optimizer.zero_grad()
             loss = train_one_itr(it,
                                  batch_fg_part_indices,
                                  batch_normalized_points,
@@ -252,11 +288,13 @@ if args.train:
             batch_loss += loss
         avg_batch_loss = batch_loss / batch_size
             
-        if (it) % 1 == 0 or it == (iterations - 1):
+        show = 100 if OVERFIT else 1
+        if (it) % show == 0 or it == (iterations - 1):
             info = f'Iteration {it} - loss: {avg_batch_loss:.8f}'
             print(info)
 
-        if (it) % 50 == 0 or it == (iterations - 1):
+        save = 1000 if OVERFIT else 100
+        if (it) % save == 0 or it == (iterations - 1):
             torch.save({
                 'epoch': it,
                 'model_state_dict': model.state_dict(),
@@ -309,9 +347,9 @@ if args.test:
 
     unique_part_names, name_to_ori_ids_and_objs,\
         orig_obbs, entire_mesh, name_to_obbs, _, _, _ =\
-        preprocess_data_7.merge_partnet_after_merging(anno_id)
+        preprocess_data_5.merge_partnet_after_merging(anno_id)
 
-    with open(f'data/{cat_name}_part_name_to_new_id_7_{ds_start}_{ds_end}.json', 'r') as f:
+    with open(f'data/{cat_name}_part_name_to_new_id_5_{ds_start}_{ds_end}.json', 'r') as f:
         unique_name_to_new_id = json.load(f)
 
     part_obbs = []
@@ -397,7 +435,7 @@ if args.test:
         #                                                 torch.tensor(float('-inf')))
         pred_values = model(transformed_points * points_mask,
                             modified_embed)
-        pred_values, _ = torch.min(pred_values, dim=-1, keepdim=True)
+        pred_values, _ = torch.max(pred_values, dim=-1, keepdim=True)
 
     if args.mask:
         mag = 1

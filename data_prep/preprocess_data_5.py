@@ -1,7 +1,6 @@
 # part classes, includes specified number of shape with variable parts
 # NOTE: obb xform is consistent throughout shapes
 # NOTE: further merges some parts
-# NOTE: sample points closer to sdf surface, use sdf values
 
 import os
 import json
@@ -33,7 +32,7 @@ name_to_cat = {
 cat_name = 'Chair'
 cat_id = name_to_cat[cat_name]
 
-pt_sample_res = 64
+pt_sample_res = 128
 
 partnet_dir = '/datasets/PartNet'
 partnet_index_path = '/sota/partnet_dataset/stats/all_valid_anno_info.txt'
@@ -714,7 +713,7 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
     for i, un in enumerate(all_unique_names):
         unique_name_to_new_id[un] = i
     with open(
-        f'data/{cat_name}_part_name_to_new_id_7_{start}_{end}.json',
+        f'data/{cat_name}_part_name_to_new_id_5_{start}_{end}.json',
         'w') as f:
         json.dump(unique_name_to_new_id, f)
     
@@ -735,7 +734,7 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
         all_new_ids_to_objs[all_valid_anno_ids[i]] = new_ids_to_objs
 
     with open(
-        f'data/{cat_name}_train_new_ids_to_objs_7_{start}_{end}.json',
+        f'data/{cat_name}_train_new_ids_to_objs_5_{start}_{end}.json',
         'w') as f:
         json.dump(all_new_ids_to_objs, f)
 
@@ -751,7 +750,7 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
                       indent=0,
                       nodenamefunc=lambda node: node.name,
                       nodeattrfunc=lambda node: "shape=box",).to_picture(
-                          f"data_prep/tmp/tree_union_class_7_{start}_{end}.png")
+                          f"data_prep/tmp/tree_union_class_5_{start}_{end}.png")
     num_union_nodes_class = sum(1 for _ in PreOrderIter(union_root_part))
     print("num_union_nodes_class: ", num_union_nodes_class)
 
@@ -770,7 +769,7 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
             make_edges(child)
     make_edges(union_root_part)
 
-    np.save(f'data/{cat_name}_union_node_names_7_{start}_{end}.npy',
+    np.save(f'data/{cat_name}_union_node_names_5_{start}_{end}.npy',
             union_node_names)
     
     # reconstruct a tree from adj
@@ -780,7 +779,7 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
                       nodenamefunc=lambda node: node.name,
                       nodeattrfunc=lambda node: "shape=box",
                       ).to_picture(
-                          f"data_prep/tmp/recon_tree_union_7_{start}_{end}.png")
+                          f"data_prep/tmp/recon_tree_union_5_{start}_{end}.png")
 
     print("making dense graphs")
     all_node_features = []
@@ -805,7 +804,7 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
         all_extents.append(extents)
     
     # exit(0)
-    fn = f'data/{cat_name}_train_{pt_sample_res}_7_{start}_{end}.hdf5'
+    fn = f'data/{cat_name}_train_{pt_sample_res}_5_{start}_{end}.hdf5'
     hdf5_file = h5py.File(fn, 'w')
     hdf5_file.create_dataset(
         'part_num_indices', [num_shapes, num_parts],
@@ -814,10 +813,10 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
         'all_indices', [num_shapes, ],
         dtype=h5py.vlen_dtype(np.int64))
     hdf5_file.create_dataset(
-        'normalized_points', [num_shapes, 10000, 3],
+        'normalized_points', [num_shapes, (pt_sample_res/2)**3, 3],
         dtype=np.float32)
     hdf5_file.create_dataset(
-        'values', [num_shapes, 10000, 1],
+        'values', [num_shapes, (pt_sample_res/2)**3, 1],
         dtype=np.float32)
     hdf5_file.create_dataset(
         'node_features', [num_shapes, num_union_nodes_class, OBB_REP_SIZE],
@@ -835,15 +834,17 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
         'extents', [num_shapes, num_parts, 3],
         dtype=np.float32)
     hdf5_file.create_dataset(
-        'transformed_points', [num_shapes, num_parts, 10000, 3],
+        'transformed_points', [num_shapes, num_parts, (pt_sample_res/2)**3, 3],
         dtype=np.float32)
     hdf5_file.create_dataset(
-        'empty_parts', [num_shapes, 10000, num_parts],
+        'empty_parts', [num_shapes, (pt_sample_res/2)**3, num_parts],
         dtype=np.uint8)
 
     valid_anno_id_to_idx = {}
     for i, x in enumerate(all_valid_anno_ids):
         valid_anno_id_to_idx[x] = i
+
+    num_workers = 4
 
     # lol: list of lists 
     lol_anno_ids = misc.chunks(all_valid_anno_ids, num_workers)
@@ -860,7 +861,8 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
                 args=(q, lol_anno_ids[i],
                       unique_name_to_new_id,
                       lol_entire_meshes[i],
-                      lol_ori_ids_to_new_ids[i]))
+                      lol_ori_ids_to_new_ids[i],
+                      99+i))
         for i in range(n_lists)
     ]
     for p in workers:
@@ -940,18 +942,20 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
 
 
 def make_data_for_one_mp(q: Queue, anno_ids, unique_name_to_new_id,
-                         entire_meshes, ori_ids_to_new_ids_list):
+                         entire_meshes, ori_ids_to_new_ids_list, display=99):
     for i, anno_id in enumerate(anno_ids):
         q.put((anno_id, make_data_for_one(anno_id,
                                 unique_name_to_new_id,
                                 entire_meshes[i],
-                                ori_ids_to_new_ids_list[i])))
+                                ori_ids_to_new_ids_list[i],
+                                display)))
 
 
 def make_data_for_one(anno_id,
                       unique_name_to_new_id: Dict,
                       entire_mesh,
                       ori_ids_to_new_ids,
+                      display=99,
                       vis=False):
     unique_names = list(unique_name_to_new_id.keys())
 
@@ -972,28 +976,21 @@ def make_data_for_one(anno_id,
     partnet_pcd_orig: trimesh.points.PointCloud = trimesh.load(partnet_points_ply)
 
     fg_voxels, fg_binvox_xform = get_info_from_voxels(
-        anno_id, pt_sample_res, entire_mesh)
+        anno_id, pt_sample_res, entire_mesh, display)
     partnet_pcd_in_fg_vox_grid = transform.mesh_space_to_voxel_space_centered(
         fg_binvox_xform, partnet_pcd_orig.vertices)
 
-    sdf_grid = ops.bin2sdf(input=fg_voxels)
-
     random.seed(319)
-    points, values = ops.sample_near_sdf_surface(sdf_grid, None,
-                                                 use_sdf_values=True)
+    points, values = gather_hdf5.sample_points_values(fg_voxels, pt_sample_res)
 
-    # pv_indices = np.arange(len(points))
-    # np.random.seed(319)
-    # np.random.shuffle(pv_indices)
-    # points = points[pv_indices]
-    # values = values[pv_indices]
+    pv_indices = np.arange(len(points))
+    np.random.seed(319)
+    np.random.shuffle(pv_indices)
+    points = points[pv_indices]
+    values = values[pv_indices]
 
-    # fg_occ_points = points[values.astype('bool').flatten()]
-    # fg_occ_points_indices = np.where(values == 1)[0]
-    # print(fg_occ_points.shape)
-
-    fg_occ_points = points[np.argwhere(values <= 0).flatten()]
-    fg_occ_points_indices = np.argwhere(values <= 0).flatten()
+    fg_occ_points = points[values.astype('bool').flatten()]
+    fg_occ_points_indices = np.where(values >= 0.5)[0]
     # print(fg_occ_points.shape)
 
     fg_closest_indices = ops.find_nearest_point(
@@ -1012,7 +1009,7 @@ def make_data_for_one(anno_id,
         for i in range(len(unique_names)):
             colors[fg_part_indices[i]] = all_colors[i]
         trimesh.points.PointCloud(fg_occ_points, colors).export(
-            'data_prep/tmp/partitioned_occupied_points_7.ply')
+            'data_prep/tmp/partitioned_occupied_points.ply')
     
     # find indices within all points that belong to separate parts
     for i, pi in enumerate(fg_part_indices):
@@ -1023,7 +1020,7 @@ def make_data_for_one(anno_id,
         for i in range(len(unique_names)):
             colors[fg_part_indices[i]] = all_colors[i]
         trimesh.points.PointCloud(points, colors).export(
-            'data_prep/tmp/partitioned_all_points_7.ply')
+            'data_prep/tmp/partitioned_all_points.ply')
 
     part_num_indices, all_indices = convert_fg_part_indices_to_flat_list(
         fg_part_indices)
@@ -1031,7 +1028,7 @@ def make_data_for_one(anno_id,
     points = points.unsqueeze(0)
     normalized_points = kaolin.ops.pointcloud.center_points(points, normalize=True)
     normalized_points = normalized_points.cpu().numpy()
-    values = values[None, :, None]
+    values = values[None, :]
 
     return {
         'part_num_indices': [part_num_indices],     # 1, num_parts
@@ -1041,24 +1038,26 @@ def make_data_for_one(anno_id,
     }
 
 
-def get_info_from_voxels(anno_id, res, entire_mesh):
+def get_info_from_voxels(anno_id, res, entire_mesh, display=99):
     """Given ShapeNet model_id and pt_sample_res,
     return model voxels and binvox transformation
     """
     obj_dir = os.path.join(partnet_dir, anno_id, 'vox_models')
+    # obj_dir = os.path.join('data/vox', anno_id)
     misc.check_dir(obj_dir)
     gt_mesh_path = os.path.join(obj_dir, f'{anno_id}.obj')
     entire_mesh.export(gt_mesh_path)
     vox_path = os.path.join(obj_dir, f'{anno_id}_{res}.binvox')
     vox_c_path = os.path.join(obj_dir, f'{anno_id}_{res}_c.binvox')
-    if not os.path.exists(vox_c_path):
+    if not os.path.exists(vox_c_path) or not os.path.exists(vox_path):
         ops.setup_vox(obj_dir)
         ops.voxelize_obj(
             obj_dir,
             f'{anno_id}.obj',
             res,
             vox_c_path,
-            vox_path)
+            vox_path,
+            display)
         ops.teardown_vox(obj_dir)
     voxels = ops.load_voxels(vox_c_path)
     binvox_xform = transform.get_transform_from_binvox_centered(
@@ -1087,7 +1086,7 @@ def convert_flat_list_to_fg_part_indices(part_num_indices, all_indices):
 
 
 if __name__ == "__main__":
-    export_data(train_ids, save_data=True, start=0, end=2000)
+    export_data(train_ids, save_data=True, start=0, end=10)
     exit(0)
 
     # merge_partnet_after_merging('39446', info=True)
@@ -1095,19 +1094,19 @@ if __name__ == "__main__":
 
     unique_name_to_new_id, all_entire_meshes, all_ori_ids_to_new_ids,\
             all_obbs, all_name_to_obbs =\
-                export_data(train_ids, save_data=False, start=0, end=10)
+                export_data(train_ids, save_data=False, start=0, end=100)
     # np.savez_compressed("data_prep/tmp/data.npz",
     #                     all_entire_meshes=all_entire_meshes,
     #                     all_ori_ids_to_new_ids=all_ori_ids_to_new_ids,
     #                     all_obbs=all_obbs,
     #                     all_name_to_obbs=all_name_to_obbs)
 
-    with open('data/Chair_train_new_ids_to_objs_7_0_10.json', 'r') as f:
+    with open('data/Chair_train_new_ids_to_objs_4_0_100.json', 'r') as f:
         all_obs = json.load(f)
     keys = list(all_obs.keys())
 
     # with open(
-    #     f'data/{cat_name}_part_name_to_new_id_7_{0}_{100}.json',
+    #     f'data/{cat_name}_part_name_to_new_id_4_{0}_{2000}.json',
     #     'r') as f:
     #     unique_name_to_new_id = json.load(f)
 
@@ -1115,7 +1114,7 @@ if __name__ == "__main__":
     # # model_idx = 3
     # anno_id = '38725'
     # model_idx = 6
-    model_idx = 1
+    model_idx = 2
     anno_id = keys[model_idx]
     print(anno_id)
 

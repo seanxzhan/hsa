@@ -25,47 +25,50 @@ def setup_vox(obj_dir):
 def teardown_vox(obj_dir):
     subprocess.call(["rm {}/voxelize.sh".format(obj_dir)], shell=True)
     subprocess.call(["rm {}/binvox".format(obj_dir)], shell=True)
-    subprocess.call(["killall Xvfb"], shell=True)
+    # subprocess.call(["killall Xvfb"], shell=True)
 
 
 def voxelize_obj(obj_dir, obj_filename, res,
                  out_vox_c_path, out_vox_nc_path,
+                 display=99,
                  bbox="", min_max=["", "", "", "", "", ""]):
     assert os.path.exists(os.path.join(obj_dir, 'binvox'))
     assert os.path.exists(os.path.join(obj_dir, 'voxelize.sh'))
-    files = misc.sorted_alphanumeric(os.listdir(obj_dir))
-    files.remove('voxelize.sh')
-    files.remove('binvox')
+    # files = misc.sorted_alphanumeric(os.listdir(obj_dir))
+    # files.remove('voxelize.sh')
+    # files.remove('binvox')
     obj_id = os.path.splitext(obj_filename)[0]
     devnull = open(os.devnull, 'w')
     if bbox == "":
-        call_string_c = "cd {} && bash voxelize.sh {} {} c".format(
-            obj_dir, obj_filename, res)
+        call_string_c = "cd {} && bash voxelize.sh {} {} c {}".format(
+            obj_dir, obj_filename, res, display)
     else:
         call_string_c =\
-            "cd {} && bash voxelize.sh {} {} c {} {} {} {} {} {} {}".format(
-                obj_dir, obj_filename, res, bbox,
+            "cd {} && bash voxelize.sh {} {} c {} {} {} {} {} {} {} {}".format(
+                obj_dir, obj_filename, res, display, bbox,
                 min_max[0], min_max[1], min_max[2],
                 min_max[3], min_max[4], min_max[5])
     mv_c = "mv {}/{}.binvox {}".format(
         obj_dir, obj_id, out_vox_c_path)
     subprocess.call([call_string_c], shell=True,
-        stdout=devnull, stderr=devnull
+        stdout=devnull,
+        stderr=devnull
     )
     subprocess.call([mv_c], shell=True)
     if bbox == "":
-        call_string_nc = "cd {} && bash voxelize.sh {} {} nc".format(
-            obj_dir, obj_filename, res)
+        call_string_nc = "cd {} && bash voxelize.sh {} {} nc {}".format(
+            obj_dir, obj_filename, res, display)
     else:
         call_string_nc =\
-            "cd {} && bash voxelize.sh {} {} nc {} {} {} {} {} {} {}".format(
-                obj_dir, obj_filename, res, bbox,
+            "cd {} && bash voxelize.sh {} {} nc {} {} {} {} {} {} {} {}".format(
+                obj_dir, obj_filename, res, display, bbox,
                 min_max[0], min_max[1], min_max[2],
                 min_max[3], min_max[4], min_max[5])
     mv_nc = "mv {}/{}.binvox {}".format(
         obj_dir, obj_id, out_vox_nc_path)
     subprocess.call([call_string_nc], shell=True,
-        stdout=devnull, stderr=devnull
+        stdout=devnull,
+        stderr=devnull
     )
     subprocess.call([mv_nc], shell=True)
 

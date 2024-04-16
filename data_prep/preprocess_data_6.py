@@ -1,6 +1,7 @@
 # part classes, includes specified number of shape with variable parts
 # NOTE: obb xform is consistent throughout shapes
 # NOTE: further merges some parts
+# NOTE: sample points closer to sdf surface
 
 import os
 import json
@@ -1085,8 +1086,8 @@ def convert_flat_list_to_fg_part_indices(part_num_indices, all_indices):
 
 
 if __name__ == "__main__":
-    export_data(train_ids, save_data=True, start=0, end=2000)
-    exit(0)
+    # export_data(train_ids, save_data=True, start=0, end=2000)
+    # exit(0)
 
     # merge_partnet_after_merging('39446', info=True)
     # exit(0)
@@ -1113,7 +1114,7 @@ if __name__ == "__main__":
     # # model_idx = 3
     # anno_id = '38725'
     # model_idx = 6
-    model_idx = 2
+    model_idx = 1
     anno_id = keys[model_idx]
     print(anno_id)
 
