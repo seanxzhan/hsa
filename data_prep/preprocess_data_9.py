@@ -1,7 +1,6 @@
 # part classes, includes specified number of shape with variable parts
 # NOTE: obb xform is consistent throughout shapes
 # NOTE: further merges some parts
-# NOTE: further merges some parts
 # NOTE: also get partnet surface points
 
 import os
@@ -417,7 +416,7 @@ def merge_partnet_after_merging(anno_id, info=False):
         with open(f'data_prep/tmp/{anno_id}_parts_info.json', 'w') as f:
             json.dump(parts_info, f)
 
-    with open('data_prep/further_merge_info_8.json', 'r') as f:
+    with open('data_prep/further_merge_info.json', 'r') as f:
         further_merge_info = json.load(f)
     further_merge_parents = list(further_merge_info.keys())
     further_merge_children = []
@@ -668,7 +667,7 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
     for i, un in enumerate(all_unique_names):
         unique_name_to_new_id[un] = i
     with open(
-        f'data/{cat_name}_part_name_to_new_id_8_{start}_{end}.json',
+        f'data/{cat_name}_part_name_to_new_id_9_{start}_{end}.json',
         'w') as f:
         json.dump(unique_name_to_new_id, f)
     
@@ -689,7 +688,7 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
         all_new_ids_to_objs[all_valid_anno_ids[i]] = new_ids_to_objs
 
     with open(
-        f'data/{cat_name}_train_new_ids_to_objs_8_{start}_{end}.json',
+        f'data/{cat_name}_train_new_ids_to_objs_9_{start}_{end}.json',
         'w') as f:
         json.dump(all_new_ids_to_objs, f)
 
@@ -705,7 +704,7 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
                       indent=0,
                       nodenamefunc=lambda node: node.name,
                       nodeattrfunc=lambda node: "shape=box",).to_picture(
-                          f"data_prep/tmp/tree_union_class_8_{start}_{end}.png")
+                          f"data_prep/tmp/tree_union_class_9_{start}_{end}.png")
     num_union_nodes_class = sum(1 for _ in PreOrderIter(union_root_part))
     print("num_union_nodes_class: ", num_union_nodes_class)
 
@@ -724,7 +723,7 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
             make_edges(child)
     make_edges(union_root_part)
 
-    np.save(f'data/{cat_name}_union_node_names_8_{start}_{end}.npy',
+    np.save(f'data/{cat_name}_union_node_names_9_{start}_{end}.npy',
             union_node_names)
     
     # reconstruct a tree from adj
@@ -734,7 +733,7 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
                       nodenamefunc=lambda node: node.name,
                       nodeattrfunc=lambda node: "shape=box",
                       ).to_picture(
-                          f"data_prep/tmp/recon_tree_union_8_{start}_{end}.png")
+                          f"data_prep/tmp/recon_tree_union_9_{start}_{end}.png")
 
     print("making dense graphs")
     all_node_features = []
@@ -760,7 +759,7 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
     
     # exit(0)
 
-    fn = f'data/{cat_name}_train_{pt_sample_res}_8_{start}_{end}.hdf5'
+    fn = f'data/{cat_name}_train_{pt_sample_res}_9_{start}_{end}.hdf5'
     hdf5_file = h5py.File(fn, 'w')
     hdf5_file.create_dataset(
         'part_num_indices', [num_shapes, num_parts],
@@ -870,11 +869,11 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
 
     # # hdf5_file.close()
     
-    # # pyg = PartPtsDataset(f'data/{cat_name}_train_{pt_sample_res}_8_{start}_{end}',
+    # # pyg = PartPtsDataset(f'data/{cat_name}_train_{pt_sample_res}_9_{start}_{end}',
     # #                      all_pts_data)
     # # pyg.process()
 
-    # pyg = PartPtsDataset(f'data/{cat_name}_train_{pt_sample_res}_8_{start}_{end}_whole',
+    # pyg = PartPtsDataset(f'data/{cat_name}_train_{pt_sample_res}_9_{start}_{end}_whole',
     #                      all_pts_whole_data)
     # pyg.process()
 
@@ -910,11 +909,11 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
 
     hdf5_file.close()
 
-    pyg = PartPtsDataset(f'data/{cat_name}_train_{pt_sample_res}_8_{start}_{end}',
+    pyg = PartPtsDataset(f'data/{cat_name}_train_{pt_sample_res}_9_{start}_{end}',
                          all_pts_data)
     pyg.process()
 
-    pyg = PartPtsDataset(f'data/{cat_name}_train_{pt_sample_res}_8_{start}_{end}_whole',
+    pyg = PartPtsDataset(f'data/{cat_name}_train_{pt_sample_res}_9_{start}_{end}_whole',
                          all_pts_whole_data)
     pyg.process()
 
@@ -959,23 +958,23 @@ def make_data_for_one(anno_id,
     partnet_pcd_in_fg_vox_grid = transform.mesh_space_to_voxel_space_centered(
         fg_binvox_xform, partnet_pcd_orig.vertices)
     
-    # partnet_pcd_part_points = []
-    # partnet_pcd_part_labels = []
-    # for un in unique_names:
-    #     new_id = unique_name_to_new_id[un]
-    #     part_indices = np.argwhere(new_labels == new_id)[:,0]
-    #     part_points = partnet_pcd_in_fg_vox_grid[part_indices]
-    #     part_points = kaolin.ops.pointcloud.center_points(
-    #         torch.from_numpy(part_points).unsqueeze(0), normalize=True)
-    #     part_points = part_points[0].to(torch.float32)
-    #     partnet_pcd_part_points.append(part_points)
-    #     partnet_pcd_part_labels.append(np.repeat([new_id], len(part_points)))
+    partnet_pcd_part_points = []
+    partnet_pcd_part_labels = []
+    for un in unique_names:
+        new_id = unique_name_to_new_id[un]
+        part_indices = np.argwhere(new_labels == new_id)[:,0]
+        part_points = partnet_pcd_in_fg_vox_grid[part_indices]
+        part_points = kaolin.ops.pointcloud.center_points(
+            torch.from_numpy(part_points).unsqueeze(0), normalize=True)
+        part_points = part_points[0].to(torch.float32)
+        partnet_pcd_part_points.append(part_points)
+        partnet_pcd_part_labels.append(np.repeat([new_id], len(part_points)))
 
-    # partnet_pcd_part_points = np.concatenate(partnet_pcd_part_points, axis=0)
-    # partnet_pcd_part_labels = np.concatenate(partnet_pcd_part_labels, axis=0)
+    partnet_pcd_part_points = np.concatenate(partnet_pcd_part_points, axis=0)
+    partnet_pcd_part_labels = np.concatenate(partnet_pcd_part_labels, axis=0)
     
-    # pts_data = Data(pos=partnet_pcd_part_points,
-    #                 part_label=partnet_pcd_part_labels)
+    pts_data = Data(pos=partnet_pcd_part_points,
+                    part_label=partnet_pcd_part_labels)
 
     partnet_pcd_norm = kaolin.ops.pointcloud.center_points(
             torch.from_numpy(partnet_pcd_in_fg_vox_grid).unsqueeze(0),
@@ -984,7 +983,6 @@ def make_data_for_one(anno_id,
 
     pts_data_whole = Data(pos=partnet_pcd_norm,
                           part_label=torch.from_numpy(new_labels).to(torch.int64))
-    return {'pts_whole_data': pts_data_whole}
 
     random.seed(319)
     points, values = gather_hdf5.sample_points_values(fg_voxels, pt_sample_res)
@@ -1041,7 +1039,8 @@ def make_data_for_one(anno_id,
         'all_indices': [all_indices],               # 1, variable length
         'normalized_points': normalized_points,     # 1, num_points, 3
         'values': values,                           # 1, num_points, 1
-        'pts_data': pts_data
+        'pts_data': pts_data,
+        'pts_whole_data': pts_data_whole
     }
 
 
@@ -1091,13 +1090,13 @@ def convert_flat_list_to_fg_part_indices(part_num_indices, all_indices):
 
 
 if __name__ == "__main__":
-    # # pass one to create the preprocess_8 dataset
+    # # pass one to create the preprocess_9 dataset
     # export_data(train_ids, save_data=True, start=0, end=2000)
     # exit(0)
     
     # pass two to create the four_parts dataset
-    good_indices = np.load('data/chair_four_parts_8_0_2000.npy')
-    data_pt = 'data/Chair_train_new_ids_to_objs_8_0_2000.json'
+    good_indices = np.load('data/chair_four_parts_4_0_2000.npy')
+    data_pt = 'data/Chair_train_new_ids_to_objs_4_0_2000.json'
     with open(data_pt, 'r') as f:
         data: Dict = json.load(f)
     all_ids = np.array(list(data.keys()))
@@ -1116,19 +1115,20 @@ if __name__ == "__main__":
 
     unique_name_to_new_id, all_entire_meshes, all_ori_ids_to_new_ids,\
             all_obbs, all_name_to_obbs =\
-                export_data(ids_w_four_parts, save_data=False, start=0, end=100)
+                export_data(ids_w_four_parts, save_data=False,
+                            start=0, end=len(ids_w_four_parts))
     # np.savez_compressed("data_prep/tmp/data.npz",
     #                     all_entire_meshes=all_entire_meshes,
     #                     all_ori_ids_to_new_ids=all_ori_ids_to_new_ids,
     #                     all_obbs=all_obbs,
     #                     all_name_to_obbs=all_name_to_obbs)
 
-    with open('data/Chair_train_new_ids_to_objs_8_0_100.json', 'r') as f:
+    with open('data/Chair_train_new_ids_to_objs_9_0_87.json', 'r') as f:
         all_obs = json.load(f)
     keys = list(all_obs.keys())
 
     # with open(
-    #     f'data/{cat_name}_part_name_to_new_id_8_{0}_{2000}.json',
+    #     f'data/{cat_name}_part_name_to_new_id_9_{0}_{2000}.json',
     #     'r') as f:
     #     unique_name_to_new_id = json.load(f)
 
