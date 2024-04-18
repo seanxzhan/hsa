@@ -8,7 +8,7 @@ import trimesh
 import argparse
 import numpy as np
 from tqdm import tqdm
-from occ_networks.encoder_decoder_nasa import VAE
+from occ_networks.encoder_decoder_nasa_1 import SmallMLPs
 from utils import misc, visualize, transform, ops, reconstruct
 from data_prep import preprocess_data_8
 from typing import Dict, List
@@ -39,7 +39,7 @@ iterations = 10001
 multires = 2
 pt_sample_res = 64        # point_sampling
 
-expt_id = 0
+expt_id = 2
 
 OVERFIT = args.of
 overfit_idx = args.of_idx
@@ -87,7 +87,8 @@ if OVERFIT:
     partnet_dataset = partnet_dataset[overfit_idx:overfit_idx+1]
 partnet_loader = DataLoader(partnet_dataset, batch_size=batch_size)
 
-num_points = normalized_points.shape[2]
+num_points = normalized_points.shape[1]
+num_shapes = normalized_points.shape[0]
 
 if not OVERFIT:
     logs_path = os.path.join('logs', f'vae/vae_{expt_id}-bs-{batch_size}',
@@ -109,25 +110,30 @@ print("results dir: ", results_dir)
 
 
 # -------- model --------
-model = VAE().to(device)
+model = SmallMLPs().to(device)
+import math
+embeddings = torch.nn.Embedding(num_shapes, 32).to(device)
+if args.train:
+    torch.nn.init.normal_(embeddings.weight.data, 0.0, 1 / math.sqrt(32))
 mse = torch.nn.MSELoss()
 params = [p for _, p in model.named_parameters()]
-optimizer = torch.optim.Adam(params, lr)
+optimizer = torch.optim.Adam([{"params": params, "lr": lr},
+                              {"params": embeddings.parameters(), "lr": lr}])
 scheduler = torch.optim.lr_scheduler.LambdaLR(
     optimizer,
     lr_lambda=lambda x: max(0.0, 10**(-x*0.0002)))
 
 
-def loss_f(pred_values, gt_values, mu, log_var):
+def loss_f(pred_values, gt_values):
     recon_loss = mse(pred_values, gt_values)
-    kl_loss = -0.5 * torch.sum(1 + log_var - mu.pow(2) - log_var.exp())
-    return recon_loss + kl_loss
+    # kl_loss = -0.5 * torch.sum(1 + log_var - mu.pow(2) - log_var.exp())
+    return recon_loss
 
 
-def train_one_itr(partnet_data, batch_points, batch_values):
-    occs, mu, log_var = model.forward(partnet_data.pos, partnet_data.batch,
-                                      batch_points)
-    loss = loss_f(occs, batch_values, mu, log_var)
+def train_one_itr(batch_points, batch_embed, batch_values):
+    occs = model.forward(batch_points,
+                         batch_embed.unsqueeze(1).expand(-1, num_points, -1))
+    loss = loss_f(occs, batch_values)
 
     optimizer.zero_grad()
     loss.backward()
@@ -145,9 +151,11 @@ if args.train:
         for step, partnet_data in enumerate(partnet_loader):
             start = step * batch_size
             end = start + batch_size
+            if start == 500:
+                continue
             loss = train_one_itr(
-                partnet_data,
                 torch.from_numpy(normalized_points[start:end]).to(device, torch.float32),
+                embeddings(torch.arange(start, end).to(device)),
                 torch.from_numpy(values[start:end]).to(device, torch.float32))
             batch_loss += loss
         avg_batch_loss = batch_loss / batch_size
@@ -162,6 +170,7 @@ if args.train:
             torch.save({
                 'epoch': it,
                 'model_state_dict': model.state_dict(),
+                'embeddings_state_dict': embeddings.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
                 'avg_batch_loss': avg_batch_loss,
                 }, os.path.join(ckpt_dir, f'model_{it}.pt'))
@@ -194,10 +203,17 @@ if args.test:
 
     checkpoint = torch.load(os.path.join(ckpt_dir, f'model_{it}.pt'))
     model.load_state_dict(checkpoint['model_state_dict'])
+    embeddings = torch.nn.Embedding(num_shapes, 32).to(device)
+    embeddings.load_state_dict(checkpoint['embeddings_state_dict'])
     optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
 
     results_dir = os.path.join(results_dir, anno_id)
     misc.check_dir(results_dir)
+
+    if not OVERFIT:
+        batch_embed = embeddings(torch.tensor(model_idx).to(device)).unsqueeze(0)
+    else:
+        batch_embed = embeddings(torch.tensor(0).to(device)).unsqueeze(0)
 
     unique_part_names, name_to_ori_ids_and_objs,\
         orig_obbs, entire_mesh, name_to_obbs, _, _, _ =\
@@ -229,6 +245,7 @@ if args.test:
     query_points = reconstruct.make_query_points(pt_sample_res)
     query_points = torch.from_numpy(query_points).to(device, torch.float32)
     query_points = query_points.unsqueeze(0)
+    num_points = query_points.shape[1]
 
     if not OVERFIT:
         partnet_dataset = partnet_dataset[model_idx:model_idx+1]
@@ -236,9 +253,8 @@ if args.test:
 
     with torch.no_grad():
         for partnet_data in partnet_loader:
-            pred_values, _, _ = model.forward(partnet_data.pos,
-                                              partnet_data.batch,
-                                              query_points)
+            pred_values = model.forward(query_points,
+                                        batch_embed.unsqueeze(1).expand(-1, num_points, -1))
 
     mag = 0.6
 

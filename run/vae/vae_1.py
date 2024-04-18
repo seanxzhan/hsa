@@ -8,7 +8,7 @@ import trimesh
 import argparse
 import numpy as np
 from tqdm import tqdm
-from occ_networks.encoder_decoder_nasa import VAE
+from occ_networks.encoder_decoder_nasa_1 import VAE
 from utils import misc, visualize, transform, ops, reconstruct
 from data_prep import preprocess_data_8
 from typing import Dict, List
@@ -39,7 +39,7 @@ iterations = 10001
 multires = 2
 pt_sample_res = 64        # point_sampling
 
-expt_id = 0
+expt_id = 1
 
 OVERFIT = args.of
 overfit_idx = args.of_idx
@@ -118,16 +118,16 @@ scheduler = torch.optim.lr_scheduler.LambdaLR(
     lr_lambda=lambda x: max(0.0, 10**(-x*0.0002)))
 
 
-def loss_f(pred_values, gt_values, mu, log_var):
+def loss_f(pred_values, gt_values):
     recon_loss = mse(pred_values, gt_values)
-    kl_loss = -0.5 * torch.sum(1 + log_var - mu.pow(2) - log_var.exp())
-    return recon_loss + kl_loss
+    # kl_loss = -0.5 * torch.sum(1 + log_var - mu.pow(2) - log_var.exp())
+    return recon_loss
 
 
 def train_one_itr(partnet_data, batch_points, batch_values):
-    occs, mu, log_var = model.forward(partnet_data.pos, partnet_data.batch,
-                                      batch_points)
-    loss = loss_f(occs, batch_values, mu, log_var)
+    occs = model.forward(partnet_data.pos, partnet_data.batch,
+                         batch_points)
+    loss = loss_f(occs, batch_values)
 
     optimizer.zero_grad()
     loss.backward()
@@ -236,9 +236,9 @@ if args.test:
 
     with torch.no_grad():
         for partnet_data in partnet_loader:
-            pred_values, _, _ = model.forward(partnet_data.pos,
-                                              partnet_data.batch,
-                                              query_points)
+            pred_values = model.forward(partnet_data.pos,
+                                        partnet_data.batch,
+                                        query_points)
 
     mag = 0.6
 
