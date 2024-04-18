@@ -2,6 +2,7 @@
 # NOTE: obb xform is consistent throughout shapes
 # NOTE: further merges some parts
 # NOTE: also get partnet surface points
+# NOTE: axis aligned bounding boxes
 
 import os
 import json
@@ -184,7 +185,7 @@ def build_obbs(anno_id, part_info: Dict):
             up_to_now += curr_num_meshes
             count += 1
         mesh = trimesh.util.concatenate(meshes)
-        obb: trimesh.primitives.Box = mesh.bounding_box_oriented
+        obb: trimesh.primitives.Box = mesh.bounding_box
         ext = np.array(obb.primitive.extents)
         xform = np.array(obb.primitive.transform)
         ext_xform = align_xform(ext, xform)
@@ -667,7 +668,7 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
     for i, un in enumerate(all_unique_names):
         unique_name_to_new_id[un] = i
     with open(
-        f'data/{cat_name}_part_name_to_new_id_9_{start}_{end}.json',
+        f'data/{cat_name}_part_name_to_new_id_10_{start}_{end}.json',
         'w') as f:
         json.dump(unique_name_to_new_id, f)
     
@@ -688,7 +689,7 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
         all_new_ids_to_objs[all_valid_anno_ids[i]] = new_ids_to_objs
 
     with open(
-        f'data/{cat_name}_train_new_ids_to_objs_9_{start}_{end}.json',
+        f'data/{cat_name}_train_new_ids_to_objs_10_{start}_{end}.json',
         'w') as f:
         json.dump(all_new_ids_to_objs, f)
 
@@ -704,7 +705,7 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
                       indent=0,
                       nodenamefunc=lambda node: node.name,
                       nodeattrfunc=lambda node: "shape=box",).to_picture(
-                          f"data_prep/tmp/tree_union_class_9_{start}_{end}.png")
+                          f"data_prep/tmp/tree_union_class_10_{start}_{end}.png")
     num_union_nodes_class = sum(1 for _ in PreOrderIter(union_root_part))
     print("num_union_nodes_class: ", num_union_nodes_class)
 
@@ -723,7 +724,7 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
             make_edges(child)
     make_edges(union_root_part)
 
-    np.save(f'data/{cat_name}_union_node_names_9_{start}_{end}.npy',
+    np.save(f'data/{cat_name}_union_node_names_10_{start}_{end}.npy',
             union_node_names)
     
     # reconstruct a tree from adj
@@ -733,7 +734,7 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
                       nodenamefunc=lambda node: node.name,
                       nodeattrfunc=lambda node: "shape=box",
                       ).to_picture(
-                          f"data_prep/tmp/recon_tree_union_9_{start}_{end}.png")
+                          f"data_prep/tmp/recon_tree_union_10_{start}_{end}.png")
 
     print("making dense graphs")
     all_node_features = []
@@ -759,7 +760,7 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
     
     # exit(0)
 
-    fn = f'data/{cat_name}_train_{pt_sample_res}_9_{start}_{end}.hdf5'
+    fn = f'data/{cat_name}_train_{pt_sample_res}_10_{start}_{end}.hdf5'
     hdf5_file = h5py.File(fn, 'w')
     hdf5_file.create_dataset(
         'part_num_indices', [num_shapes, num_parts],
@@ -869,11 +870,11 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
 
     # # hdf5_file.close()
     
-    # # pyg = PartPtsDataset(f'data/{cat_name}_train_{pt_sample_res}_9_{start}_{end}',
+    # # pyg = PartPtsDataset(f'data/{cat_name}_train_{pt_sample_res}_10_{start}_{end}',
     # #                      all_pts_data)
     # # pyg.process()
 
-    # pyg = PartPtsDataset(f'data/{cat_name}_train_{pt_sample_res}_9_{start}_{end}_whole',
+    # pyg = PartPtsDataset(f'data/{cat_name}_train_{pt_sample_res}_10_{start}_{end}_whole',
     #                      all_pts_whole_data)
     # pyg.process()
 
@@ -909,11 +910,11 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
 
     hdf5_file.close()
 
-    pyg = PartPtsDataset(f'data/{cat_name}_train_{pt_sample_res}_9_{start}_{end}',
+    pyg = PartPtsDataset(f'data/{cat_name}_train_{pt_sample_res}_10_{start}_{end}',
                          all_pts_data)
     pyg.process()
 
-    pyg = PartPtsDataset(f'data/{cat_name}_train_{pt_sample_res}_9_{start}_{end}_whole',
+    pyg = PartPtsDataset(f'data/{cat_name}_train_{pt_sample_res}_10_{start}_{end}_whole',
                          all_pts_whole_data)
     pyg.process()
 
@@ -1118,12 +1119,12 @@ if __name__ == "__main__":
     #                     all_obbs=all_obbs,
     #                     all_name_to_obbs=all_name_to_obbs)
 
-    with open('data/Chair_train_new_ids_to_objs_9_0_87.json', 'r') as f:
+    with open('data/Chair_train_new_ids_to_objs_10_0_87.json', 'r') as f:
         all_obs = json.load(f)
     keys = list(all_obs.keys())
 
     # with open(
-    #     f'data/{cat_name}_part_name_to_new_id_9_{0}_{2000}.json',
+    #     f'data/{cat_name}_part_name_to_new_id_10_{0}_{2000}.json',
     #     'r') as f:
     #     unique_name_to_new_id = json.load(f)
 
