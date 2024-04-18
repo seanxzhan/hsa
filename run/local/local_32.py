@@ -43,14 +43,14 @@ if args.of:
     assert args.of_idx != None
 
 device = 'cuda'
-lr = 3e-3
+lr = 1e-3
 laplacian_weight = 0.1
 iterations = 3001
 save_every = 100
 multires = 2
 pt_sample_res = 64        # point_sampling
 
-expt_id = 31
+expt_id = 32
 
 OVERFIT = args.of
 overfit_idx = args.of_idx
@@ -91,7 +91,7 @@ if OVERFIT:
     part_nodes = train_data['part_nodes'][overfit_idx:overfit_idx+1]
     xforms = train_data['xforms'][overfit_idx:overfit_idx+1]
     transformed_points = train_data['transformed_points'][overfit_idx:overfit_idx+1]
-    empty_parts = train_data['empty_parts'][overfit_idx:overfit_idx+1]
+    # empty_parts = train_data['empty_parts'][overfit_idx:overfit_idx+1]
 else:
     part_num_indices = train_data['part_num_indices']
     all_indices = train_data['all_indices']
@@ -100,7 +100,7 @@ else:
     part_nodes = train_data['part_nodes']
     xforms = train_data['xforms']
     transformed_points = train_data['transformed_points']
-    empty_parts = train_data['empty_parts']
+    # empty_parts = train_data['empty_parts']
 
 num_points = transformed_points.shape[1]
 num_shapes, num_parts = part_num_indices.shape
@@ -131,11 +131,11 @@ misc.check_dir(results_dir)
 print("results dir: ", results_dir)
 
 # -------- model --------
-each_part_feat = 16
+each_part_feat = 32
 model = SDFDecoder(num_parts=num_parts,
                    feature_dims=each_part_feat,
-                   internal_dims=64,
-                   hidden=4,
+                   internal_dims=128,
+                   hidden=5,
                    multires=2).to(device)
 
 mse = torch.nn.MSELoss()
@@ -160,7 +160,7 @@ def load_batch(batch_idx, batch_size):
         torch.from_numpy(values[start:end]).to(device, torch.float32),\
         None,\
         embeddings(torch.arange(start, end).to(device)),\
-        torch.from_numpy(empty_parts[start:end]).to(device, torch.long)
+        None
 
 optimizer = torch.optim.Adam([{"params": params, "lr": lr},
                               {"params": embeddings.parameters(), "lr": lr}])
