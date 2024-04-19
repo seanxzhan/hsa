@@ -24,7 +24,7 @@ parser.add_argument('--mask', action="store_true")
 parser.add_argument('--recon_one_part', '--ro', action="store_true")
 parser.add_argument('--recon_the_rest', '--rt', action="store_true")
 # parser.add_argument('--part', type=int)
-parser.add_argument('--parts', '--p', nargs='+') 
+parser.add_argument('--parts', '--p', nargs='+')
 parser.add_argument('--it', type=int)
 parser.add_argument('--asb', action="store_true")
 parser.add_argument('--of', action="store_true", default=False)
@@ -50,12 +50,12 @@ save_every = 100
 multires = 2
 pt_sample_res = 64        # point_sampling
 
-expt_id = 33
+expt_id = 34
 
 OVERFIT = args.of
 overfit_idx = args.of_idx
 
-batch_size = 10
+batch_size = 25
 if OVERFIT:
     batch_size = 1
 
@@ -134,7 +134,7 @@ print("results dir: ", results_dir)
 each_part_feat = 32
 model = SDFDecoder(num_parts=num_parts,
                    feature_dims=each_part_feat,
-                   internal_dims=64,
+                   internal_dims=128,
                    hidden=4,
                    multires=2).to(device)
 
@@ -344,7 +344,7 @@ if args.test:
     transformed_points = torch.zeros((bs,
                                       num_parts,
                                       num_points,
-                                      3)).to(device)    
+                                      3)).to(device)
     for i in range(num_parts):
         pts = query_points[0]
         xform = xforms[0, i]

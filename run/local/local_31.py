@@ -100,7 +100,7 @@ else:
     part_nodes = train_data['part_nodes']
     xforms = train_data['xforms']
     transformed_points = train_data['transformed_points']
-    empty_parts = train_data['empty_parts']
+    # empty_parts = train_data['empty_parts']
 
 num_points = transformed_points.shape[1]
 num_shapes, num_parts = part_num_indices.shape
@@ -160,7 +160,7 @@ def load_batch(batch_idx, batch_size):
         torch.from_numpy(values[start:end]).to(device, torch.float32),\
         None,\
         embeddings(torch.arange(start, end).to(device)),\
-        torch.from_numpy(empty_parts[start:end]).to(device, torch.long)
+        None
 
 optimizer = torch.optim.Adam([{"params": params, "lr": lr},
                               {"params": embeddings.parameters(), "lr": lr}])
@@ -178,8 +178,8 @@ np.random.seed(319)
 def train_one_itr(it, all_fg_part_indices, 
                   transformed_points, values,
                   part_nodes, batch_embed, batch_empty_parts):
-    # num_parts_to_mask = np.random.randint(1, num_parts)
-    num_parts_to_mask = 1
+    num_parts_to_mask = np.random.randint(1, num_parts)
+    # num_parts_to_mask = 1
     rand_indices = np.random.choice(num_parts, num_parts_to_mask,
                                     replace=False)
 
@@ -374,12 +374,12 @@ if args.test:
         else:
             print(f"masking parts: {masked_indices.cpu().numpy().tolist()}")
 
-        parts_mask = torch.ones((batch_embed.shape[0], num_parts)).to(device, torch.float32)
+        parts_mask = torch.zeros((batch_embed.shape[0], num_parts)).to(device, torch.float32)
         if len(masked_indices) != 0:
-            parts_mask[:, masked_indices] = 0
+            parts_mask[:, masked_indices] = 1
         parts_mask = torch.repeat_interleave(parts_mask,
                                              each_part_feat, dim=-1)
-        
+
         points_mask = torch.zeros((1, num_parts, 1, 1)).to(device, torch.float32)
         points_mask[:, masked_indices] = 1
 

@@ -46,7 +46,7 @@ points = np.array([
     [2.0, 1.0]
 ])
 
-max_edge_length = 1
+max_edge_length = 2
 
 # Construct Vietoris-Rips complex
 edges = create_vietoris_rips_complex(points, max_edge_length)
