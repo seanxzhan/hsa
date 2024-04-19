@@ -51,7 +51,7 @@ save_every = 100
 multires = 2
 pt_sample_res = 64        # point_sampling
 
-expt_id = 38
+expt_id = 39
 
 OVERFIT = args.of
 overfit_idx = args.of_idx
@@ -168,7 +168,7 @@ def load_batch(batch_idx, batch_size):
         torch.from_numpy(normalized_points[start:end]).to(device, torch.float32),\
         torch.from_numpy(values[start:end]).to(device, torch.float32),\
         embeddings(torch.arange(start, end).to(device)),\
-        torch.from_numpy(node_features[start:end, :, 12:]).to(device, torch.float32),\
+        torch.from_numpy(node_features[start:end, :, :3]).to(device, torch.float32),\
         torch.from_numpy(adj[start:end]).to(device, torch.long),\
         torch.from_numpy(part_nodes[start:end]).to(device, torch.long),\
         torch.from_numpy(xforms[start:end, :, :3, 3]).to(device, torch.float32)
@@ -378,7 +378,7 @@ if args.test:
 
     if not OVERFIT:
         xforms = torch.from_numpy(xforms[model_idx:model_idx+1]).to(device, torch.float32)
-        batch_node_feat = torch.from_numpy(node_features[model_idx:model_idx+1, :, 12:]).to(device, torch.float32)
+        batch_node_feat = torch.from_numpy(node_features[model_idx:model_idx+1, :, :3]).to(device, torch.float32)
         batch_adj = torch.from_numpy(adj[model_idx:model_idx+1]).to(device, torch.float32)
         batch_part_nodes = torch.from_numpy(part_nodes[model_idx:model_idx+1]).to(device, torch.float32)
 
@@ -580,7 +580,7 @@ if args.asb:
     for i, idx in enumerate(model_indices):
         anno_id = model_idx_to_anno_id[idx]
         part_idx = part_indices[i]
-        shape_node_feat = torch.from_numpy(node_features[idx, :, 12:])    # 7, 3
+        shape_node_feat = torch.from_numpy(node_features[idx, :, :3])    # 7, 3
         shape_part_nodes = torch.from_numpy(part_nodes[idx])  # 4, 7
         shape_adj = torch.from_numpy(adj[idx])
         # shape_part_mask = shape_part_nodes[part_idx].unsqueeze(1)    # 7, 1

@@ -45,6 +45,8 @@ class SDFDecoder(torch.nn.Module):
                  feature_dims=8,
                  internal_dims=32,
                  hidden=3,
+                 obb_decoder_internal_dims=32,
+                 obb_decoder_hidden=3,
                  output_dims=1,
                  multires=1) -> None:
         super().__init__()
@@ -68,13 +70,10 @@ class SDFDecoder(torch.nn.Module):
         
         self.obb_gnn = OBBGNN(num_node_features=3,
                               graph_feature_dim=32,
-                              output_dims=3)
+                              output_dims=3,
+                              decoder_hidden=obb_decoder_hidden,
+                              decoder_internal_dims=obb_decoder_internal_dims)
         
-        # for i, mlp in enumerate(self.nets):
-        #     if i not in [6, 13, 18]:
-        #         for param in mlp.parameters():
-        #             param.requires_grad = False
-
     def learn_xform(self, node_feat, adj, mask, batch):
         return self.obb_gnn.forward(node_feat, adj, mask, batch)
 
@@ -87,16 +86,12 @@ class SDFDecoder(torch.nn.Module):
                             self.num_parts)).to(points.device)
         for i in range(self.num_parts):
             pts = points[:, i, :, :]
-            # pts = self.transform_points(points, xforms[:, i])
             feat = features[:, i*self.feature_dims:(i+1)*self.feature_dims]
             feat = feat.unsqueeze(1).expand(-1, pts.shape[1], -1)
             occs[:, :, i] = self.nets[i](pts, feat).squeeze(-1)
 
         out = occs
         return out
-    
-    # def transform_points(self, points, xform):
-    #     return points + xform
 
 
 # Positional Encoding from https://github.com/yenchenlin/nerf-pytorch/blob/1f064835d2cca26e4df2d7d130daa39a8cee1795/run_nerf_helpers.py
@@ -131,6 +126,7 @@ class Embedder:
         
     def embed(self, inputs):
         return torch.cat([fn(inputs) for fn in self.embed_fns], -1)
+
 
 def get_embedder(multires):
     embed_kwargs = {
