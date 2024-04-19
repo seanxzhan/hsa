@@ -556,8 +556,22 @@ if args.asb:
     # assembly shape from coarse parts
     it = args.it
 
-    model_indices = [9, 11, 20, 39]
-    part_indices = [3, 1, 0, 2]
+    # model_indices = [9, 11, 20, 39]
+    # # part_indices = [3, 1, 0, 2]
+    # part_indices = [0, 1, 2, 3]
+
+    # model_indices = [20, 20, 39, 39]
+    # part_indices = [0, 1, 2, 3]
+
+    model_indices = [20, 20, 20, 20]
+    part_indices = [0, 1, 2, 3]
+
+    # {
+    #     "chair_arm": 0,
+    #     "chair_back": 1,
+    #     "chair_seat": 2,
+    #     "regular_leg_base": 3
+    # }
 
     asb_str = '-'.join([str(x) for x in model_indices])
     results_dir = os.path.join(results_dir, f'0assembly_{asb_str}')
@@ -577,16 +591,20 @@ if args.asb:
     asb_part_nodes = torch.zeros((num_parts, num_union_nodes)).to(torch.long)
     asb_adj = torch.zeros((num_union_nodes, num_union_nodes)).to(torch.long)
     asb_embed = torch.zeros(1, num_parts*each_part_feat).to(torch.float32)
+    gt_xforms = torch.zeros((1, num_parts, 3)).to(torch.float32)
+    gt_exts = torch.zeros((num_parts, 3)).to(torch.float32)
     for i, idx in enumerate(model_indices):
         anno_id = model_idx_to_anno_id[idx]
         part_idx = part_indices[i]
         shape_node_feat = torch.from_numpy(node_features[idx, :, 12:])    # 7, 3
         shape_part_nodes = torch.from_numpy(part_nodes[idx])  # 4, 7
         shape_adj = torch.from_numpy(adj[idx])
+        shape_xform = torch.from_numpy(xforms[idx, part_idx, :3, 3])
         # shape_part_mask = shape_part_nodes[part_idx].unsqueeze(1)    # 7, 1
         # asb_node_features += shape_node_feat * shape_part_mask
         union_node_indices =\
             torch.argwhere(shape_part_nodes[part_idx] == 1).flatten()
+        shape_ext = torch.from_numpy(node_features[idx, :, :3])[union_node_indices]
         asb_node_feat[union_node_indices] = shape_node_feat[union_node_indices]
         
         asb_part_nodes[part_idx] = shape_part_nodes[part_idx]
@@ -597,8 +615,15 @@ if args.asb:
         asb_embed[:, part_idx*each_part_feat:(part_idx+1)*each_part_feat] =\
             embeddings(torch.tensor(idx))[part_idx*each_part_feat:(part_idx+1)*each_part_feat]
 
+        gt_xforms[:, part_idx] = shape_xform
+        gt_exts[part_idx] = shape_ext
+
     # print(node_features[9, :, 12:])
-    # print(asb_node_features)
+    # print(asb_node_feat)
+    # print(asb_part_nodes)
+    # print(asb_adj)
+    # exit(0)
+    # print(gt_xforms)
     # exit(0)
 
     # build a tree that is a subset of the union tree (dense graph)
@@ -615,20 +640,16 @@ if args.asb:
     batch_part_nodes = asb_part_nodes.unsqueeze(0).to(device)
     batch_adj = asb_adj.unsqueeze(0).to(device)
     batch_embed = asb_embed.to(device)
+    gt_xforms = gt_xforms.to(device)
 
     # exit(0)
-
-    # NOTE: VERY IMPORTANT
-    # WHY do we want to infer the hierarchy? 
-    # this hierarchy can be make the shape more cohesive
-    # experiment: user draws bounding boxes, without hierarchy, shapes are disconnected
-    # with hierarchy, network optimizes the extrinsics (xform) of bounding boxes
-    # somewhere in the network, xform needs to be conditioned on the hierarchy!!!
     
     gt_color = [31, 119, 180, 255]
     mesh_pred_path = os.path.join(results_dir, 'mesh_pred.png')
     obbs_path = os.path.join(results_dir, 'obbs.png')
+    prex_obbs_path = os.path.join(results_dir, 'prex_obbs.png') # pre-xform
     lst_paths = [
+        prex_obbs_path,
         obbs_path,
         mesh_pred_path]
 
@@ -636,12 +657,6 @@ if args.asb:
     query_points = torch.from_numpy(query_points).to(device, torch.float32)
     query_points = query_points.unsqueeze(0)
     bs, num_points, _ = query_points.shape
-
-    # if not OVERFIT:
-        # xforms = torch.from_numpy(xforms[model_idx:model_idx+1]).to(device, torch.float32)
-        # batch_node_feat = torch.from_numpy(node_features[model_idx:model_idx+1, :, 12:]).to(device, torch.float32)
-        # batch_adj = torch.from_numpy(adj[model_idx:model_idx+1]).to(device, torch.float32)
-        # batch_part_nodes = torch.from_numpy(part_nodes[model_idx:model_idx+1]).to(device, torch.float32)
 
     with torch.no_grad():
         if args.mask:
@@ -690,6 +705,23 @@ if args.asb:
         occs1 = occs1.masked_fill(occ_mask==1,torch.tensor(float('-inf')))
         pred_values, _ = torch.max(occs1, dim=-1, keepdim=True)
 
+    learned_xforms = learned_xforms[0].cpu().numpy()
+    gt_xforms = gt_xforms[0].cpu().numpy()
+
+    obbs_of_interest = [[]] * num_parts
+    prex_obbs_of_interest = [[]] * num_parts
+
+    for i in range(num_parts):
+        ext = gt_exts[i].numpy()
+        learned_xform = np.eye(4)
+        learned_xform[:3, 3] = -learned_xforms[i]
+        gt_xform = np.eye(4)
+        gt_xform[:3, 3] = -gt_xforms[i]
+        ext_xform = (ext, learned_xform)
+        prex_ext_xform = (ext, gt_xform)
+        obbs_of_interest[i] = [ext_xform]
+        prex_obbs_of_interest[i] = [prex_ext_xform]
+
     if args.mask:
         mag = 1
     else:
@@ -710,16 +742,20 @@ if args.asb:
     visualize.save_mesh_vis(pred_mesh, mesh_pred_path,
                             mag=mag, white_bg=False)
     
-    exit(0)
+    # exit(0)
     masked_indices = masked_indices.cpu().numpy()
     unmasked_indices = list(set(range(num_parts)) - set(masked_indices))
 
-    obbs_of_interest = [obbs_of_interest[x] for x in unmasked_indices]
     import itertools
+    obbs_of_interest = [obbs_of_interest[x] for x in unmasked_indices]
     obbs_of_interest = list(itertools.chain(*obbs_of_interest))
-
     visualize.save_obbs_vis(obbs_of_interest,
-                            obbs_path, mag=0.8, white_bg=False)
+                            obbs_path, mag=0.8, white_bg=True)
+    
+    prex_obbs_of_interest = [prex_obbs_of_interest[x] for x in unmasked_indices]
+    prex_obbs_of_interest = list(itertools.chain(*prex_obbs_of_interest))
+    visualize.save_obbs_vis(prex_obbs_of_interest,
+                            prex_obbs_path, mag=0.8, white_bg=True)
     
     if not args.mask:
         visualize.stitch_imges(

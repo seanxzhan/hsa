@@ -51,7 +51,7 @@ save_every = 100
 multires = 2
 pt_sample_res = 64        # point_sampling
 
-expt_id = 40
+expt_id = 43
 
 OVERFIT = args.of
 overfit_idx = args.of_idx
@@ -91,6 +91,7 @@ if OVERFIT:
     values = train_data['values'][overfit_idx:overfit_idx+1]
     part_nodes = train_data['part_nodes'][overfit_idx:overfit_idx+1]
     xforms = train_data['xforms'][overfit_idx:overfit_idx+1]
+    extents = train_data['extents'][overfit_idx:overfit_idx+1]
     # transformed_points = train_data['transformed_points'][overfit_idx:overfit_idx+1]
     # empty_parts = train_data['empty_parts'][overfit_idx:overfit_idx+1]
     node_features = train_data['node_features'][overfit_idx:overfit_idx+1]
@@ -103,6 +104,7 @@ else:
     values = train_data['values']
     part_nodes = train_data['part_nodes']
     xforms = train_data['xforms']
+    extents = train_data['extents']
     # transformed_points = train_data['transformed_points']
     # empty_parts = train_data['empty_parts']
     node_features = train_data['node_features']
@@ -145,8 +147,6 @@ model = SDFDecoder(num_parts=num_parts,
                    feature_dims=each_part_feat,
                    internal_dims=128,
                    hidden=4,
-                   obb_decoder_internal_dims=16,
-                   obb_decoder_hidden=2,
                    multires=2).to(device)
 
 mse = torch.nn.MSELoss()
@@ -173,7 +173,8 @@ def load_batch(batch_idx, batch_size):
         torch.from_numpy(node_features[start:end, :, :3]).to(device, torch.float32),\
         torch.from_numpy(adj[start:end]).to(device, torch.long),\
         torch.from_numpy(part_nodes[start:end]).to(device, torch.long),\
-        torch.from_numpy(xforms[start:end, :, :3, 3]).to(device, torch.float32)
+        torch.from_numpy(xforms[start:end, :, :3, 3]).to(device, torch.float32),\
+        torch.from_numpy(extents[start:end]).to(device, torch.float32)
 
 optimizer = torch.optim.Adam([{"params": params, "lr": lr},
                               {"params": embeddings.parameters(), "lr": lr}])
@@ -189,7 +190,8 @@ def loss_f(pred_values, gt_values):
 
 def loss_f_xform(pred_xforms, gt_xforms):
     xform_loss = mse(pred_xforms, gt_xforms)
-    return xform_loss
+    repulse_loss = torch.mean(1 / (torch.norm(pred_xforms, p=2, dim=-1) + 1e-6))
+    return xform_loss + 0.001 * repulse_loss
 
 
 torch.manual_seed(319)
@@ -201,7 +203,7 @@ def train_one_itr(it,
                   batch_points, batch_values,
                   batch_embed,
                   batch_node_feat, batch_adj, batch_part_nodes,
-                  batch_xforms):
+                  batch_xforms, batch_exts):
     num_parts_to_mask = np.random.randint(1, num_parts)
     # num_parts_to_mask = 1
     rand_indices = np.random.choice(num_parts, num_parts_to_mask,
@@ -244,21 +246,36 @@ def train_one_itr(it,
     transformed_points = batch_points.unsqueeze(1).expand(-1, num_parts, -1, -1) +\
         learned_xforms.unsqueeze(2)
 
+    half_extents = batch_exts / 2
+    soft_mask_x = torch.sigmoid(10 * (half_extents[..., 0:1] - transformed_points[..., 0].abs()))
+    soft_mask_y = torch.sigmoid(10 * (half_extents[..., 1:2] - transformed_points[..., 1].abs()))
+    soft_mask_z = torch.sigmoid(10 * (half_extents[..., 2:3] - transformed_points[..., 2].abs()))
+    soft_mask = soft_mask_x * soft_mask_y * soft_mask_z
+    # transformed_points = transformed_points
+
     occs1 = model(transformed_points.masked_fill(points_mask==1,torch.tensor(0)),
                   batch_embed.masked_fill(parts_mask==1, torch.tensor(0)))
     occs1 = occs1.masked_fill(occ_mask==1,torch.tensor(float('-inf')))
+    occs1 = occs1.masked_fill(soft_mask.transpose(1, 2)==1,torch.tensor(float('-inf')))
     pred_values1, _ = torch.max(occs1, dim=-1, keepdim=True)
     loss1 = loss_f(pred_values1, modified_values)
 
     occs2 = model(transformed_points,
                   batch_embed)
+    occs2 = occs2.masked_fill(soft_mask.transpose(1, 2)==1,torch.tensor(float('-inf')))
     pred_values2, _ = torch.max(occs2, dim=-1, keepdim=True)
     loss2 = loss_f(pred_values2, batch_values)
 
     loss = loss1 + loss2
 
+    # if it % 10 == 0:
+    #     print(loss)
+
     loss_xform = loss_f_xform(learned_xforms, batch_xforms)
     loss += loss_xform
+
+    # if it % 10 == 0:
+    #     print(loss_xform)
 
     optimizer.zero_grad()
     loss.backward()
@@ -278,7 +295,7 @@ if args.train:
                 batch_normalized_points, batch_values,\
                 batch_embed, \
                 batch_node_feat, batch_adj, batch_part_nodes,\
-                batch_xforms =\
+                batch_xforms, batch_exts =\
                     load_batch(b, batch_size)
             loss = train_one_itr(it,
                                  batch_fg_part_indices,
@@ -286,7 +303,7 @@ if args.train:
                                  batch_values,
                                  batch_embed,
                                  batch_node_feat, batch_adj, batch_part_nodes,
-                                 batch_xforms)
+                                 batch_xforms, batch_exts)
             batch_loss += loss
         avg_batch_loss = batch_loss / batch_size
             

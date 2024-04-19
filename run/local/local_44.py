@@ -51,7 +51,7 @@ save_every = 100
 multires = 2
 pt_sample_res = 64        # point_sampling
 
-expt_id = 40
+expt_id = 44
 
 OVERFIT = args.of
 overfit_idx = args.of_idx
@@ -145,8 +145,6 @@ model = SDFDecoder(num_parts=num_parts,
                    feature_dims=each_part_feat,
                    internal_dims=128,
                    hidden=4,
-                   obb_decoder_internal_dims=16,
-                   obb_decoder_hidden=2,
                    multires=2).to(device)
 
 mse = torch.nn.MSELoss()
@@ -189,7 +187,8 @@ def loss_f(pred_values, gt_values):
 
 def loss_f_xform(pred_xforms, gt_xforms):
     xform_loss = mse(pred_xforms, gt_xforms)
-    return xform_loss
+    repulse_loss = torch.mean(1 / (torch.norm(pred_xforms, p=2, dim=-1) + 1e-6))
+    return xform_loss + 0.001 * repulse_loss
 
 
 torch.manual_seed(319)
@@ -201,7 +200,8 @@ def train_one_itr(it,
                   batch_points, batch_values,
                   batch_embed,
                   batch_node_feat, batch_adj, batch_part_nodes,
-                  batch_xforms):
+                  batch_xforms,
+                  do_print=False):
     num_parts_to_mask = np.random.randint(1, num_parts)
     # num_parts_to_mask = 1
     rand_indices = np.random.choice(num_parts, num_parts_to_mask,
@@ -257,8 +257,15 @@ def train_one_itr(it,
 
     loss = loss1 + loss2
 
+    # if it % 10 == 0 and do_print:
+    #     print(loss)
+
     loss_xform = loss_f_xform(learned_xforms, batch_xforms)
     loss += loss_xform
+
+    # if it % 10 == 0 and do_print:
+    #     print(learned_xforms[0])
+    #     print(loss_xform)
 
     optimizer.zero_grad()
     loss.backward()
@@ -286,7 +293,8 @@ if args.train:
                                  batch_values,
                                  batch_embed,
                                  batch_node_feat, batch_adj, batch_part_nodes,
-                                 batch_xforms)
+                                 batch_xforms,
+                                 b==n_batches-1)
             batch_loss += loss
         avg_batch_loss = batch_loss / batch_size
             
@@ -562,11 +570,11 @@ if args.asb:
     # # part_indices = [3, 1, 0, 2]
     # part_indices = [0, 1, 2, 3]
 
-    # model_indices = [20, 20, 39, 39]
-    # part_indices = [0, 1, 2, 3]
-
-    model_indices = [20, 20, 20, 20]
+    model_indices = [20, 20, 39, 39]
     part_indices = [0, 1, 2, 3]
+
+    # model_indices = [20, 20, 20, 20]
+    # part_indices = [0, 1, 2, 3]
 
     # {
     #     "chair_arm": 0,
@@ -698,7 +706,7 @@ if args.asb:
                                       learned_xforms)
 
         transformed_points = query_points.unsqueeze(1).expand(-1, num_parts, -1, -1) +\
-            learned_xforms.unsqueeze(2)
+            gt_xforms.unsqueeze(2)
 
         occs1 = model(transformed_points.masked_fill(points_mask==1,torch.tensor(0)),
                       batch_embed.masked_fill(parts_mask==1, torch.tensor(0)))
