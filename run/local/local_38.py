@@ -44,14 +44,14 @@ if args.of:
     assert args.of_idx != None
 
 device = 'cuda'
-lr = 1e-3
+lr = 5e-3
 laplacian_weight = 0.1
 iterations = 3001
 save_every = 100
 multires = 2
 pt_sample_res = 64        # point_sampling
 
-expt_id = 35
+expt_id = 38
 
 OVERFIT = args.of
 overfit_idx = args.of_idx
@@ -266,9 +266,6 @@ def train_one_itr(it,
     loss_xform = loss_f_xform(learned_xforms, batch_xforms)
     loss += loss_xform
 
-    # if it % 10 == 0:
-    #     print(loss_xform)
-
     optimizer.zero_grad()
     loss.backward()
     optimizer.step()
@@ -386,7 +383,7 @@ if args.test:
     query_points = reconstruct.make_query_points(pt_sample_res)
     query_points = torch.from_numpy(query_points).to(device, torch.float32)
     query_points = query_points.unsqueeze(0)
-
+    
     if not OVERFIT:
         xforms = torch.from_numpy(xforms[model_idx:model_idx+1]).to(device, torch.float32)
         batch_node_feat = torch.from_numpy(node_features[model_idx:model_idx+1, :, 12:]).to(device, torch.float32)
