@@ -58,5 +58,21 @@ if __name__ == "__main__":
     # # part assembly examples
     # peek_11_id_to_idx('3344')
     # peek_11_id_to_idx('39901')
-    peek_11_id_to_idx('39440')
+    # peek_11_id_to_idx('39440')
     # peek_11_id_to_idx('40825')
+    # peek_11_id_to_idx('39901')
+
+    # peek_11_id_to_idx('41910')
+    # peek_11_id_to_idx('3344')
+    peek_11_id_to_idx('40825')
+    # peek_11_id_to_idx('38076')
+
+    # peek_11_id_to_idx('43888')
+    # peek_11_id_to_idx('42312')
+    # peek_11_id_to_idx('3125')
+    # peek_11_id_to_idx('3144')
+    # peek_11_id_to_idx('44979')
+    # peek_11_id_to_idx('37986')
+    # peek_11_id_to_idx('2239')
+    # peek_11_id_to_idx('41378')
+    # peek_11_id_to_idx('42992')
