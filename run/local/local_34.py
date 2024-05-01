@@ -559,6 +559,19 @@ if args.asb:
     model_indices = [39, 86, 43, 41]
     part_indices = [2, 3, 1, 0]
 
+    # model_indices = [39] * 4
+    # part_indices = [2, 3, 1, 0]
+
+    # model_indices = [86] * 4
+    # part_indices = [2, 3, 1, 0]
+
+    # model_indices = [43] * 4
+    # part_indices = [2, 3, 1, 0]
+
+    # model_indices = [41] * 4
+    # part_indices = [2, 3, 1, 0]
+
+
     # {
     #     "chair_arm": 0,
     #     "chair_back": 1,
@@ -607,10 +620,10 @@ if args.asb:
 
     # # explosion
     # learned_xforms = gt_xforms.clone()
-    # learned_xforms[0, 0] -= torch.tensor([0, 0.3, 0])
+    # learned_xforms[0, 0] -= torch.tensor([0, 0.4, 0])
     # learned_xforms[0, 1] -= torch.tensor([0, 0.0, -0.1])
-    # learned_xforms[0, 2] -= torch.tensor([0, 0.2, 0])
-    # learned_xforms[0, 3] -= torch.tensor([0, 0.0, 0])
+    # learned_xforms[0, 2] -= torch.tensor([0, 0.3, 0.1])
+    # learned_xforms[0, 3] -= torch.tensor([0, 0.0, 0.15])
 
     # # assembly model_indices = [37, 86, 19, 41]
     # learned_xforms = gt_xforms.clone()
@@ -653,13 +666,13 @@ if args.asb:
         obbs_path,
         pred_mesh_path]
 
-    # normal
-    query_points = reconstruct.make_query_points(pt_sample_res)
+    # # normal
+    # query_points = reconstruct.make_query_points(pt_sample_res)
 
-    # assembly
-    # limits=[(-0.525, 0.525)]*3
-    # query_points = reconstruct.make_query_points(
-    #     pt_sample_res, limits=limits)
+    # explosion
+    limits=[(-0.525, 0.525)]*3
+    query_points = reconstruct.make_query_points(
+        pt_sample_res, limits=limits)
 
     query_points = torch.from_numpy(query_points).to(device, torch.float32)
     query_points = query_points.unsqueeze(0)
