@@ -157,36 +157,36 @@ def save_obbs_vis(obbs, out_path, mesh_y_rot=-45, mag=1,
     """obbs: a list of tuples x, where x = (extents, transform)
     """
     if name_to_obbs is None:    
-        obb_meshes = []
-        for x in obbs:
-            obb_mesh = trimesh.creation.box(extents=x[0], transform=x[1])
-            # obb_mesh.visual.face_colors = [100, 100, 100, 255]
-            obb_meshes.append(obb_mesh)
-
-        material = pyrender.MetallicRoughnessMaterial(
-            baseColorFactor=[0.12, 0.46, 0.70, 0.4],  alphaMode='BLEND')
-        obb_meshes = [pyrender.Mesh.from_trimesh(x, smooth=False, material=material)
-                    for x in obb_meshes]
-
         # obb_meshes = []
-        # for i, obb in enumerate(obbs):
-        #     # if i == 2:
-        #     #     base_color = [148.0/255, 201.0/255, 107.0/255, 0.9]
-        #     # if i == 3:
-        #     #     base_color = [221.0/255, 137.0/255, 133.0/255, 0.9]
-        #     # if i == 1:
-        #     #     base_color = [173.0/255, 157.0/255, 190.0/255, 0.9]
-        #     if i == 0:
-        #         base_color = [150.0/255, 118.0/255, 96.0/255, 0.9]
-        #     else:
-        #         # base_color = [0.0, 0.0, 0.0, 0.0]
-        #         continue
-        #     obb_meshes.append(
-        #         pyrender.Mesh.from_trimesh(
-        #             trimesh.creation.box(extents=obb[0], transform=obb[1]),
-        #             smooth=False,
-        #             material=pyrender.MetallicRoughnessMaterial(
-        #                 baseColorFactor=base_color, alphaMode='BLEND')))
+        # for x in obbs:
+        #     obb_mesh = trimesh.creation.box(extents=x[0], transform=x[1])
+        #     # obb_mesh.visual.face_colors = [100, 100, 100, 255]
+        #     obb_meshes.append(obb_mesh)
+
+        # material = pyrender.MetallicRoughnessMaterial(
+        #     baseColorFactor=[0.12, 0.46, 0.70, 0.4],  alphaMode='BLEND')
+        # obb_meshes = [pyrender.Mesh.from_trimesh(x, smooth=False, material=material)
+        #             for x in obb_meshes]
+
+        obb_meshes = []
+        for i, obb in enumerate(obbs):
+            if i == 2:
+                base_color = [148.0/255, 201.0/255, 107.0/255, 0.9]
+            if i == 3:
+                base_color = [221.0/255, 137.0/255, 133.0/255, 0.9]
+            if i == 1:
+                base_color = [173.0/255, 157.0/255, 190.0/255, 0.9]
+            if i == 0:
+                base_color = [150.0/255, 118.0/255, 96.0/255, 0.9]
+            # else:
+            #     # base_color = [0.0, 0.0, 0.0, 0.0]
+            #     continue
+            obb_meshes.append(
+                pyrender.Mesh.from_trimesh(
+                    trimesh.creation.box(extents=obb[0], transform=obb[1]),
+                    smooth=False,
+                    material=pyrender.MetallicRoughnessMaterial(
+                        baseColorFactor=base_color, alphaMode='BLEND')))
     else:
         obb_meshes = []
         for name, obb in name_to_obbs.items():
