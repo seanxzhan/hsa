@@ -11,7 +11,7 @@ from tqdm import tqdm
 # from occ_networks.basic_decoder_nasa import SDFDecoder
 from occ_networks.xform_decoder_nasa_just_obbgnn import SDFDecoder
 from utils import misc, visualize, transform, ops, reconstruct, tree
-from data_prep import preprocess_data_11
+from data_prep import preprocess_data_12
 from typing import Dict, List
 from anytree.exporter import UniqueDotExporter
 
@@ -75,14 +75,14 @@ cat_name = 'Chair'
 cat_id = name_to_cat[cat_name]
 # cat_id = '03636649'
 
-train_new_ids_to_objs_path = f'data/{cat_name}_train_new_ids_to_objs_11_{ds_start}_{ds_end}.json'
+train_new_ids_to_objs_path = f'data/{cat_name}_train_new_ids_to_objs_12_{ds_start}_{ds_end}.json'
 with open(train_new_ids_to_objs_path, 'r') as f:
     train_new_ids_to_objs: Dict = json.load(f)
 model_idx_to_anno_id = {}
 for model_idx, anno_id in enumerate(train_new_ids_to_objs.keys()):
     model_idx_to_anno_id[model_idx] = anno_id
 
-train_data_path = f'data/{cat_name}_train_{pt_sample_res}_11_{ds_start}_{ds_end}.hdf5'
+train_data_path = f'data/{cat_name}_train_{pt_sample_res}_12_{ds_start}_{ds_end}.hdf5'
 train_data = h5py.File(train_data_path, 'r')
 if OVERFIT:
     part_num_indices = train_data['part_num_indices'][overfit_idx:overfit_idx+1]
@@ -96,6 +96,7 @@ if OVERFIT:
     node_features = train_data['node_features'][overfit_idx:overfit_idx+1]
     adj = train_data['adj'][overfit_idx:overfit_idx+1]
     part_nodes = train_data['part_nodes'][overfit_idx:overfit_idx+1]
+    relations = train_data['relations'][overfit_idx:overfit_idx+1]
 else:
     part_num_indices = train_data['part_num_indices']
     all_indices = train_data['all_indices']
@@ -108,14 +109,40 @@ else:
     node_features = train_data['node_features']
     adj = train_data['adj']
     part_nodes = train_data['part_nodes']
+    relations = train_data['relations']
 
+# {
+#     "chair_arm": 0,
+#     "chair_back": 1,
+#     "chair_seat": 2,
+#     "regular_leg_base": 3
+# }
+
+connectivity = [[0, 1], [0, 2], [1, 2], [2, 3]]
+connectivity = torch.tensor(connectivity, dtype=torch.long).to(device)
+
+# # Create an adjacency matrix initialized to zero
+# connectivity_matrix = torch.zeros((4, 4), dtype=torch.long)
+# # Set the connections in the upper triangle
+# for i, j in connectivity:
+#     if i < j:  # Ensure i < j to maintain upper triangular form
+#         connectivity_matrix[i, j] = 1
+#     else:
+#         connectivity_matrix[j, i] = 1  # If i >= j, swap to maintain upper triangular
+# print(connectivity_matrix)
+# exit(0)
+
+# print(relations[0, :, :3, 3])
+# pairwise_xforms = xforms[0, :, :3, 3][connectivity.cpu().numpy()]
+# print(pairwise_xforms[:, 1] - pairwise_xforms[:, 0])
+# exit(0)
 
 num_union_nodes = adj.shape[1]
 num_points = normalized_points.shape[1]
 num_shapes, num_parts = part_num_indices.shape
 all_fg_part_indices = []
 for i in range(num_shapes):
-    indices = preprocess_data_11.convert_flat_list_to_fg_part_indices(
+    indices = preprocess_data_12.convert_flat_list_to_fg_part_indices(
         part_num_indices[i], all_indices[i])
     all_fg_part_indices.append(np.array(indices, dtype=object))
 
@@ -171,7 +198,8 @@ def load_batch(batch_idx, batch_size):
         torch.from_numpy(node_features[start:end, :, :3]).to(device, torch.float32),\
         torch.from_numpy(adj[start:end]).to(device, torch.long),\
         torch.from_numpy(part_nodes[start:end]).to(device, torch.long),\
-        torch.from_numpy(xforms[start:end, :, :3, 3]).to(device, torch.float32)
+        torch.from_numpy(xforms[start:end, :, :3, 3]).to(device, torch.float32),\
+        torch.from_numpy(relations[start:end, :, :3, 3]).to(device, torch.float32)
 
 optimizer = torch.optim.Adam([{"params": params, "lr": lr},
                               {"params": embeddings.parameters(), "lr": lr}])
@@ -199,7 +227,7 @@ def train_one_itr(it,
                   batch_points, batch_values,
                   batch_embed,
                   batch_node_feat, batch_adj, batch_part_nodes,
-                  batch_xforms):
+                  batch_xforms, batch_relations):
     # num_parts_to_mask = np.random.randint(1, num_parts)
     # # num_parts_to_mask = 1
     # rand_indices = np.random.choice(num_parts, num_parts_to_mask,
@@ -234,10 +262,21 @@ def train_one_itr(it,
     batch_vec = torch.arange(start=0, end=batch_size).to(device)
     batch_vec = torch.repeat_interleave(batch_vec, num_union_nodes)
     batch_mask = torch.sum(batch_part_nodes, dim=1)
-    learned_xforms = model.learn_xform(batch_node_feat, batch_adj, batch_mask, batch_vec)
+    learned_xforms = model.learn_xform(batch_node_feat,
+                                       batch_adj,
+                                       batch_mask,
+                                       batch_vec)
+    
     learned_xforms = torch.einsum('ijk, ikm -> ijm',
                                   batch_part_nodes.to(torch.float32),
                                   learned_xforms)
+    
+    pairwise_xforms = learned_xforms[:, connectivity]
+    learned_relations = pairwise_xforms[:, :, 1] - pairwise_xforms[:, :, 0]
+
+    # print("learned ", learned_relations[0])
+    # print("gt ", batch_relations[0])
+    # exit(0)
 
     # transformed_points = batch_points.unsqueeze(1).expand(-1, num_parts, -1, -1) +\
     #     learned_xforms.unsqueeze(2)
@@ -256,7 +295,9 @@ def train_one_itr(it,
     # loss = loss1 + loss2
 
     loss_xform = loss_f_xform(learned_xforms, batch_xforms)
-    loss = loss_xform
+    loss_relations = loss_f_xform(learned_relations, batch_relations)
+    
+    loss = loss_xform + loss_relations
 
     optimizer.zero_grad()
     loss.backward()
@@ -276,7 +317,7 @@ if args.train:
                 batch_normalized_points, batch_values,\
                 batch_embed, \
                 batch_node_feat, batch_adj, batch_part_nodes,\
-                batch_xforms =\
+                batch_xforms, batch_relations =\
                     load_batch(b, batch_size)
             loss = train_one_itr(it,
                                  batch_fg_part_indices,
@@ -284,7 +325,7 @@ if args.train:
                                  batch_values,
                                  batch_embed,
                                  batch_node_feat, batch_adj, batch_part_nodes,
-                                 batch_xforms)
+                                 batch_xforms, batch_relations)
             batch_loss += loss
         avg_batch_loss = batch_loss / batch_size
             
@@ -346,9 +387,9 @@ if args.test:
 
     unique_part_names, name_to_ori_ids_and_objs,\
         orig_obbs, entire_mesh, name_to_obbs, _, _, _ =\
-        preprocess_data_11.merge_partnet_after_merging(anno_id)
+        preprocess_data_12.merge_partnet_after_merging(anno_id)
 
-    with open(f'data/{cat_name}_part_name_to_new_id_11_{ds_start}_{ds_end}.json', 'r') as f:
+    with open(f'data/{cat_name}_part_name_to_new_id_12_{ds_start}_{ds_end}.json', 'r') as f:
         unique_name_to_new_id = json.load(f)
 
     part_obbs = []
@@ -626,7 +667,7 @@ if args.asb:
 
     # build a tree that is a subset of the union tree (dense graph)
     # using the bounding boxes
-    node_names = np.load(f'data/{cat_name}_union_node_names_11_{ds_start}_{ds_end}.npy')
+    node_names = np.load(f'data/{cat_name}_union_node_names_12_{ds_start}_{ds_end}.npy')
     recon_root = tree.recon_tree(asb_adj.numpy(), node_names)
     UniqueDotExporter(recon_root,
                       indent=0,

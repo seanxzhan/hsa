@@ -279,7 +279,25 @@ def build_dense_graph(union_root: AnyNode, name_to_obbs: Dict, obbs,
     adj = adj[None, :]
     part_nodes = part_nodes[None, :]
 
-    return node_features, adj, part_nodes, xforms, extents
+    # relation information
+
+    # connectivity = np.zeros((num_unique_part_classes, num_unique_part_classes))
+    # connectivity[0, 1] = 1
+    # connectivity[0, 2] = 1
+    # connectivity[1, 2] = 1
+    # connectivity[2, 3] = 1
+    # connected_xforms = connectivity @ xforms[:, :3, 3]
+
+    connectivity = [(0, 1), (0, 2), (1, 2), (2, 3)]
+    relations = np.zeros((len(connectivity), 4, 4), dtype=np.float32)
+    
+    for i, conn in enumerate(connectivity):
+        src = xforms[conn[0]]
+        tgt = xforms[conn[1]]
+        tgt_in_src = np.linalg.inv(src) @ tgt
+        relations[i] = tgt_in_src
+
+    return node_features, adj, part_nodes, xforms, extents, relations
 
 
 def merge_partnet_after_merging(anno_id, info=False):
@@ -743,10 +761,11 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
     all_part_nodes = []
     all_xforms = []
     all_extents = []
+    all_relations = []
     for i in tqdm(range(num_shapes)):
         # print(f"------------ {i} ------------")
         node_features, adj, part_nodes,\
-            xforms, extents =\
+            xforms, extents, relations =\
             build_dense_graph(union_root_part,
                               all_name_to_obbs[i],
                               all_obbs[i],
@@ -758,6 +777,7 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
         all_part_nodes.append(part_nodes)
         all_xforms.append(xforms)
         all_extents.append(extents)
+        all_relations.append(relations)
     
     # exit(0)
 
@@ -796,6 +816,9 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
     hdf5_file.create_dataset(
         'empty_parts', [num_shapes, (pt_sample_res/2)**3, num_parts],
         dtype=np.uint8)
+    hdf5_file.create_dataset(
+        'relations', [num_shapes, 4, 4, 4],
+        dtype=np.float32)
 
     # all_pts_data = [None] * num_shapes
     # all_pts_whole_data = [None] * num_shapes
@@ -897,6 +920,7 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
         hdf5_file['part_nodes'][i] = all_part_nodes[i]
         hdf5_file['xforms'][i] = all_xforms[i]
         hdf5_file['extents'][i] = all_extents[i]
+        hdf5_file['relations'][i] = all_relations[i]
         all_pts_data.append(out['pts_data'])
         all_pts_whole_data.append(out['pts_whole_data'])
 
@@ -1117,7 +1141,7 @@ if __name__ == "__main__":
 
     unique_name_to_new_id, all_entire_meshes, all_ori_ids_to_new_ids,\
             all_obbs, all_name_to_obbs =\
-                export_data(ids_w_four_parts, save_data=False, start=0, end=100)
+                export_data(ids_w_four_parts, save_data=True, start=0, end=10)
     # np.savez_compressed("data_prep/tmp/data.npz",
     #                     all_entire_meshes=all_entire_meshes,
     #                     all_ori_ids_to_new_ids=all_ori_ids_to_new_ids,
