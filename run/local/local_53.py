@@ -14,7 +14,6 @@ from utils import misc, visualize, transform, ops, reconstruct, tree
 from data_prep import preprocess_data_12
 from typing import Dict, List
 from anytree.exporter import UniqueDotExporter
-from anytree import RenderTree
 
 
 parser = argparse.ArgumentParser()
@@ -52,7 +51,7 @@ save_every = 100
 multires = 2
 pt_sample_res = 64        # point_sampling
 
-expt_id = 52
+expt_id = 53
 
 OVERFIT = args.of
 overfit_idx = args.of_idx
@@ -204,6 +203,7 @@ def load_batch(batch_idx, batch_size):
         torch.from_numpy(adj[start:end]).to(device, torch.long),\
         torch.from_numpy(part_nodes[start:end]).to(device, torch.long),\
         torch.from_numpy(xforms[start:end, :, :3, 3]).to(device, torch.float32),\
+        torch.from_numpy(extents[start:end]).to(device, torch.float32),\
         torch.from_numpy(relations[start:end, :, :3, 3]).to(device, torch.float32)
 
 optimizer = torch.optim.Adam([{"params": params, "lr": lr},
@@ -233,7 +233,7 @@ def train_one_itr(it,
                   batch_points, batch_values,
                   batch_embed,
                   batch_node_feat, batch_adj, batch_part_nodes,
-                  batch_xforms, batch_relations):
+                  batch_xforms, batch_exts, batch_relations):
     num_parts_to_mask = np.random.randint(1, num_parts)
     # num_parts_to_mask = 1
     rand_indices = np.random.choice(num_parts, num_parts_to_mask,
@@ -280,21 +280,32 @@ def train_one_itr(it,
     pairwise_xforms = learned_xforms[:, connectivity]
     learned_relations = pairwise_xforms[:, :, 1] - pairwise_xforms[:, :, 0]
 
-    # print("learned ", learned_relations.shape)
-    # print("gt ", batch_relations.shape)
-    # exit(0)
-
     transformed_points = batch_points.unsqueeze(1).expand(-1, num_parts, -1, -1) +\
         learned_xforms.unsqueeze(2)
 
-    occs1 = model(transformed_points.masked_fill(points_mask==1,torch.tensor(0)),
+    half_extents = batch_exts / 2
+    soft_mask_x = torch.sigmoid(100 * (half_extents[..., 0:1] - transformed_points[..., 0].abs()))
+    soft_mask_y = torch.sigmoid(100 * (half_extents[..., 1:2] - transformed_points[..., 1].abs()))
+    soft_mask_z = torch.sigmoid(100 * (half_extents[..., 2:3] - transformed_points[..., 2].abs()))
+    # mask_x = (transformed_points[..., 0].abs() > half_extents[..., 0:1]).to(torch.float32)
+    # mask_y = (transformed_points[..., 1].abs() > half_extents[..., 1:2])
+    # mask_z = (transformed_points[..., 2].abs() > half_extents[..., 2:3]).to()
+    mask = soft_mask_x * soft_mask_y * soft_mask_z
+
+    # print(mask.shape)
+    # exit(0)
+
+    occs1 = model(transformed_points.masked_fill(points_mask==1,torch.tensor(0)).\
+                  masked_fill(mask.unsqueeze(-1)==0, torch.tensor(0)),
                   batch_embed.masked_fill(parts_mask==1, torch.tensor(0)))
-    occs1 = occs1.masked_fill(occ_mask==1,torch.tensor(float('-inf')))
+    occs1 = occs1.masked_fill(occ_mask==1,torch.tensor(float('-inf'))).\
+                  masked_fill(mask.transpose(1, 2)==0, torch.tensor(0))
     pred_values1, _ = torch.max(occs1, dim=-1, keepdim=True)
     loss1 = loss_f(pred_values1, modified_values)
 
-    occs2 = model(transformed_points,
+    occs2 = model(transformed_points.masked_fill(mask.unsqueeze(-1)==0, torch.tensor(0)),
                   batch_embed)
+    occs2 = occs2.masked_fill(mask.transpose(1, 2)==0, torch.tensor(0))
     pred_values2, _ = torch.max(occs2, dim=-1, keepdim=True)
     loss2 = loss_f(pred_values2, batch_values)
 
@@ -305,7 +316,7 @@ def train_one_itr(it,
         embed_fn(learned_relations.view(-1, 3)),
         embed_fn(batch_relations.view(-1, 3)))
     
-    loss += loss_xform + 10 * loss_relations
+    loss += loss_xform + loss_relations
 
     optimizer.zero_grad()
     loss.backward()
@@ -325,7 +336,7 @@ if args.train:
                 batch_normalized_points, batch_values,\
                 batch_embed, \
                 batch_node_feat, batch_adj, batch_part_nodes,\
-                batch_xforms, batch_relations =\
+                batch_xforms, batch_exts, batch_relations =\
                     load_batch(b, batch_size)
             loss = train_one_itr(it,
                                  batch_fg_part_indices,
@@ -333,7 +344,7 @@ if args.train:
                                  batch_values,
                                  batch_embed,
                                  batch_node_feat, batch_adj, batch_part_nodes,
-                                 batch_xforms, batch_relations)
+                                 batch_xforms, batch_exts, batch_relations)
             batch_loss += loss
         avg_batch_loss = batch_loss / batch_size
             
@@ -692,19 +703,10 @@ if args.asb:
         gt_xforms[:, part_idx] = shape_xform
         gt_exts[part_idx] = shape_ext
 
-    # print(asb_adj)
-    # print(asb_part_nodes)
-
-    # first = asb_part_nodes[0].clone()
-    # asb_part_nodes[0] = asb_part_nodes[1]
-    # asb_part_nodes[1] = first
-    # print(asb_part_nodes)
-
     # build a tree that is a subset of the union tree (dense graph)
     # using the bounding boxes
     node_names = np.load(f'data/{cat_name}_union_node_names_12_{ds_start}_{ds_end}.npy')
     recon_root = tree.recon_tree(asb_adj.numpy(), node_names)
-    # print(RenderTree(recon_root))
     UniqueDotExporter(recon_root,
                       indent=0,
                       nodenamefunc=lambda node: node.name,
