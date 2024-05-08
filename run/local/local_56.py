@@ -51,7 +51,7 @@ save_every = 100
 multires = 2
 pt_sample_res = 64        # point_sampling
 
-expt_id = 53
+expt_id = 56
 
 OVERFIT = args.of
 overfit_idx = args.of_idx
@@ -203,7 +203,6 @@ def load_batch(batch_idx, batch_size):
         torch.from_numpy(adj[start:end]).to(device, torch.long),\
         torch.from_numpy(part_nodes[start:end]).to(device, torch.long),\
         torch.from_numpy(xforms[start:end, :, :3, 3]).to(device, torch.float32),\
-        torch.from_numpy(extents[start:end]).to(device, torch.float32),\
         torch.from_numpy(relations[start:end, :, :3, 3]).to(device, torch.float32)
 
 optimizer = torch.optim.Adam([{"params": params, "lr": lr},
@@ -228,41 +227,41 @@ np.random.seed(319)
 
 embed_fn, _ = get_embedder(2)
 
-def train_one_itr(it,
+def train_one_itr(it, b,
                   all_fg_part_indices, 
                   batch_points, batch_values,
                   batch_embed,
                   batch_node_feat, batch_adj, batch_part_nodes,
-                  batch_xforms, batch_exts, batch_relations):
-    # num_parts_to_mask = np.random.randint(1, num_parts)
-    # # num_parts_to_mask = 1
-    # rand_indices = np.random.choice(num_parts, num_parts_to_mask,
-    #                                 replace=False)
+                  batch_xforms, batch_relations):
+    num_parts_to_mask = np.random.randint(1, num_parts)
+    # num_parts_to_mask = 1
+    rand_indices = np.random.choice(num_parts, num_parts_to_mask,
+                                    replace=False)
 
-    # masked_indices = torch.from_numpy(rand_indices).to(device, torch.long)
-    # # make gt value mask
-    # val_mask = torch.ones_like(batch_values).to(device, torch.float32)
-    # for i in range(batch_size):
-    #     fg_part_indices = all_fg_part_indices[i]
-    #     fg_part_indices_masked = fg_part_indices[masked_indices.cpu().numpy()]
-    #     if len(fg_part_indices_masked) != 0:
-    #         fg_part_indices_masked = np.concatenate(fg_part_indices_masked, axis=0)
-    #     else:
-    #         fg_part_indices_masked = np.array([])
-    #     val_mask[i][fg_part_indices_masked] = 0
-    # modified_values = batch_values * val_mask
+    masked_indices = torch.from_numpy(rand_indices).to(device, torch.long)
+    # make gt value mask
+    val_mask = torch.ones_like(batch_values).to(device, torch.float32)
+    for i in range(batch_size):
+        fg_part_indices = all_fg_part_indices[i]
+        fg_part_indices_masked = fg_part_indices[masked_indices.cpu().numpy()]
+        if len(fg_part_indices_masked) != 0:
+            fg_part_indices_masked = np.concatenate(fg_part_indices_masked, axis=0)
+        else:
+            fg_part_indices_masked = np.array([])
+        val_mask[i][fg_part_indices_masked] = 0
+    modified_values = batch_values * val_mask
 
-    # parts_mask = torch.zeros((batch_embed.shape[0], num_parts)).to(device, torch.float32)
-    # if len(masked_indices) != 0:
-    #     parts_mask[:, rand_indices] = 1
-    # parts_mask = torch.repeat_interleave(parts_mask,
-    #                                      each_part_feat, dim=-1)
+    parts_mask = torch.zeros((batch_embed.shape[0], num_parts)).to(device, torch.float32)
+    if len(masked_indices) != 0:
+        parts_mask[:, rand_indices] = 1
+    parts_mask = torch.repeat_interleave(parts_mask,
+                                         each_part_feat, dim=-1)
 
-    # points_mask = torch.zeros((batch_size, num_parts, 1, 1)).to(device, torch.float32)
-    # points_mask[:, rand_indices] = 1
+    points_mask = torch.zeros((batch_size, num_parts, 1, 1)).to(device, torch.float32)
+    points_mask[:, rand_indices] = 1
 
-    # occ_mask = torch.zeros((batch_size, 1, num_parts)).to(device, torch.float32)
-    # occ_mask[:, :, rand_indices] = 1
+    occ_mask = torch.zeros((batch_size, 1, num_parts)).to(device, torch.float32)
+    occ_mask[:, :, rand_indices] = 1
 
     # learning xforms
     batch_vec = torch.arange(start=0, end=batch_size).to(device)
@@ -283,66 +282,18 @@ def train_one_itr(it,
     transformed_points = batch_points.unsqueeze(1).expand(-1, num_parts, -1, -1) +\
         learned_xforms.unsqueeze(2)
 
-    # half_extents = batch_exts / 2
-    # soft_mask_x = torch.sigmoid(10 * (half_extents[..., 0:1] - transformed_points[..., 0].abs()))
-    # soft_mask_y = torch.sigmoid(10 * (half_extents[..., 1:2] - transformed_points[..., 1].abs()))
-    # soft_mask_z = torch.sigmoid(10 * (half_extents[..., 2:3] - transformed_points[..., 2].abs()))
-    # mask = soft_mask_x * soft_mask_y * soft_mask_z    
-
-    # import matplotlib.pyplot as plt
-    # plt.subplot(4, 1, 1)
-    # plt.hist(mask[0, 0].detach().cpu().numpy(), bins=100, color='blue')
-    # plt.title("Histogram of Sampled SDF Values")
-    # plt.ylabel("Frequency")
-    # plt.xlim(0, 1)
-
-    # plt.subplot(4, 1, 2)
-    # plt.hist(mask[0, 1].detach().cpu().numpy(), bins=100, color='blue')
-    # plt.ylabel("Frequency")
-    # plt.xlim(0, 1)
-
-    # plt.subplot(4, 1, 3)
-    # plt.hist(mask[0, 2].detach().cpu().numpy(), bins=100, color='blue')
-    # plt.ylabel("Frequency")
-    # plt.xlim(0, 1)
-
-    # plt.subplot(4, 1, 4)
-    # plt.hist(mask[0, 3].detach().cpu().numpy(), bins=100, color='blue')
-    # plt.ylabel("Frequency")
-    # plt.xlim(0, 1)
-
-    # misc.save_fig(plt, '', 'tmp/mask_hist.png')
-    # plt.close()
-    # exit(0)
-
-
-    # occs1 = model(transformed_points.masked_fill(points_mask==1,torch.tensor(0)),
-    #               batch_embed.masked_fill(parts_mask==1, torch.tensor(0)))
-    # occs1 = occs1.masked_fill(occ_mask==1,torch.tensor(float('-inf'))).\
-    #               masked_fill(mask.transpose(1, 2) < 0.01, torch.tensor(float('-inf')))
-    # pred_values1, _ = torch.max(occs1, dim=-1, keepdim=True)
-    # loss1 = loss_f(pred_values1, modified_values)
+    occs1 = model(transformed_points.masked_fill(points_mask==1,torch.tensor(0)),
+                  batch_embed.masked_fill(parts_mask==1, torch.tensor(0)))
+    occs1 = occs1.masked_fill(occ_mask==1,torch.tensor(float('-inf')))
+    pred_values1, _ = torch.max(occs1, dim=-1, keepdim=True)
+    loss1 = loss_f(pred_values1, modified_values)
 
     occs2 = model(transformed_points,
                   batch_embed)
     pred_values2, _ = torch.max(occs2, dim=-1, keepdim=True)
     loss2 = loss_f(pred_values2, batch_values)
 
-    # penalize predicted occ values for points outside of bounding boxes
-    half_extents = batch_exts / 2
-    soft_mask_x = torch.sigmoid(100 * (half_extents[..., 0:1] - transformed_points[..., 0].abs()))
-    soft_mask_y = torch.sigmoid(100 * (half_extents[..., 1:2] - transformed_points[..., 1].abs()))
-    soft_mask_z = torch.sigmoid(100 * (half_extents[..., 2:3] - transformed_points[..., 2].abs()))
-    mask = soft_mask_x * soft_mask_y * soft_mask_z
-    out_of_box_penalty = torch.mean(
-        torch.sum((mask.transpose(1, 2) < 0.1) * (occs2 > 0).float(), dim=1))
-    # print(out_of_box_penalty)
-    # exit(0)
-
-    occs2 = occs2.masked_fill(mask.transpose(1, 2) < 0.1, torch.tensor(0))
-
-    # loss = loss1 + loss2
-    loss = loss2 + 0.0001 * out_of_box_penalty
+    loss = loss1 + loss2
 
     loss_xform = loss_f_xform(
         embed_fn(learned_xforms.view(-1, 3)),
@@ -351,8 +302,12 @@ def train_one_itr(it,
         embed_fn(learned_relations.view(-1, 3)),
         embed_fn(batch_relations.view(-1, 3)))
     
-    loss += loss_xform + loss_relations
-    # loss += loss_xform
+    loss += 10 * loss_xform + 10 * loss_relations
+
+    if b == n_batches - 1:
+        print("geom loss: ", (loss1 + loss2).detach().cpu().numpy())
+        print("xform loss: ", loss_xform.detach().cpu().numpy())
+        print("relations loss: ", loss_relations.detach().cpu().numpy())
 
     optimizer.zero_grad()
     loss.backward()
@@ -372,15 +327,15 @@ if args.train:
                 batch_normalized_points, batch_values,\
                 batch_embed, \
                 batch_node_feat, batch_adj, batch_part_nodes,\
-                batch_xforms, batch_exts, batch_relations =\
+                batch_xforms, batch_relations =\
                     load_batch(b, batch_size)
-            loss = train_one_itr(it,
+            loss = train_one_itr(it, b,
                                  batch_fg_part_indices,
                                  batch_normalized_points,
                                  batch_values,
                                  batch_embed,
                                  batch_node_feat, batch_adj, batch_part_nodes,
-                                 batch_xforms, batch_exts, batch_relations)
+                                 batch_xforms, batch_relations)
             batch_loss += loss
         avg_batch_loss = batch_loss / batch_size
             
@@ -480,7 +435,6 @@ if args.test:
         batch_node_feat = torch.from_numpy(node_features[model_idx:model_idx+1, :, :3]).to(device, torch.float32)
         batch_adj = torch.from_numpy(adj[model_idx:model_idx+1]).to(device, torch.float32)
         batch_part_nodes = torch.from_numpy(part_nodes[model_idx:model_idx+1]).to(device, torch.float32)
-        batch_exts = torch.from_numpy(extents[model_idx:model_idx+1]).to(device, torch.float32)
 
     with torch.no_grad():
         if args.mask:
@@ -524,48 +478,9 @@ if args.test:
         transformed_points = query_points.unsqueeze(1).expand(-1, num_parts, -1, -1) +\
             learned_xforms.unsqueeze(2)
 
-        half_extents = batch_exts / 2
-        soft_mask_x = torch.sigmoid(10 * (half_extents[..., 0:1] - transformed_points[..., 0].abs()))
-        soft_mask_y = torch.sigmoid(10 * (half_extents[..., 1:2] - transformed_points[..., 1].abs()))
-        soft_mask_z = torch.sigmoid(10 * (half_extents[..., 2:3] - transformed_points[..., 2].abs()))
-        mask = soft_mask_x * soft_mask_y * soft_mask_z
-
-        import matplotlib.pyplot as plt
-        plt.subplot(3, 1, 1)
-        n, bins, patches = plt.hist(soft_mask_x[0, 0].cpu().numpy(), bins=100, color='blue')
-        plt.title("Histogram of Sampled SDF Values")
-        plt.ylabel("Frequency")
-        plt.xlim(0, 1)
-
-        plt.subplot(3, 1, 2)
-        n, bins, patches = plt.hist(soft_mask_y[0, 0].cpu().numpy(), bins=100, color='blue')
-        plt.ylabel("Frequency")
-        plt.xlim(0, 1)
-
-        plt.subplot(3, 1, 3)
-        n, bins, patches = plt.hist(soft_mask_z[0, 0].cpu().numpy(), bins=100, color='blue')
-        plt.xlabel("SDF Value")
-        plt.ylabel("Frequency")
-        plt.xlim(0, 1)
-        misc.save_fig(plt, '', 'tmp/mask_hist.png')
-        plt.close()
-
         occs1 = model(transformed_points.masked_fill(points_mask==1,torch.tensor(0)),
                       batch_embed.masked_fill(parts_mask==1, torch.tensor(0)))
         occs1 = occs1.masked_fill(occ_mask==1,torch.tensor(float('-inf')))
-        exit(0)
-
-        # occs1 = model(transformed_points.masked_fill(points_mask==1,torch.tensor(0)).\
-        #           masked_fill(mask.unsqueeze(-1)==0, torch.tensor(0)),
-        #           batch_embed.masked_fill(parts_mask==1, torch.tensor(0)))
-        # occs1 = occs1.masked_fill(occ_mask==1,torch.tensor(float('-inf'))).\
-        #             masked_fill(mask.transpose(1, 2)==0, torch.tensor(0))
-
-        occs1 = model(transformed_points.masked_fill(points_mask==1,torch.tensor(0)),
-                  batch_embed.masked_fill(parts_mask==1, torch.tensor(0)))
-        occs1 = occs1.masked_fill(occ_mask==1,torch.tensor(float('-inf'))).\
-                    masked_fill(mask.transpose(1, 2)==0, torch.tensor(0))
-
         pred_values, _ = torch.max(occs1, dim=-1, keepdim=True)
 
     learned_xforms = learned_xforms[0].cpu().numpy()
@@ -713,8 +628,12 @@ if args.asb:
     # model_indices = [0] * 4
     # part_indices = [0, 1, 2, 3]
 
-    model_indices = [39, 86, 43, 41]
-    part_indices = [2, 3, 1, 0]
+    # model_indices = [39, 86, 43, 41]
+    # part_indices = [2, 3, 1, 0]
+    # part_indices = [0, 1, 2, 3]
+
+    model_indices = [0, 1, 2, 3]
+    part_indices = [0, 1, 2, 3]
 
     # {
     #     "chair_arm": 0,
