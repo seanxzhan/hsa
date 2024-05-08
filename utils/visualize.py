@@ -153,7 +153,7 @@ def save_mesh_vis(trimesh_obj, out_path, mesh_y_rot=-45, mag=1,
 
 def save_obbs_vis(obbs, out_path, mesh_y_rot=-45, mag=1,
                   white_bg=False, save_img=True, show_coord=False,
-                  name_to_obbs=None):
+                  name_to_obbs=None, unmasked_indices=None):
     """obbs: a list of tuples x, where x = (extents, transform)
     """
     if name_to_obbs is None:    
@@ -178,6 +178,15 @@ def save_obbs_vis(obbs, out_path, mesh_y_rot=-45, mag=1,
                 base_color = [173.0/255, 157.0/255, 190.0/255, 0.9]
             if i == 0:
                 base_color = [150.0/255, 118.0/255, 96.0/255, 0.9]
+            if unmasked_indices is not None and len(unmasked_indices) == 1:
+                if unmasked_indices == [2]:
+                    base_color = [148.0/255, 201.0/255, 107.0/255, 0.9]
+                if unmasked_indices == [3]:
+                    base_color = [221.0/255, 137.0/255, 133.0/255, 0.9]
+                if unmasked_indices == [1]:
+                    base_color = [173.0/255, 157.0/255, 190.0/255, 0.9]
+                if unmasked_indices == [0]:
+                    base_color = [150.0/255, 118.0/255, 96.0/255, 0.9]
             # else:
             #     # base_color = [0.0, 0.0, 0.0, 0.0]
             #     continue
@@ -452,7 +461,7 @@ def stitch_imges(out_path, image_paths=None, images=None, adj=100):
     if image_paths:
         images = [Image.open(x) for x in image_paths]
     widths, heights = zip(*(i.size for i in images))
-    adj = 100
+    # adj = 100
     total_width = sum(widths) - len(images) * adj
     max_height = max(heights)
     new_im = Image.new('RGBA', (total_width, max_height))

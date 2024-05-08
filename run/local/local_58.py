@@ -9,7 +9,7 @@ import argparse
 import numpy as np
 from tqdm import tqdm
 # from occ_networks.basic_decoder_nasa import SDFDecoder, get_embedder
-from occ_networks.xform_decoder_nasa import SDFDecoder, get_embedder
+from occ_networks.xform_decoder_nasa_obbgnn_ae import SDFDecoder, get_embedder
 from utils import misc, visualize, transform, ops, reconstruct, tree
 from data_prep import preprocess_data_12
 from typing import Dict, List
@@ -51,7 +51,7 @@ save_every = 100
 multires = 2
 pt_sample_res = 64        # point_sampling
 
-expt_id = 57
+expt_id = 58
 
 OVERFIT = args.of
 overfit_idx = args.of_idx
@@ -174,9 +174,7 @@ model = SDFDecoder(num_parts=num_parts,
                    feature_dims=each_part_feat,
                    internal_dims=128,
                    hidden=4,
-                   multires=2,
-                   obb_decoder_internal_dims=64,
-                   obb_decoder_hidden=4).to(device)
+                   multires=2).to(device)
 
 mse = torch.nn.MSELoss()
 
@@ -281,15 +279,17 @@ def train_one_itr(it, b,
     batch_vec = torch.arange(start=0, end=batch_size).to(device)
     batch_vec = torch.repeat_interleave(batch_vec, num_union_nodes)
     batch_mask = torch.sum(batch_part_nodes, dim=1)
-    learned_xforms = model.learn_xform(batch_node_feat,
-                                       batch_adj,
-                                       batch_mask,
-                                       batch_vec)
+    learned_geom, learned_xforms = model.learn_geom_xform(batch_node_feat,
+                                            batch_adj,
+                                            batch_mask,
+                                            batch_vec)
+    learned_relations = learned_xforms[:, connectivity[:, 0], connectivity[:, 1], :]
+    learned_xforms = learned_xforms[:, [0, 1, 2, 3], [0, 1, 2, 3], :]
 
-    learned_xforms = torch.einsum('ijk, ikm -> ijm',
-                                  batch_part_nodes.to(torch.float32),
-                                  learned_xforms)
-    
+    batch_geom = torch.einsum('ijk, ikm -> ijm',
+                               batch_part_nodes.to(torch.float32),
+                               batch_node_feat)
+
     pairwise_xforms = learned_xforms[:, connectivity]
     learned_relations = pairwise_xforms[:, :, 1] - pairwise_xforms[:, :, 0]
 
@@ -309,6 +309,11 @@ def train_one_itr(it, b,
 
     loss = (loss1 + loss2) * adjust_geom_weight(it, 500, 750, 1.0, 2.0)
 
+    loss_bbox_geom = loss_f(
+        embed_fn(learned_geom.view(-1, 3)),
+        embed_fn(batch_geom.view(-1, 3)),)
+    loss += loss_bbox_geom
+
     loss_xform = loss_f_xform(
         embed_fn(learned_xforms.view(-1, 3)),
         embed_fn(batch_xforms.view(-1, 3)))
@@ -320,6 +325,7 @@ def train_one_itr(it, b,
 
     if b == n_batches - 1:
         print("geom loss: ", (loss1 + loss2).detach().cpu().numpy())
+        print("bbox geom loss: ", loss_bbox_geom.detach().cpu().numpy())
         print("xform loss: ", loss_xform.detach().cpu().numpy())
         print("relations loss: ", loss_relations.detach().cpu().numpy())
 

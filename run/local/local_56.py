@@ -495,7 +495,7 @@ if args.test:
     if args.mask:
         mag = 1
     else:
-        mag = 0.6
+        mag = 0.8
 
     sdf_grid = torch.reshape(
         pred_values,
@@ -583,12 +583,12 @@ if args.test:
     obbs_of_interest = [part_obbs[x] for x in unmasked_indices]
     obbs_of_interest = list(itertools.chain(*obbs_of_interest))
     visualize.save_obbs_vis(obbs_of_interest,
-                            obbs_path, mag=0.6, white_bg=white_bg)
+                            obbs_path, mag=mag, white_bg=white_bg)
     
     learned_obbs_of_interest = [learned_obbs_of_interest[x] for x in unmasked_indices]
     learned_obbs_of_interest = list(itertools.chain(*learned_obbs_of_interest))
     visualize.save_obbs_vis(learned_obbs_of_interest,
-                            learned_obbs_path, mag=0.6, white_bg=white_bg)
+                            learned_obbs_path, mag=mag, white_bg=white_bg)
     
     if not args.mask:
         visualize.stitch_imges(
