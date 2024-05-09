@@ -628,12 +628,14 @@ if args.asb:
     # model_indices = [0] * 4
     # part_indices = [0, 1, 2, 3]
 
-    # model_indices = [39, 86, 43, 41]
-    # part_indices = [2, 3, 1, 0]
-    # part_indices = [0, 1, 2, 3]
-
-    model_indices = [0, 1, 2, 3]
+    model_indices = [39, 86, 43, 41]
     part_indices = [0, 1, 2, 3]
+    # part_indices = [1, 2, 3, 0]
+    # part_indices = [2, 3, 0, 1]
+    # part_indices = [3, 0, 1, 2]
+
+    # model_indices = [0, 1, 2, 3]
+    # part_indices = [0, 1, 2, 3]
 
     # {
     #     "chair_arm": 0,
@@ -813,7 +815,7 @@ if args.asb:
     if args.mask:
         mag = 1
     else:
-        mag = 0.7
+        mag = 0.8
 
     sdf_grid = torch.reshape(
         pred_values1,
@@ -853,22 +855,24 @@ if args.asb:
     obbs_of_interest = [obbs_of_interest[x] for x in unmasked_indices]
     obbs_of_interest = list(itertools.chain(*obbs_of_interest))
     visualize.save_obbs_vis(obbs_of_interest,
-                            obbs_path, mag=0.8, white_bg=True)
+                            obbs_path, mag=mag, white_bg=True,
+                            unmasked_indices=unmasked_indices)
     
     prex_obbs_of_interest = [prex_obbs_of_interest[x] for x in unmasked_indices]
     prex_obbs_of_interest = list(itertools.chain(*prex_obbs_of_interest))
     visualize.save_obbs_vis(prex_obbs_of_interest,
-                            prex_obbs_path, mag=0.8, white_bg=True)
+                            prex_obbs_path, mag=mag, white_bg=True,
+                            unmasked_indices=unmasked_indices)
     
     if not args.mask:
         visualize.stitch_imges(
             os.path.join(results_dir,f'assembly_results.png'),
             image_paths=lst_paths,
-            adj=200)
+            adj=100)
     else:
         # parts_str contains all the parts that are MASKED OUT
         parts_str = '-'.join([str(x) for x in masked_indices])
         visualize.stitch_imges(
             os.path.join(results_dir,f'assembly_results_mask_{parts_str}.png'),
             image_paths=lst_paths,
-            adj=200)
+            adj=100)

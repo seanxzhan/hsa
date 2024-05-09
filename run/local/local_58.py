@@ -490,10 +490,19 @@ if args.test:
         batch_vec = torch.arange(start=0, end=1).to(device)
         batch_vec = torch.repeat_interleave(batch_vec, num_union_nodes)
         batch_mask = torch.sum(batch_part_nodes, dim=1)
-        learned_xforms = model.learn_xform(batch_node_feat, batch_adj, batch_mask, batch_vec)
-        learned_xforms = torch.einsum('ijk, ikm -> ijm',
-                                      batch_part_nodes.to(torch.float32),
-                                      learned_xforms)
+        learned_geom, learned_xforms = model.learn_geom_xform(batch_node_feat,
+                                                    batch_adj,
+                                                    batch_mask,
+                                                    batch_vec)
+        learned_relations = learned_xforms[:, connectivity[:, 0], connectivity[:, 1], :]
+        learned_xforms = learned_xforms[:, [0, 1, 2, 3], [0, 1, 2, 3], :]
+
+        batch_geom = torch.einsum('ijk, ikm -> ijm',
+                                batch_part_nodes.to(torch.float32),
+                                batch_node_feat)
+
+        pairwise_xforms = learned_xforms[:, connectivity]
+        learned_relations = pairwise_xforms[:, :, 1] - pairwise_xforms[:, :, 0]
 
         transformed_points = query_points.unsqueeze(1).expand(-1, num_parts, -1, -1) +\
             learned_xforms.unsqueeze(2)
@@ -654,7 +663,11 @@ if args.asb:
     # part_indices = [2, 3, 1, 0]
 
     model_indices = [39, 86, 43, 41]
-    part_indices = [0, 1, 2, 3]
+    # part_indices = [0, 1, 2, 3]
+    # part_indices = [1, 2, 3, 0]
+    # part_indices = [2, 3, 0, 1]
+    part_indices = [3, 0, 1, 2]
+    
     # part_indices = [2, 3, 1, 0]
 
     # {
@@ -669,7 +682,7 @@ if args.asb:
     # print(f"anno id: {anno_id}, model id: {model_id}")
     print(anno_ids)
 
-    asb_str = '-'.join([str(x) for x in model_indices])
+    asb_str = '-'.join([str(x) for x in model_indices+part_indices])
     results_dir = os.path.join(results_dir, f'0assembly_{asb_str}')
     misc.check_dir(results_dir)
     print("results dir: ", results_dir)
@@ -796,10 +809,19 @@ if args.asb:
         batch_vec = torch.arange(start=0, end=1).to(device)
         batch_vec = torch.repeat_interleave(batch_vec, num_union_nodes)
         batch_mask = torch.sum(batch_part_nodes, dim=1)
-        learned_xforms = model.learn_xform(batch_node_feat, batch_adj, batch_mask, batch_vec)
-        learned_xforms = torch.einsum('ijk, ikm -> ijm',
-                                      batch_part_nodes.to(torch.float32),
-                                      learned_xforms)
+        learned_geom, learned_xforms = model.learn_geom_xform(batch_node_feat,
+                                                    batch_adj,
+                                                    batch_mask,
+                                                    batch_vec)
+        learned_relations = learned_xforms[:, connectivity[:, 0], connectivity[:, 1], :]
+        learned_xforms = learned_xforms[:, [0, 1, 2, 3], [0, 1, 2, 3], :]
+
+        batch_geom = torch.einsum('ijk, ikm -> ijm',
+                                batch_part_nodes.to(torch.float32),
+                                batch_node_feat)
+
+        pairwise_xforms = learned_xforms[:, connectivity]
+        learned_relations = pairwise_xforms[:, :, 1] - pairwise_xforms[:, :, 0]
 
         transformed_points = query_points.unsqueeze(1).expand(-1, num_parts, -1, -1) +\
             gt_xforms.unsqueeze(2)
@@ -835,7 +857,7 @@ if args.asb:
     if args.mask:
         mag = 1
     else:
-        mag = 0.7
+        mag = 0.8
 
     sdf_grid = torch.reshape(
         pred_values1,
@@ -875,22 +897,24 @@ if args.asb:
     obbs_of_interest = [obbs_of_interest[x] for x in unmasked_indices]
     obbs_of_interest = list(itertools.chain(*obbs_of_interest))
     visualize.save_obbs_vis(obbs_of_interest,
-                            obbs_path, mag=0.8, white_bg=True)
+                            obbs_path, mag=mag, white_bg=True,
+                            unmasked_indices=unmasked_indices)
     
     prex_obbs_of_interest = [prex_obbs_of_interest[x] for x in unmasked_indices]
     prex_obbs_of_interest = list(itertools.chain(*prex_obbs_of_interest))
     visualize.save_obbs_vis(prex_obbs_of_interest,
-                            prex_obbs_path, mag=0.8, white_bg=True)
+                            prex_obbs_path, mag=mag, white_bg=True,
+                            unmasked_indices=unmasked_indices)
     
     if not args.mask:
         visualize.stitch_imges(
             os.path.join(results_dir,f'assembly_results.png'),
             image_paths=lst_paths,
-            adj=200)
+            adj=100)
     else:
         # parts_str contains all the parts that are MASKED OUT
         parts_str = '-'.join([str(x) for x in masked_indices])
         visualize.stitch_imges(
             os.path.join(results_dir,f'assembly_results_mask_{parts_str}.png'),
             image_paths=lst_paths,
-            adj=200)
+            adj=100)

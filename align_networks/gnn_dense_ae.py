@@ -73,15 +73,15 @@ class GraphDecoder(torch.nn.Module):
         self.node_feature_dims = node_feature_dims
         self.edge_feature_dims = edge_feature_dims
 
-        node_net = (
-            torch.nn.Linear(input_dims, node_feature_internal_dims, bias=False),
-            torch.nn.ReLU())
-        for _ in range(node_feature_hidden-1):
-            node_net = node_net + (
-                torch.nn.Linear(node_feature_internal_dims, node_feature_internal_dims, bias=False),
-                torch.nn.ReLU())
-        node_net = node_net + (torch.nn.Linear(node_feature_internal_dims, num_nodes * node_feature_dims, bias=False),)
-        self.node_net = torch.nn.Sequential(*node_net)
+        # node_net = (
+        #     torch.nn.Linear(input_dims, node_feature_internal_dims, bias=False),
+        #     torch.nn.ReLU())
+        # for _ in range(node_feature_hidden-1):
+        #     node_net = node_net + (
+        #         torch.nn.Linear(node_feature_internal_dims, node_feature_internal_dims, bias=False),
+        #         torch.nn.ReLU())
+        # node_net = node_net + (torch.nn.Linear(node_feature_internal_dims, num_nodes * node_feature_dims, bias=False),)
+        # self.node_net = torch.nn.Sequential(*node_net)
 
         edge_net = (
             torch.nn.Linear(input_dims, edge_feature_internal_dims, bias=False),
@@ -90,13 +90,16 @@ class GraphDecoder(torch.nn.Module):
             edge_net = edge_net + (
                 torch.nn.Linear(edge_feature_internal_dims, edge_feature_internal_dims, bias=False),
                 torch.nn.ReLU())
-        edge_net = edge_net + (torch.nn.Linear(edge_feature_internal_dims, num_nodes * num_nodes * edge_feature_dims, bias=False),)
+        # edge_net = edge_net + (torch.nn.Linear(edge_feature_internal_dims, num_nodes * num_nodes * edge_feature_dims, bias=False),)
+        edge_net = edge_net + (torch.nn.Linear(edge_feature_internal_dims, num_nodes * edge_feature_dims, bias=False),)
         self.edge_net = torch.nn.Sequential(*edge_net)
 
     def forward(self, z):
-        node_feats = self.node_net(z).view(-1, self.num_nodes, self.node_feature_dims)
-        edge_feats = self.edge_net(z).view(-1, self.num_nodes, self.num_nodes, self.node_feature_dims)
-        return node_feats, edge_feats
+        # node_feats = self.node_net(z).view(-1, self.num_nodes, self.node_feature_dims)
+        # edge_feats = self.edge_net(z).view(-1, self.num_nodes, self.num_nodes, self.node_feature_dims)
+        edge_feats = self.edge_net(z).view(-1, self.num_nodes, self.node_feature_dims)
+        # return node_feats, edge_feats
+        return None, edge_feats
 
 
 class Attention(torch.nn.Module):

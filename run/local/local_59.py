@@ -486,16 +486,16 @@ if args.test:
         occ_mask = torch.zeros((1, 1, num_parts)).to(device, torch.float32)
         occ_mask[:, :, masked_indices] = 1
 
-        # learning xforms
+        # learning xformsx
         batch_vec = torch.arange(start=0, end=1).to(device)
         batch_vec = torch.repeat_interleave(batch_vec, num_union_nodes)
         batch_mask = torch.sum(batch_part_nodes, dim=1)
-        learned_geom, learned_xforms = model.learn_geom_xform(batch_node_feat,
+        _, learned_xforms = model.learn_geom_xform(batch_node_feat,
                                                     batch_adj,
                                                     batch_mask,
                                                     batch_vec)
-        learned_relations = learned_xforms[:, connectivity[:, 0], connectivity[:, 1], :]
-        learned_xforms = learned_xforms[:, [0, 1, 2, 3], [0, 1, 2, 3], :]
+        # learned_relations = learned_xforms[:, connectivity[:, 0], connectivity[:, 1], :]
+        # learned_xforms = learned_xforms[:, [0, 1, 2, 3], [0, 1, 2, 3], :]
 
         batch_geom = torch.einsum('ijk, ikm -> ijm',
                                 batch_part_nodes.to(torch.float32),
@@ -809,12 +809,12 @@ if args.asb:
         batch_vec = torch.arange(start=0, end=1).to(device)
         batch_vec = torch.repeat_interleave(batch_vec, num_union_nodes)
         batch_mask = torch.sum(batch_part_nodes, dim=1)
-        learned_geom, learned_xforms = model.learn_geom_xform(batch_node_feat,
+        _, learned_xforms = model.learn_geom_xform(batch_node_feat,
                                                     batch_adj,
                                                     batch_mask,
                                                     batch_vec)
-        learned_relations = learned_xforms[:, connectivity[:, 0], connectivity[:, 1], :]
-        learned_xforms = learned_xforms[:, [0, 1, 2, 3], [0, 1, 2, 3], :]
+        # learned_relations = learned_xforms[:, connectivity[:, 0], connectivity[:, 1], :]
+        # learned_xforms = learned_xforms[:, [0, 1, 2, 3], [0, 1, 2, 3], :]
 
         batch_geom = torch.einsum('ijk, ikm -> ijm',
                                 batch_part_nodes.to(torch.float32),
