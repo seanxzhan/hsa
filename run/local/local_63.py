@@ -51,7 +51,7 @@ save_every = 100
 multires = 2
 pt_sample_res = 64        # point_sampling
 
-expt_id = 62
+expt_id = 63
 
 OVERFIT = args.of
 overfit_idx = args.of_idx
@@ -120,8 +120,8 @@ else:
 #     "regular_leg_base": 3
 # }
 
-connectivity = [[0, 1], [0, 2], [1, 2], [2, 3]]
-connectivity = torch.tensor(connectivity, dtype=torch.long).to(device)
+# connectivity = [[0, 1], [0, 2], [1, 2], [2, 3]]
+# connectivity = torch.tensor(connectivity, dtype=torch.long).to(device)
 
 # # Create an adjacency matrix initialized to zero
 # connectivity_matrix = torch.zeros((4, 4), dtype=torch.long)
@@ -288,8 +288,8 @@ def train_one_itr(it, b,
     #                            batch_part_nodes.to(torch.float32),
     #                            batch_node_feat)
 
-    pairwise_xforms = learned_xforms[:, connectivity]
-    learned_relations = pairwise_xforms[:, :, 1] - pairwise_xforms[:, :, 0]
+    # pairwise_xforms = learned_xforms[:, connectivity]
+    # learned_relations = pairwise_xforms[:, :, 1] - pairwise_xforms[:, :, 0]
 
     # transformed_points = batch_points.unsqueeze(1).expand(-1, num_parts, -1, -1) +\
     #     learned_xforms.unsqueeze(2)
@@ -315,11 +315,12 @@ def train_one_itr(it, b,
     loss_xform = loss_f_xform(
         embed_fn(learned_xforms.view(-1, 3)),
         embed_fn(batch_xforms.view(-1, 3)))
-    loss_relations = loss_f_xform(
-        embed_fn(learned_relations.view(-1, 3)),
-        embed_fn(batch_relations.view(-1, 3)))
+    # loss_relations = loss_f_xform(
+    #     embed_fn(learned_relations.view(-1, 3)),
+    #     embed_fn(batch_relations.view(-1, 3)))
     
-    loss = 1 * (loss_xform + loss_relations)
+    # loss = 1 * (loss_xform + loss_relations)
+    loss = 1 * (loss_xform)
 
     # if b == n_batches - 1:
     #     # print("occ loss: ", (loss1 + loss2).detach().cpu().numpy())
@@ -500,8 +501,8 @@ if args.test:
         #                         batch_part_nodes.to(torch.float32),
         #                         batch_node_feat)
 
-        pairwise_xforms = learned_xforms[:, connectivity]
-        learned_relations = pairwise_xforms[:, :, 1] - pairwise_xforms[:, :, 0]
+        # pairwise_xforms = learned_xforms[:, connectivity]
+        # learned_relations = pairwise_xforms[:, :, 1] - pairwise_xforms[:, :, 0]
 
         # transformed_points = query_points.unsqueeze(1).expand(-1, num_parts, -1, -1) +\
         #     learned_xforms.unsqueeze(2)
@@ -666,8 +667,8 @@ if args.asb:
     model_indices = [39, 86, 43, 41]
     # part_indices = [0, 1, 2, 3]
     # part_indices = [1, 2, 3, 0]
-    # part_indices = [2, 3, 0, 1]
-    part_indices = [3, 0, 1, 2]
+    part_indices = [2, 3, 0, 1]
+    # part_indices = [3, 0, 1, 2]
     
     # part_indices = [2, 3, 1, 0]
 
@@ -821,8 +822,8 @@ if args.asb:
         #                         batch_part_nodes.to(torch.float32),
         #                         batch_node_feat)
 
-        pairwise_xforms = learned_xforms[:, connectivity]
-        learned_relations = pairwise_xforms[:, :, 1] - pairwise_xforms[:, :, 0]
+        # pairwise_xforms = learned_xforms[:, connectivity]
+        # learned_relations = pairwise_xforms[:, :, 1] - pairwise_xforms[:, :, 0]
 
         # transformed_points = query_points.unsqueeze(1).expand(-1, num_parts, -1, -1) +\
         #     gt_xforms.unsqueeze(2)
