@@ -9,7 +9,7 @@ import argparse
 import numpy as np
 from tqdm import tqdm
 # from occ_networks.basic_decoder_nasa import SDFDecoder, get_embedder
-from occ_networks.xform_decoder_nasa_obbgnn_ae import SDFDecoder, get_embedder
+from occ_networks.xform_decoder_nasa_obbgnn_ae_58 import SDFDecoder, get_embedder
 from utils import misc, visualize, transform, ops, reconstruct, tree
 from data_prep import preprocess_data_12
 from typing import Dict, List
