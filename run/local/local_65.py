@@ -8,6 +8,7 @@ import trimesh
 import argparse
 import numpy as np
 from tqdm import tqdm
+from torch.utils.tensorboard import SummaryWriter
 # from occ_networks.basic_decoder_nasa import SDFDecoder, get_embedder
 from occ_networks.xform_decoder_nasa_obbgnn_ae import SDFDecoder, get_embedder
 from utils import misc, visualize, transform, ops, reconstruct, tree
@@ -51,7 +52,7 @@ save_every = 100
 multires = 2
 pt_sample_res = 64        # point_sampling
 
-expt_id = 64
+expt_id = 65
 
 OVERFIT = args.of
 overfit_idx = args.of_idx
@@ -167,6 +168,8 @@ else:
 misc.check_dir(ckpt_dir)
 misc.check_dir(results_dir)
 print("results dir: ", results_dir)
+
+writer = SummaryWriter(os.path.join(logs_path, 'summary'))
 
 # -------- model --------
 each_part_feat = 32
@@ -319,13 +322,16 @@ def train_one_itr(it, b,
         embed_fn(learned_relations.view(-1, 3)),
         embed_fn(batch_relations.view(-1, 3)))
     
-    loss += loss_xform + loss_relations
+    loss += 20 * (loss_xform + loss_relations)
 
     if b == n_batches - 1:
-        print("occ loss: ", (loss1 + loss2).detach().cpu().numpy())
+        # print("occ loss: ", (loss1 + loss2).detach().cpu().numpy())
         # print("bbox geom loss: ", loss_bbox_geom.detach().cpu().numpy())
-        print("xform loss: ", loss_xform.detach().cpu().numpy())
-        print("relations loss: ", loss_relations.detach().cpu().numpy())
+        # print("xform loss: ", loss_xform.detach().cpu().numpy())
+        # print("relations loss: ", loss_relations.detach().cpu().numpy())
+        writer.add_scalar('occ loss', loss1 + loss2, it)
+        writer.add_scalar('xform loss', loss_xform, it)
+        writer.add_scalar('relations loss', loss_relations, it)
 
     optimizer.zero_grad()
     loss.backward()
@@ -354,6 +360,7 @@ if args.train:
                                  batch_embed,
                                  batch_node_feat, batch_adj, batch_part_nodes,
                                  batch_xforms, batch_relations)
+            writer.add_scalar('iteration loss', loss, it)
             batch_loss += loss
         avg_batch_loss = batch_loss / batch_size
             
@@ -373,6 +380,7 @@ if args.train:
                 }, os.path.join(ckpt_dir, f'model_{it}.pt'))
 
     print("duration: ", time.time() - start_time)
+    writer.close()
 
 
 def compute_iou(voxel_grid1, voxel_grid2):
@@ -664,10 +672,10 @@ if args.asb:
     # part_indices = [2, 3, 1, 0]
 
     model_indices = [39, 86, 43, 41]
-    part_indices = [0, 1, 2, 3]
+    # part_indices = [0, 1, 2, 3]
     # part_indices = [1, 2, 3, 0]
     # part_indices = [2, 3, 0, 1]
-    # part_indices = [3, 0, 1, 2]
+    part_indices = [3, 0, 1, 2]
     
     # part_indices = [2, 3, 1, 0]
 
