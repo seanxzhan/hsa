@@ -52,7 +52,7 @@ save_every = 100
 multires = 2
 pt_sample_res = 64        # point_sampling
 
-expt_id = 66
+expt_id = 68
 
 OVERFIT = args.of
 overfit_idx = args.of_idx
@@ -251,7 +251,7 @@ def train_one_itr(it, b,
                                             batch_adj,
                                             batch_mask,
                                             batch_vec)
-    learned_relations = learned_xforms[:, connectivity[:, 0], connectivity[:, 1], :]
+    # learned_relations = learned_xforms[:, connectivity[:, 0], connectivity[:, 1], :]
     learned_xforms = learned_xforms[:, [0, 1, 2, 3], [0, 1, 2, 3], :]
 
     batch_geom = torch.einsum('ijk, ikm -> ijm',
@@ -285,17 +285,17 @@ def train_one_itr(it, b,
     loss_xform = loss_f_xform(
         embed_fn(learned_xforms.view(-1, 3)),
         embed_fn(batch_xforms.view(-1, 3)))
-    loss_relations = loss_f_xform(
-        embed_fn(learned_relations.view(-1, 3)),
-        embed_fn(batch_relations.view(-1, 3)))
+    # loss_relations = loss_f_xform(
+    #     embed_fn(learned_relations.view(-1, 3)),
+    #     embed_fn(batch_relations.view(-1, 3)))
     
-    loss += 10 * loss_xform + 10 * loss_relations
+    loss += 10 * loss_xform
 
     if b == n_batches - 1:
         writer.add_scalar('occ loss', loss1 + loss2, it)
         writer.add_scalar('bbox geom loss', loss_bbox_geom, it)
         writer.add_scalar('xform loss', loss_xform, it)
-        writer.add_scalar('relations loss', loss_relations, it)
+        # writer.add_scalar('relations loss', loss_relations, it)
 
     optimizer.zero_grad()
     loss.backward()
@@ -632,14 +632,13 @@ if args.asb:
     # model_indices = [39, 86, 43, 41]
     # part_indices = [2, 3, 1, 0]
 
-    # model_indices = [39, 86, 43, 41]
+    model_indices = [39, 86, 43, 41]
     # part_indices = [0, 1, 2, 3]
     # part_indices = [1, 2, 3, 0]
     # part_indices = [2, 3, 0, 1]
-    # part_indices = [3, 0, 1, 2]
+    part_indices = [3, 0, 1, 2]
     
-    model_indices = [3, 0, 1, 4]
-    part_indices = [0, 1, 2, 3]
+    # part_indices = [2, 3, 1, 0]
 
     # {
     #     "chair_arm": 0,
