@@ -74,7 +74,6 @@ name_to_cat = {
 }
 cat_name = 'Chair'
 cat_id = name_to_cat[cat_name]
-# cat_id = '03636649'
 
 train_new_ids_to_objs_path = f'data/{cat_name}_train_new_ids_to_objs_12_{ds_start}_{ds_end}.json'
 with open(train_new_ids_to_objs_path, 'r') as f:
@@ -93,8 +92,6 @@ if OVERFIT:
     part_nodes = train_data['part_nodes'][overfit_idx:overfit_idx+1]
     xforms = train_data['xforms'][overfit_idx:overfit_idx+1]
     extents = train_data['extents'][overfit_idx:overfit_idx+1]
-    # transformed_points = train_data['transformed_points'][overfit_idx:overfit_idx+1]
-    # empty_parts = train_data['empty_parts'][overfit_idx:overfit_idx+1]
     node_features = train_data['node_features'][overfit_idx:overfit_idx+1]
     adj = train_data['adj'][overfit_idx:overfit_idx+1]
     part_nodes = train_data['part_nodes'][overfit_idx:overfit_idx+1]
@@ -107,8 +104,6 @@ else:
     part_nodes = train_data['part_nodes']
     xforms = train_data['xforms']
     extents = train_data['extents']
-    # transformed_points = train_data['transformed_points']
-    # empty_parts = train_data['empty_parts']
     node_features = train_data['node_features']
     adj = train_data['adj']
     part_nodes = train_data['part_nodes']
@@ -123,22 +118,6 @@ else:
 
 connectivity = [[0, 1], [0, 2], [1, 2], [2, 3]]
 connectivity = torch.tensor(connectivity, dtype=torch.long).to(device)
-
-# # Create an adjacency matrix initialized to zero
-# connectivity_matrix = torch.zeros((4, 4), dtype=torch.long)
-# # Set the connections in the upper triangle
-# for i, j in connectivity:
-#     if i < j:  # Ensure i < j to maintain upper triangular form
-#         connectivity_matrix[i, j] = 1
-#     else:
-#         connectivity_matrix[j, i] = 1  # If i >= j, swap to maintain upper triangular
-# print(connectivity_matrix)
-# exit(0)
-
-# print(relations[0, :, :3, 3])
-# pairwise_xforms = xforms[0, :, :3, 3][connectivity.cpu().numpy()]
-# print(pairwise_xforms[:, 1] - pairwise_xforms[:, 0])
-# exit(0)
 
 num_union_nodes = adj.shape[1]
 num_points = normalized_points.shape[1]
@@ -217,20 +196,6 @@ def loss_f(pred_values, gt_values):
     recon_loss = mse(pred_values, gt_values)
     return recon_loss
 
-def adjust_geom_weight(epoch, epoch_start, max_epoch, initial_weight=1.0, final_weight=2.0):
-    # Linear scaling of the weight
-    # epoch_start: starting epoch for weight change
-    if epoch <= epoch_start:
-        return initial_weight
-    elif epoch <= max_epoch:
-        return initial_weight + (final_weight - initial_weight) *\
-            ((epoch - epoch_start) / (max_epoch - epoch_start))
-    else:
-        return final_weight
-    
-# for e in range(0, 10):
-#     print(adjust_geom_weight(e, 4, 7, 1, 2))
-# exit(0)
 
 def loss_f_xform(pred_xforms, gt_xforms):
     xform_loss = mse(pred_xforms, gt_xforms)
@@ -327,10 +292,6 @@ def train_one_itr(it, b,
     loss += 10 * loss_xform + 10 * loss_relations
 
     if b == n_batches - 1:
-        # print("occ loss: ", (loss1 + loss2).detach().cpu().numpy())
-        # print("bbox geom loss: ", loss_bbox_geom.detach().cpu().numpy())
-        # print("xform loss: ", loss_xform.detach().cpu().numpy())
-        # print("relations loss: ", loss_relations.detach().cpu().numpy())
         writer.add_scalar('occ loss', loss1 + loss2, it)
         writer.add_scalar('bbox geom loss', loss_bbox_geom, it)
         writer.add_scalar('xform loss', loss_xform, it)
@@ -464,17 +425,6 @@ if args.test:
         batch_node_feat = torch.from_numpy(node_features[model_idx:model_idx+1, :, :3]).to(device, torch.float32)
         batch_adj = torch.from_numpy(adj[model_idx:model_idx+1]).to(device, torch.float32)
         batch_part_nodes = torch.from_numpy(part_nodes[model_idx:model_idx+1]).to(device, torch.float32)
-
-    # pts = normalized_points[model_idx]
-    # vals = values[model_idx]
-    # occ_pts = pts[vals.astype('bool').flatten()]
-    # colors = np.zeros((len(occ_pts), 3))
-    # colors[:] = 1
-    # trimesh.points.PointCloud(occ_pts, colors).export(
-    #     'tmp/occ_pts.ply')
-
-    # print(occ_pts.shape)
-    # exit(0)
 
     with torch.no_grad():
         if args.mask:
