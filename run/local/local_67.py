@@ -10,7 +10,7 @@ import numpy as np
 from tqdm import tqdm
 from torch.utils.tensorboard import SummaryWriter
 # from occ_networks.basic_decoder_nasa import SDFDecoder, get_embedder
-from occ_networks.xform_decoder_nasa_obbgnn_ae_58 import SDFDecoder, get_embedder
+from occ_networks.xform_decoder_nasa_obbgnn_ae_67 import SDFDecoder, get_embedder
 from utils import misc, visualize, transform, ops, reconstruct, tree
 from data_prep import preprocess_data_12
 from typing import Dict, List
@@ -52,7 +52,7 @@ save_every = 100
 multires = 2
 pt_sample_res = 64        # point_sampling
 
-expt_id = 66
+expt_id = 67
 
 OVERFIT = args.of
 overfit_idx = args.of_idx
@@ -286,8 +286,8 @@ def train_one_itr(it, b,
                                             batch_adj,
                                             batch_mask,
                                             batch_vec)
-    learned_relations = learned_xforms[:, connectivity[:, 0], connectivity[:, 1], :]
-    learned_xforms = learned_xforms[:, [0, 1, 2, 3], [0, 1, 2, 3], :]
+    # learned_relations = learned_xforms[:, connectivity[:, 0], connectivity[:, 1], :]
+    # learned_xforms = learned_xforms[:, [0, 1, 2, 3], [0, 1, 2, 3], :]
 
     batch_geom = torch.einsum('ijk, ikm -> ijm',
                                batch_part_nodes.to(torch.float32),
@@ -464,17 +464,6 @@ if args.test:
         batch_node_feat = torch.from_numpy(node_features[model_idx:model_idx+1, :, :3]).to(device, torch.float32)
         batch_adj = torch.from_numpy(adj[model_idx:model_idx+1]).to(device, torch.float32)
         batch_part_nodes = torch.from_numpy(part_nodes[model_idx:model_idx+1]).to(device, torch.float32)
-
-    # pts = normalized_points[model_idx]
-    # vals = values[model_idx]
-    # occ_pts = pts[vals.astype('bool').flatten()]
-    # colors = np.zeros((len(occ_pts), 3))
-    # colors[:] = 1
-    # trimesh.points.PointCloud(occ_pts, colors).export(
-    #     'tmp/occ_pts.ply')
-
-    # print(occ_pts.shape)
-    # exit(0)
 
     with torch.no_grad():
         if args.mask:
