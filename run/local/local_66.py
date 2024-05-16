@@ -32,6 +32,7 @@ parser.add_argument('--asb', action="store_true")
 parser.add_argument('--of', action="store_true", default=False)
 parser.add_argument('--of_idx', '--oi', type=int)
 parser.add_argument('--inv', action="store_true")
+parser.add_argument('--part_indices', nargs='+')
 args = parser.parse_args()
 # assert args.train != args.test, "Must pass in either train or test"
 if args.test:
@@ -82,6 +83,8 @@ with open(train_new_ids_to_objs_path, 'r') as f:
 model_idx_to_anno_id = {}
 for model_idx, anno_id in enumerate(train_new_ids_to_objs.keys()):
     model_idx_to_anno_id[model_idx] = anno_id
+with open('results/mapping.json', 'w') as f:
+    json.dump(model_idx_to_anno_id, f)
 
 train_data_path = f'data/{cat_name}_train_{pt_sample_res}_12_{ds_start}_{ds_end}.hdf5'
 train_data = h5py.File(train_data_path, 'r')
@@ -643,8 +646,13 @@ if args.asb:
     # model_indices = [5, 4, 2, 8]
     # part_indices = [0, 1, 2, 3]
 
-    model_indices = [500, 501, 502, 503]
-    part_indices = [0, 1, 2, 3]
+    # model_indices = [500, 501, 506, 505]
+    # part_indices = [0, 1, 2, 3]
+
+    # model_indices = [255, 354, 28, 175]
+    # model_indices = [343, 185, 370, 258]
+    model_indices = [347, 82, 292, 365]
+    part_indices = [int(x) for x in args.part_indices]
 
     # {
     #     "chair_arm": 0,
@@ -659,21 +667,31 @@ if args.asb:
     print(anno_ids)
 
     asb_str = '-'.join([str(x) for x in anno_ids+part_indices])
+    old_results_dir = results_dir
     results_dir = os.path.join(results_dir, f'0assembly_{asb_str}')
     misc.check_dir(results_dir)
     print("results dir: ", results_dir)
 
     with open(os.path.join(results_dir, 'anno_ids.txt'), 'w') as f:
-        anno_ids_str = '-'.join([str(x) for x in anno_ids])
+        anno_ids_str = '-'.join([str(x) for x in model_indices])
         part_indices_str = '-'.join([str(x) for x in part_indices])
         # f.write(anno_ids_str)
         f.writelines([anno_ids_str, '\n', part_indices_str])
 
     checkpoint = torch.load(os.path.join(ckpt_dir, f'model_{it}.pt'))
     model.load_state_dict(checkpoint['model_state_dict'])
-    optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-    embeddings = torch.nn.Embedding(num_shapes, num_parts*each_part_feat)
-    embeddings.load_state_dict(checkpoint['embeddings_state_dict'])
+
+    if not args.inv:
+        embeddings = torch.nn.Embedding(num_shapes, num_parts*each_part_feat)
+        embeddings.load_state_dict(checkpoint['embeddings_state_dict'])
+    else:
+        embeddings = torch.zeros(num_shapes, num_parts*each_part_feat)
+        all_paths = [os.path.join(old_results_dir, str(x), 'embedding.pth') for x in anno_ids]
+        for p in all_paths:
+            assert os.path.exists(p), "you haven't run shape inversion for all unseen models"
+        all_embeddings = [torch.load(p) for p in all_paths]
+        for i in range(len(all_embeddings)):
+            embeddings[i] = all_embeddings[i].weight.data[0]
 
     all_part_num_obbs = []
     # obbs_of_interest = [[]] * num_parts
@@ -703,8 +721,12 @@ if args.asb:
         for uni in union_node_indices:
             build_adj_matrix(uni, asb_adj, shape_adj)
 
-        asb_embed[:, part_idx*each_part_feat:(part_idx+1)*each_part_feat] =\
-            embeddings(torch.tensor(idx))[part_idx*each_part_feat:(part_idx+1)*each_part_feat]
+        if not args.inv:
+            asb_embed[:, part_idx*each_part_feat:(part_idx+1)*each_part_feat] =\
+                embeddings(torch.tensor(idx))[part_idx*each_part_feat:(part_idx+1)*each_part_feat]
+        else:
+            asb_embed[:, part_idx*each_part_feat:(part_idx+1)*each_part_feat] =\
+                embeddings[i, part_idx*each_part_feat:(part_idx+1)*each_part_feat]
 
         gt_xforms[:, part_idx] = shape_xform
         gt_exts[part_idx] = shape_ext
@@ -894,6 +916,8 @@ if args.asb:
             os.path.join(results_dir,f'assembly_results_mask_{parts_str}.png'),
             image_paths=lst_paths,
             adj=100)
+        
+    exit(0)
 
 
 if args.inv:
@@ -907,18 +931,20 @@ if args.inv:
     checkpoint = torch.load(os.path.join(ckpt_dir, f'model_{it}.pt'))
     model.load_state_dict(checkpoint['model_state_dict'])
     model.eval()
-    embeddings = torch.nn.Embedding(1, num_parts*each_part_feat).to(device)
-    torch.nn.init.normal_(
-        embeddings.weight.data,
-        0.0,
-        1 / math.sqrt(num_parts*each_part_feat),
-    )
 
     results_dir = os.path.join(results_dir, anno_id)
     misc.check_dir(results_dir)
 
-    # print(batch_embed.requires_grad)
-    # exit(0)
+    embedding_fp = os.path.join(results_dir, 'embedding.pth')
+    if os.path.exists(embedding_fp):
+        embeddings = torch.load(embedding_fp).to(device)
+    else:
+        embeddings = torch.nn.Embedding(1, num_parts*each_part_feat).to(device)
+        torch.nn.init.normal_(
+            embeddings.weight.data,
+            0.0,
+            1 / math.sqrt(num_parts*each_part_feat),
+        )
 
     unique_part_names, name_to_ori_ids_and_objs,\
         orig_obbs, entire_mesh, name_to_obbs, _, _, _ =\
@@ -964,56 +990,53 @@ if args.inv:
         lr_lambda=lambda x: max(0.0, 10**(-x*0.0002)))
     num_iterations = 3000
 
-    print("optimizing for embedding")
-    for i in tqdm(range(num_iterations)):
-        batch_embed = embeddings(torch.tensor(0).to(device)).unsqueeze(0)
-        batch_vec = torch.arange(start=0, end=1).to(device)
-        batch_vec = torch.repeat_interleave(batch_vec, num_union_nodes)
-        batch_mask = torch.sum(batch_part_nodes, dim=1)
-        # with torch.no_grad():
-        learned_geom, learned_xforms = model.learn_geom_xform(batch_node_feat,
-                                                    batch_adj,
-                                                    batch_mask,
-                                                    batch_vec)
-        learned_relations = learned_xforms[:, connectivity[:, 0], connectivity[:, 1], :]
-        learned_xforms = learned_xforms[:, [0, 1, 2, 3], [0, 1, 2, 3], :]
+    if not os.path.exists(embedding_fp):
+        print("optimizing for embedding")
+        for i in tqdm(range(num_iterations)):
+            batch_embed = embeddings(torch.tensor(0).to(device)).unsqueeze(0)
+            batch_vec = torch.arange(start=0, end=1).to(device)
+            batch_vec = torch.repeat_interleave(batch_vec, num_union_nodes)
+            batch_mask = torch.sum(batch_part_nodes, dim=1)
+            with torch.no_grad():
+                learned_geom, learned_xforms = model.learn_geom_xform(batch_node_feat,
+                                                            batch_adj,
+                                                            batch_mask,
+                                                            batch_vec)
+                learned_relations = learned_xforms[:, connectivity[:, 0], connectivity[:, 1], :]
+                learned_xforms = learned_xforms[:, [0, 1, 2, 3], [0, 1, 2, 3], :]
+            # learned_xforms = batch_xforms
 
-        batch_geom = torch.einsum('ijk, ikm -> ijm',
-                                  batch_part_nodes.to(torch.float32),
-                                  batch_node_feat)
+            batch_geom = torch.einsum('ijk, ikm -> ijm',
+                                    batch_part_nodes.to(torch.float32),
+                                    batch_node_feat)
 
-        pairwise_xforms = learned_xforms[:, connectivity]
-        learned_relations = pairwise_xforms[:, :, 1] - pairwise_xforms[:, :, 0]
+            pairwise_xforms = learned_xforms[:, connectivity]
+            # learned_relations = pairwise_xforms[:, :, 1] - pairwise_xforms[:, :, 0]
 
-        transformed_points = gt_points.unsqueeze(1).expand(-1, num_parts, -1, -1) +\
-            learned_xforms.unsqueeze(2)
+            transformed_points = gt_points.unsqueeze(1).expand(-1, num_parts, -1, -1) +\
+                learned_xforms.unsqueeze(2)
 
-        occs = model(transformed_points, batch_embed)
-        pred_values, _ = torch.max(occs, dim=-1, keepdim=True)
+            occs = model(transformed_points, batch_embed)
+            pred_values, _ = torch.max(occs, dim=-1, keepdim=True)
 
-        loss = loss_f(pred_values, gt_values)
+            loss = loss_f(pred_values, gt_values)
 
-        # loss_bbox_geom = loss_f(
-        #     embed_fn(learned_geom.view(-1, 3)),
-        #     embed_fn(batch_geom.view(-1, 3)),)
-        # loss += loss_bbox_geom
+            # loss += 10 * loss_xform + 10 * loss_relations
 
-        # loss_xform = loss_f_xform(
-        #     embed_fn(learned_xforms.view(-1, 3)),
-        #     embed_fn(batch_xforms.view(-1, 3)))
-        # loss_relations = loss_f_xform(
-        #     embed_fn(learned_relations.view(-1, 3)),
-        #     embed_fn(batch_relations.view(-1, 3)))
+            # if (i+1) % 100 == 0:  # Print loss every 100 iterations
+            #     print(f'Iteration {i+1}/{num_iterations}, Loss: {loss.item()}')
+
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+            scheduler.step()
         
-        # loss += 10 * loss_xform + 10 * loss_relations
+        print(f'Loss: {loss.item()}')
 
-        # if (i+1) % 100 == 0:  # Print loss every 100 iterations
-        #     print(f'Iteration {i+1}/{num_iterations}, Loss: {loss.item()}')
-
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
-        scheduler.step()
+    if not os.path.exists(embedding_fp):
+        # save optimized embeddings
+        # embedding_fp = os.path.join(results_dir, 'embedding.pth')
+        torch.save(embeddings, embedding_fp)
 
     query_points = reconstruct.make_query_points(pt_sample_res)
     query_points = torch.from_numpy(query_points).to(device, torch.float32)
@@ -1021,6 +1044,7 @@ if args.inv:
     bs, num_points, _ = query_points.shape
 
     with torch.no_grad():
+        batch_embed = embeddings(torch.tensor(0).to(device)).unsqueeze(0)
         if args.mask:
             # parts = [args.part]
             parts = args.parts
