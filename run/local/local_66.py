@@ -1248,22 +1248,44 @@ if args.samp:
     misc.check_dir(results_dir)
     print(results_dir)
 
-    # sample by PCA
-    pca = PCA(n_components=8)  # Number of components should be <= embedding_dim
-    pca.fit(embeddings.weight.data.numpy()[:500])
-    embedddings_pca = pca.transform(embeddings.weight.data.numpy()[:500])
-    np.random.seed(319)
     def sample_pca_space(xformed_pca, num_samples=10, scale=1.0):
         mean = np.mean(xformed_pca, axis=0)
         std_dev = np.std(xformed_pca, axis=0)
         samples = np.random.normal(mean, std_dev * scale, size=(num_samples, xformed_pca.shape[1]))
         return samples
-    num_samples = 10
+
+    # # sample by PCA, entire vector
+    # NOTE: generated shapes are cohesive!
+    np.random.seed(319)
+    num_samples = 20
     scale = 1.0  # Adjust scale to control the diversity of generated shapes
+    pca = PCA(n_components=4)  # Number of components should be <= embedding_dim
+    pca.fit(embeddings.weight.data.numpy()[:500])
+    embedddings_pca = pca.transform(embeddings.weight.data.numpy()[:500])
     sampled_pca_embeddings = sample_pca_space(embedddings_pca, num_samples, scale)
     sampled_lat_embeddings = pca.inverse_transform(sampled_pca_embeddings)
     sampled_lat_embeddings = torch.from_numpy(sampled_lat_embeddings)
     batch_embed = sampled_lat_embeddings[sample_idx].to(device, torch.float32).unsqueeze(0)
+
+    # # sampe by PCA, by part
+    # # NOTE: generated shapes aren't cohesive! (because there's no global notion)
+    # # does this mean if i don't run loss on entire shapes (instead only on local shapes)
+    # # during training, i can't sample cohesive shapes??
+    # np.random.seed(319)
+    # num_samples = 20
+    # scale = 1.0
+    # sampled_lat_embeddings = torch.zeros(num_samples, num_parts*each_part_feat)
+    # for i in range(num_parts):
+    #     pca = PCA(n_components=8)
+    #     chunk = embeddings.weight.data.numpy()[:500, i*each_part_feat:(i+1)*each_part_feat]
+    #     pca.fit(chunk)
+    #     embedddings_pca = pca.transform(chunk)
+    #     part_pca_embeddings = sample_pca_space(embedddings_pca, num_samples, scale)
+    #     part_lat_embeddings = pca.inverse_transform(part_pca_embeddings)
+    #     sampled_lat_embeddings[:, i*each_part_feat:(i+1)*each_part_feat] =\
+    #         torch.from_numpy(part_lat_embeddings)
+    # sampled_lat_embeddings = sampled_lat_embeddings.to(device, torch.float32)
+    # batch_embed = sampled_lat_embeddings[sample_idx].unsqueeze(0)
 
     unique_part_names, name_to_ori_ids_and_objs,\
         orig_obbs, entire_mesh, name_to_obbs, _, _, _ =\
@@ -1289,8 +1311,8 @@ if args.samp:
     learned_obbs_path = os.path.join(results_dir, 'obbs_pred.png')
     obbs_path = os.path.join(results_dir, 'obbs_gt.png')
     lst_paths = [
-        obbs_path,
-        mesh_gt_path,
+        # obbs_path,
+        # mesh_gt_path,
         learned_obbs_path,
         mesh_pred_path]
 
@@ -1390,68 +1412,7 @@ if args.samp:
     
     unmasked_indices = list(set(range(num_parts)) - set(masked_indices))
 
-    obj_dir = os.path.join(partnet_dir, anno_id, 'vox_models')
-    assert os.path.exists(obj_dir)
-    gt_mesh_path = os.path.join(obj_dir, f'{anno_id}.obj')
-
-    if not args.mask:
-        gt_mesh = trimesh.load(gt_mesh_path, file_type='obj', force='mesh')
-        gt_vertices_aligned = torch.from_numpy(
-            gt_mesh.vertices).to(device).to(torch.float32)
-        gt_vertices_aligned = kaolin.ops.pointcloud.center_points(
-            gt_vertices_aligned.unsqueeze(0), normalize=True).squeeze(0)
-        gt_vertices_aligned = gt_vertices_aligned.cpu().numpy()
-        aligned_gt_mesh = trimesh.Trimesh(gt_vertices_aligned, gt_mesh.faces)
-        aligned_gt_mesh.export(os.path.join(results_dir, 'mesh_gt.obj'))
-        aligned_gt_mesh.visual.vertex_colors = [31, 119, 180]
-        visualize.save_mesh_vis(aligned_gt_mesh, mesh_gt_path,
-                                mag=mag, white_bg=white_bg)
-    else:
-        partnet_objs_dir = os.path.join(partnet_dir, anno_id, 'objs')
-        lst_of_part_meshes = []
-        
-        model_new_ids_to_obj_names: Dict = train_new_ids_to_objs[anno_id]
-        for i in range(num_parts):
-            if not str(i) in list(model_new_ids_to_obj_names.keys()):
-                lst_of_part_meshes.append(None)
-            else:
-                obj_names = model_new_ids_to_obj_names[str(i)]
-                meshes = []
-                for obj_name in obj_names:
-                    obj_path = os.path.join(partnet_objs_dir, f'{obj_name}.obj')
-                    part_mesh = trimesh.load_mesh(obj_path)
-                    meshes.append(part_mesh)
-                concat_part_mesh = trimesh.util.concatenate(meshes)
-                lst_of_part_meshes.append(concat_part_mesh)
-
-        masked_indices = masked_indices.cpu().numpy().tolist()
-        unmasked_indices = list(set(range(num_parts)) - set(masked_indices))
-
-        if args.recon_one_part:
-            # only show stuff in masked_indices
-            concat_mesh = trimesh.util.concatenate(
-                [lst_of_part_meshes[x] for x in parts])
-        if args.recon_the_rest:
-            # don't show stuff in masked_indices
-            concat_mesh = trimesh.util.concatenate(
-                [lst_of_part_meshes[x] for x in unmasked_indices])
-    
-        aligned_verts = kaolin.ops.pointcloud.center_points(
-            torch.from_numpy(np.array(concat_mesh.vertices)).unsqueeze(0),
-            normalize=True).squeeze(0)
-        aligned_gt_mesh = trimesh.Trimesh(aligned_verts, concat_mesh.faces)
-        aligned_gt_mesh.export(os.path.join(results_dir, 'mesh_gt.obj'))
-        aligned_gt_mesh.visual.vertex_colors = [31, 119, 180]
-        visualize.save_mesh_vis(aligned_gt_mesh, mesh_gt_path,
-                                mag=mag, white_bg=white_bg)
-
-    import itertools
-    obbs_of_interest = [part_obbs[x] for x in unmasked_indices]
-    obbs_of_interest = list(itertools.chain(*obbs_of_interest))
-    visualize.save_obbs_vis(obbs_of_interest,
-                            obbs_path, mag=mag, white_bg=white_bg,
-                            unmasked_indices=unmasked_indices)
-    
+    import itertools    
     learned_obbs_of_interest = [learned_obbs_of_interest[x] for x in unmasked_indices]
     learned_obbs_of_interest = list(itertools.chain(*learned_obbs_of_interest))
     visualize.save_obbs_vis(learned_obbs_of_interest,

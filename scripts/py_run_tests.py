@@ -18,7 +18,7 @@ def run_asb_inv():
         subprocess.call([f"scripts/test_local_asb_inv.sh 66 3000 {perm[0]} {perm[1]} {perm[2]} {perm[3]}"], shell=True)
 
 def run_sample(model_idx):
-    for i in range(10):
+    for i in range(20):
         subprocess.call([f"scripts/test_local_sample.sh 66 3000 {model_idx} {i}"], shell=True)
 
 
