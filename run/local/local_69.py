@@ -234,57 +234,20 @@ minib_size = num_points // n_minib
 
 embed_fn, _ = get_embedder(2)
 
-def train_one_itr(it, b,
-                  all_fg_part_indices, 
-                  batch_points, batch_values,
-                  batch_embed,
-                  batch_node_feat, batch_adj, batch_part_nodes,
-                  batch_xforms, batch_relations):
-    num_parts_to_mask = np.random.randint(1, num_parts)
-    # num_parts_to_mask = 1
-    rand_indices = np.random.choice(num_parts, num_parts_to_mask,
-                                    replace=False)
-
-    masked_indices = torch.from_numpy(rand_indices).to(device, torch.long)
-    # make gt value mask
-    val_mask = torch.ones_like(batch_values).to(device, torch.float32)
-    for i in range(batch_size):
-        fg_part_indices = all_fg_part_indices[i]
-        fg_part_indices_masked = fg_part_indices[masked_indices.cpu().numpy()]
-        if len(fg_part_indices_masked) != 0:
-            fg_part_indices_masked = np.concatenate(fg_part_indices_masked, axis=0)
-        else:
-            fg_part_indices_masked = np.array([])
-        val_mask[i][fg_part_indices_masked] = 0
-
-    all_minib_losses = 0
-    for minib in range(n_minib):
-        loss = train_one_minib(it, b, minib, rand_indices, masked_indices,
-                               val_mask[:, minib*minib_size:(minib+1)*minib_size],
-                               batch_points[:, minib*minib_size:(minib+1)*minib_size],
-                               batch_values[:, minib*minib_size:(minib+1)*minib_size],
-                               batch_embed,
-                               batch_node_feat,
-                               batch_adj,
-                               batch_part_nodes,
-                               batch_xforms,
-                               batch_relations)
-        all_minib_losses += loss
-    return all_minib_losses
-    
 
 def train_one_minib(it, b, minib,
-                    rand_indices, masked_indices, val_mask, 
+                    rand_indices, batch_val_mask,
                     batch_points, batch_values,
                     batch_embed,
                     batch_node_feat, batch_adj, batch_part_nodes,
                     batch_xforms, batch_relations):
+    val_mask = batch_val_mask[:, minib*minib_size:(minib+1)*minib_size]
 
     modified_values = batch_values * val_mask
 
     parts_mask = torch.zeros((batch_embed.shape[0], num_parts)).to(device, torch.float32)
-    if len(masked_indices) != 0:
-        parts_mask[:, rand_indices] = 1
+    # if len(masked_indices) != 0:
+    parts_mask[:, rand_indices] = 1
     parts_mask = torch.repeat_interleave(parts_mask,
                                          each_part_feat, dim=-1)
 
@@ -349,10 +312,7 @@ def train_one_minib(it, b, minib,
         writer.add_scalar('relations loss', loss_relations, it)
 
     optimizer.zero_grad()
-    if minib < n_minib - 1:
-        loss.backward(retain_graph=True)
-    else:
-        loss.backward()
+    loss.backward()
     optimizer.step()
     scheduler.step()
 
@@ -363,25 +323,42 @@ if args.train:
     print("training...")
     start_time = time.time()
     for it in range(iterations):
-        batch_loss = 0
+        batch_loss = 0        
         for b in range(n_batches):
-            batch_fg_part_indices,\
-                batch_normalized_points, batch_values,\
-                batch_embed, \
-                batch_node_feat, batch_adj, batch_part_nodes,\
-                batch_xforms, batch_relations =\
-                    load_batch(b, batch_size)
-            loss = train_one_itr(it, b,
-                                 batch_fg_part_indices,
-                                 batch_normalized_points,
-                                 batch_values,
-                                 batch_embed,
-                                 batch_node_feat, batch_adj, batch_part_nodes,
-                                 batch_xforms, batch_relations)
-            writer.add_scalar('iteration loss', loss, it)
-            batch_loss += loss
+            num_parts_to_mask = np.random.randint(1, num_parts)
+            # num_parts_to_mask = 1
+            rand_indices = np.random.choice(num_parts, num_parts_to_mask,
+                                            replace=False)
+            # make gt value mask
+            val_mask = torch.ones(batch_size, num_points, 1).to(device, torch.float32)
+            for i in range(batch_size):
+                fg_part_indices = all_fg_part_indices[i]
+                fg_part_indices_masked = fg_part_indices[rand_indices]
+                if len(fg_part_indices_masked) != 0:
+                    fg_part_indices_masked = np.concatenate(fg_part_indices_masked, axis=0)
+                else:
+                    fg_part_indices_masked = np.array([])
+                val_mask[i][fg_part_indices_masked] = 0
+            # total_minib_loss = 0
+            for minib in range(n_minib):
+                batch_fg_part_indices,\
+                    batch_normalized_points, batch_values,\
+                    batch_embed, \
+                    batch_node_feat, batch_adj, batch_part_nodes,\
+                    batch_xforms, batch_relations =\
+                        load_minibatch(b, batch_size, minib, minib_size)
+                minib_loss = train_one_minib(it, b, minib,
+                                             rand_indices, val_mask,
+                                             batch_normalized_points,
+                                             batch_values,
+                                             batch_embed,
+                                             batch_node_feat, batch_adj, batch_part_nodes,
+                                             batch_xforms, batch_relations)
+                # total_minib_loss += minib_loss
+                batch_loss += minib_loss
         avg_batch_loss = batch_loss / batch_size
-            
+        writer.add_scalar('iteration loss', avg_batch_loss, it)
+
         show = 100 if OVERFIT else 10
         if (it) % show == 0 or it == (iterations - 1):
             info = f'-------- Iteration {it} - loss: {avg_batch_loss:.8f} --------'
