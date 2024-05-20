@@ -23,4 +23,4 @@ def run_sample(model_idx):
 
 
 if __name__ == "__main__":
-    run_sample(86)
+    run_sample(41)
