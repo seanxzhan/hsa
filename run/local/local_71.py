@@ -50,14 +50,14 @@ if args.of:
     assert args.of_idx != None
 
 device = 'cuda'
-lr = 5e-3
+lr = 1e-3
 laplacian_weight = 0.1
-iterations = 3001
+iterations = 2001
 save_every = 100
 multires = 2
 pt_sample_res = 128        # point_sampling
 
-expt_id = 69
+expt_id = 71
 
 OVERFIT = args.of
 overfit_idx = args.of_idx
