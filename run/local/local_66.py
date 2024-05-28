@@ -925,7 +925,7 @@ if args.asb:
     exit(0)
 
 
-if args.inv:
+if args.inv and not args.sc:
     white_bg = True
     it = args.it
     model_idx = args.test_idx
@@ -1454,10 +1454,23 @@ if args.sc:
 
     checkpoint = torch.load(os.path.join(ckpt_dir, f'model_{it}.pt'))
     model.load_state_dict(checkpoint['model_state_dict'])
+
+    # if not args.inv:
+    #     embeddings = torch.nn.Embedding(num_shapes, num_parts*each_part_feat)
+    #     embeddings.load_state_dict(checkpoint['embeddings_state_dict'])
+    # else:
+    #     embeddings = torch.zeros(num_shapes, num_parts*each_part_feat)
+    #     all_paths = [os.path.join(old_results_dir, str(x), 'embedding.pth') for x in anno_ids]
+    #     for p in all_paths:
+    #         assert os.path.exists(p), "you haven't run shape inversion for all unseen models"
+    #     all_embeddings = [torch.load(p) for p in all_paths]
+    #     for i in range(len(all_embeddings)):
+    #         embeddings[i] = all_embeddings[i].weight.data[0]
+
     embeddings = torch.nn.Embedding(num_shapes, num_parts*each_part_feat)
     embeddings.load_state_dict(checkpoint['embeddings_state_dict'])
-    optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
 
+    old_results_dir = results_dir
     parts_str = '-'.join([str(x) for x in fixed_parts])
     results_dir = os.path.join(results_dir, f'{anno_id}-completion-{parts_str}', f'{anno_id}-sample-{sample_idx}')
     misc.check_dir(results_dir)
@@ -1484,11 +1497,21 @@ if args.sc:
         _, indices = nn_model.kneighbors(fixed_vector)
         nn_unfixed_embed = unfixed_part[indices[0]]
 
-        gmm = GaussianMixture(n_components=5, covariance_type='full')
-        gmm.fit(nn_unfixed_embed)
+        # gmm = GaussianMixture(n_components=5, covariance_type='full')
+        # gmm.fit(nn_unfixed_embed)
 
-        sampled_variance_parts = gmm.sample(num_samples)[0]
-        return sampled_variance_parts
+        # sampled_variance_parts = gmm.sample(num_samples)[0]
+        # return sampled_variance_parts
+
+        pca = PCA(n_components=4)  # Number of components should be <= embedding_dim
+        pca.fit(nn_unfixed_embed)
+        embedddings_pca = pca.transform(nn_unfixed_embed)
+        sampled_pca_embeddings = sample_pca_space(embedddings_pca, num_samples)
+        sampled_lat_embeddings = pca.inverse_transform(sampled_pca_embeddings)
+        sampled_lat_embeddings = torch.from_numpy(sampled_lat_embeddings)
+        return sampled_lat_embeddings
+        
+        # batch_embed = sampled_lat_embeddings[sample_idx].to(device, torch.float32).unsqueeze(0)
     
     def sample_pca_space(xformed_pca, num_samples=10, scale=1.0):
         mean = np.mean(xformed_pca, axis=0)
@@ -1501,7 +1524,13 @@ if args.sc:
     np.random.seed(319)
     num_samples = 10
 
-    test_embed = embeddings.weight.data.numpy()[model_idx]
+    if not args.inv:
+        test_embed = embeddings.weight.data.numpy()[model_idx]
+    else:
+        embed_p = os.path.join(old_results_dir, str(anno_id), 'embedding.pth')
+        assert os.path.exists(embed_p), "you haven't run shape inversion for all unseen models"
+        test_embed = torch.load(embed_p).weight.data.cpu().numpy()[0]
+
     fixed_test_embed = np.concatenate([test_embed[i*each_part_feat:(i+1)*each_part_feat] for i in fixed_parts])[None, :]
     sampled_unfixed_parts = sample_conditional(fixed_test_embed, nn_model, unfixed_embed, num_samples)
     complete_embed = np.zeros((num_samples, num_parts*each_part_feat), np.float32)
@@ -1617,7 +1646,7 @@ if args.sc:
         learned_obbs_of_interest[i] = [ext_xform]
 
     if args.mask:
-        mag = 1
+        mag = 0.8
     else:
         mag = 0.8
 
