@@ -36,6 +36,8 @@ parser.add_argument('--inv', action="store_true")
 parser.add_argument('--part_indices', nargs='+')
 parser.add_argument('--samp', action="store_true")
 parser.add_argument('--sample_idx', '--si', type=int)
+parser.add_argument('--sc', action="store_true")
+parser.add_argument('--fixed_indices', nargs='+')
 args = parser.parse_args()
 # assert args.train != args.test, "Must pass in either train or test"
 if args.test:
@@ -259,12 +261,16 @@ def train_one_itr(it, b,
                                             batch_adj,
                                             batch_mask,
                                             batch_vec)
-    learned_relations = learned_xforms[:, connectivity[:, 0], connectivity[:, 1], :]
+    # learned_relations = learned_xforms[:, connectivity[:, 0], connectivity[:, 1], :]
     learned_xforms = learned_xforms[:, [0, 1, 2, 3], [0, 1, 2, 3], :]
 
     batch_geom = torch.einsum('ijk, ikm -> ijm',
                                batch_part_nodes.to(torch.float32),
                                batch_node_feat)
+    # pairwise_geom = learned_geom[:, connectivity]
+    # learned_ratio = pairwise_geom[:, :, 1] / pairwise_geom[:, :, 0]
+    # batch_pairwise_geom =  batch_geom[:, connectivity]
+    # batch_ratio = batch_pairwise_geom[:, :, 1] / batch_pairwise_geom[:, :, 0]
 
     pairwise_xforms = learned_xforms[:, connectivity]
     learned_relations = pairwise_xforms[:, :, 1] - pairwise_xforms[:, :, 0]
@@ -288,7 +294,11 @@ def train_one_itr(it, b,
     loss_bbox_geom = loss_f(
         embed_fn(learned_geom.view(-1, 3)),
         embed_fn(batch_geom.view(-1, 3)),)
-    loss += loss_bbox_geom
+    # loss_bbox_ratio = loss_f(
+    #     embed_fn(learned_ratio.view(-1, 3)),
+    #     embed_fn(batch_ratio.view(-1, 3)),)
+    # loss += loss_bbox_geom + 0.1 * loss_bbox_ratio
+    loss += 10 * loss_bbox_geom
 
     loss_xform = loss_f_xform(
         embed_fn(learned_xforms.view(-1, 3)),
@@ -302,6 +312,7 @@ def train_one_itr(it, b,
     if b == n_batches - 1:
         writer.add_scalar('occ loss', loss1 + loss2, it)
         writer.add_scalar('bbox geom loss', loss_bbox_geom, it)
+        # writer.add_scalar('bbox ratio loss', loss_bbox_ratio, it)
         writer.add_scalar('xform loss', loss_xform, it)
         writer.add_scalar('relations loss', loss_relations, it)
 
@@ -470,7 +481,7 @@ if args.test:
                                                     batch_adj,
                                                     batch_mask,
                                                     batch_vec)
-        learned_relations = learned_xforms[:, connectivity[:, 0], connectivity[:, 1], :]
+        # learned_relations = learned_xforms[:, connectivity[:, 0], connectivity[:, 1], :]
         learned_xforms = learned_xforms[:, [0, 1, 2, 3], [0, 1, 2, 3], :]
 
         batch_geom = torch.einsum('ijk, ikm -> ijm',
@@ -923,7 +934,7 @@ if args.asb:
     exit(0)
 
 
-if args.inv:
+if args.inv and not args.sc:
     white_bg = True
     it = args.it
     model_idx = args.test_idx
@@ -1427,6 +1438,259 @@ if args.samp:
     else:
         # parts_str contains all the parts that are MASKED OUT
         parts_str = '-'.join([str(x) for x in masked_indices])
+        visualize.stitch_imges(
+            os.path.join(results_dir,f'{anno_id}_results_mask_{parts_str}.png'),
+            image_paths=lst_paths,
+            adj=100)
+
+    exit(0)
+
+
+if args.sc:
+    from sklearn.mixture import GaussianMixture
+    from sklearn.neighbors import NearestNeighbors
+
+    white_bg = True
+    it = args.it
+    model_idx = args.test_idx
+    sample_idx = args.sample_idx
+    fixed_parts = args.fixed_indices
+    fixed_parts = [int(x) for x in fixed_parts]
+    unfixed_parts = list(set(range(num_parts)) - set(fixed_parts))
+    anno_id = model_idx_to_anno_id[model_idx]
+    model_id = misc.anno_id_to_model_id(partnet_index_path)[anno_id]
+    print(f"anno id: {anno_id}, model id: {model_id}")
+
+    checkpoint = torch.load(os.path.join(ckpt_dir, f'model_{it}.pt'))
+    model.load_state_dict(checkpoint['model_state_dict'])
+
+    # if not args.inv:
+    #     embeddings = torch.nn.Embedding(num_shapes, num_parts*each_part_feat)
+    #     embeddings.load_state_dict(checkpoint['embeddings_state_dict'])
+    # else:
+    #     embeddings = torch.zeros(num_shapes, num_parts*each_part_feat)
+    #     all_paths = [os.path.join(old_results_dir, str(x), 'embedding.pth') for x in anno_ids]
+    #     for p in all_paths:
+    #         assert os.path.exists(p), "you haven't run shape inversion for all unseen models"
+    #     all_embeddings = [torch.load(p) for p in all_paths]
+    #     for i in range(len(all_embeddings)):
+    #         embeddings[i] = all_embeddings[i].weight.data[0]
+
+    embeddings = torch.nn.Embedding(num_shapes, num_parts*each_part_feat)
+    embeddings.load_state_dict(checkpoint['embeddings_state_dict'])
+
+    old_results_dir = results_dir
+    parts_str = '-'.join([str(x) for x in fixed_parts])
+    results_dir = os.path.join(results_dir, f'{anno_id}-completion-{parts_str}', f'{anno_id}-sample-{sample_idx}')
+    misc.check_dir(results_dir)
+    print(results_dir)
+
+    dim_fixed = len(fixed_parts) * each_part_feat
+    dim_unfixed = num_parts * each_part_feat - dim_fixed
+
+    fixed_embed = np.zeros((500, dim_fixed), np.float32)
+    unfixed_embed = np.zeros((500, dim_unfixed), np.float32)
+
+    for i, idx in enumerate(fixed_parts):
+        fixed_embed[:500, i*each_part_feat:(i+1)*each_part_feat] =\
+            embeddings.weight.data.numpy()[:500, idx*each_part_feat:(idx+1)*each_part_feat]
+    
+    for i, idx in enumerate(unfixed_parts):
+        unfixed_embed[:500, i*each_part_feat:(i+1)*each_part_feat] =\
+            embeddings.weight.data.numpy()[:500, idx*each_part_feat:(idx+1)*each_part_feat]
+
+    nn_model = NearestNeighbors(n_neighbors=50)
+    nn_model.fit(fixed_embed)
+
+    def sample_conditional(fixed_vector, nn_model: NearestNeighbors, unfixed_part, num_samples=1):
+        _, indices = nn_model.kneighbors(fixed_vector)
+        nn_unfixed_embed = unfixed_part[indices[0]]
+
+        # gmm = GaussianMixture(n_components=5, covariance_type='full')
+        # gmm.fit(nn_unfixed_embed)
+
+        # sampled_variance_parts = gmm.sample(num_samples)[0]
+        # return sampled_variance_parts
+
+        pca = PCA(n_components=4)  # Number of components should be <= embedding_dim
+        pca.fit(nn_unfixed_embed)
+        embedddings_pca = pca.transform(nn_unfixed_embed)
+        sampled_pca_embeddings = sample_pca_space(embedddings_pca, num_samples)
+        sampled_lat_embeddings = pca.inverse_transform(sampled_pca_embeddings)
+        sampled_lat_embeddings = torch.from_numpy(sampled_lat_embeddings)
+        return sampled_lat_embeddings
+        
+        # batch_embed = sampled_lat_embeddings[sample_idx].to(device, torch.float32).unsqueeze(0)
+    
+    def sample_pca_space(xformed_pca, num_samples=10, scale=1.0):
+        mean = np.mean(xformed_pca, axis=0)
+        std_dev = np.std(xformed_pca, axis=0)
+        samples = np.random.normal(mean, std_dev * scale, size=(num_samples, xformed_pca.shape[1]))
+        return samples
+
+    # # sample by PCA, entire vector
+    # NOTE: generated shapes are cohesive!
+    np.random.seed(319)
+    num_samples = 10
+
+    if not args.inv:
+        test_embed = embeddings.weight.data.numpy()[model_idx]
+    else:
+        embed_p = os.path.join(old_results_dir, str(anno_id), 'embedding.pth')
+        assert os.path.exists(embed_p), "you haven't run shape inversion for all unseen models"
+        test_embed = torch.load(embed_p).weight.data.cpu().numpy()[0]
+
+    fixed_test_embed = np.concatenate([test_embed[i*each_part_feat:(i+1)*each_part_feat] for i in fixed_parts])[None, :]
+    sampled_unfixed_parts = sample_conditional(fixed_test_embed, nn_model, unfixed_embed, num_samples)
+    complete_embed = np.zeros((num_samples, num_parts*each_part_feat), np.float32)
+    for i, idx in enumerate(fixed_parts):
+        complete_embed[:, idx*each_part_feat:(idx+1)*each_part_feat] =\
+            fixed_test_embed[:, i*each_part_feat:(i+1)*each_part_feat]
+    for i, idx in enumerate(unfixed_parts):
+        complete_embed[:, idx*each_part_feat:(idx+1)*each_part_feat] =\
+            sampled_unfixed_parts[:, i*each_part_feat:(i+1)*each_part_feat]
+    batch_embed = torch.from_numpy(complete_embed[sample_idx]).unsqueeze(0).to(device, torch.float32)
+
+    unique_part_names, name_to_ori_ids_and_objs,\
+        orig_obbs, entire_mesh, name_to_obbs, _, _, _ =\
+        preprocess_data_12.merge_partnet_after_merging(anno_id)
+
+    with open(f'data/{cat_name}_part_name_to_new_id_12_{ds_start}_{ds_end}.json', 'r') as f:
+        unique_name_to_new_id = json.load(f)
+
+    part_obbs = []
+
+    unique_names = list(unique_name_to_new_id.keys())
+    model_part_names = list(name_to_obbs.keys())
+
+    for i, un in enumerate(unique_names):
+        if not un in model_part_names:
+            part_obbs.append([])
+            continue
+        part_obbs.append([name_to_obbs[un]])
+
+    gt_color = [31, 119, 180, 255]
+    mesh_pred_path = os.path.join(results_dir, 'mesh_pred.png')
+    mesh_gt_path = os.path.join(results_dir, 'mesh_gt.png')
+    learned_obbs_path = os.path.join(results_dir, 'obbs_pred.png')
+    obbs_path = os.path.join(results_dir, 'obbs_gt.png')
+    lst_paths = [
+        # obbs_path,
+        # mesh_gt_path,
+        learned_obbs_path,
+        mesh_pred_path]
+
+    query_points = reconstruct.make_query_points(pt_sample_res)
+    query_points = torch.from_numpy(query_points).to(device, torch.float32)
+    query_points = query_points.unsqueeze(0)
+    bs, num_points, _ = query_points.shape
+
+    batch_node_feat = torch.from_numpy(node_features[model_idx:model_idx+1, :, :3]).to(device, torch.float32)
+    batch_adj = torch.from_numpy(adj[model_idx:model_idx+1]).to(device, torch.float32)
+    batch_part_nodes = torch.from_numpy(part_nodes[model_idx:model_idx+1]).to(device, torch.float32)
+
+    with torch.no_grad():
+        if args.mask:
+            # parts = [args.part]
+            parts = args.parts
+            parts = [int(x) for x in parts]
+            if args.recon_one_part:
+                # only reconstruct part specified by parts
+                masked_indices = list(set(range(num_parts)) - set(parts))
+                masked_indices = torch.Tensor(masked_indices).to(device, torch.long)
+            if args.recon_the_rest:
+                # don't reconstruct stuff in masked_indices
+                masked_indices = torch.Tensor(parts).to(device, torch.long)
+        else:
+            masked_indices = torch.Tensor([]).to(device, torch.long)
+
+        if not args.mask:
+            print("reconstructing...")
+        else:
+            print(f"masking parts: {masked_indices.cpu().numpy().tolist()}")
+
+        parts_mask = torch.zeros((batch_embed.shape[0], num_parts)).to(device, torch.float32)
+        parts_mask[:, masked_indices] = 1
+        parts_mask = torch.repeat_interleave(parts_mask, each_part_feat, dim=-1)
+        
+        points_mask = torch.zeros((1, num_parts, 1, 1)).to(device, torch.float32)
+        points_mask[:, masked_indices] = 1
+
+        occ_mask = torch.zeros((1, 1, num_parts)).to(device, torch.float32)
+        occ_mask[:, :, masked_indices] = 1
+
+        # learning xforms
+        batch_vec = torch.arange(start=0, end=1).to(device)
+        batch_vec = torch.repeat_interleave(batch_vec, num_union_nodes)
+        batch_mask = torch.sum(batch_part_nodes, dim=1)
+        learned_geom, learned_xforms = model.learn_geom_xform(batch_node_feat,
+                                                    batch_adj,
+                                                    batch_mask,
+                                                    batch_vec)
+        learned_relations = learned_xforms[:, connectivity[:, 0], connectivity[:, 1], :]
+        learned_xforms = learned_xforms[:, [0, 1, 2, 3], [0, 1, 2, 3], :]
+
+        batch_geom = torch.einsum('ijk, ikm -> ijm',
+                                batch_part_nodes.to(torch.float32),
+                                batch_node_feat)
+
+        pairwise_xforms = learned_xforms[:, connectivity]
+        learned_relations = pairwise_xforms[:, :, 1] - pairwise_xforms[:, :, 0]
+
+        transformed_points = query_points.unsqueeze(1).expand(-1, num_parts, -1, -1) +\
+            learned_xforms.unsqueeze(2)
+
+        occs1 = model(transformed_points.masked_fill(points_mask==1,torch.tensor(0)),
+                      batch_embed.masked_fill(parts_mask==1, torch.tensor(0)))
+        occs1 = occs1.masked_fill(occ_mask==1,torch.tensor(float('-inf')))
+        pred_values, _ = torch.max(occs1, dim=-1, keepdim=True)
+
+    learned_xforms = learned_xforms[0].cpu().numpy()
+    learned_obbs_of_interest = [[]] * num_parts
+    for i in range(num_parts):
+        ext = extents[model_idx, i]
+        learned_xform = np.eye(4)
+        learned_xform[:3, 3] = -learned_xforms[i]
+        ext_xform = (ext, learned_xform)
+        learned_obbs_of_interest[i] = [ext_xform]
+
+    if args.mask:
+        mag = 0.8
+    else:
+        mag = 0.8
+
+    sdf_grid = torch.reshape(
+        pred_values,
+        (1, pt_sample_res, pt_sample_res, pt_sample_res))
+    sdf_grid = torch.permute(sdf_grid, (0, 2, 1, 3))
+    vertices, faces =\
+        kaolin.ops.conversions.voxelgrids_to_trianglemeshes(sdf_grid)
+    vertices = kaolin.ops.pointcloud.center_points(
+        vertices[0].unsqueeze(0), normalize=True).squeeze(0)
+    pred_vertices = vertices.cpu().numpy()
+    pred_faces = faces[0].cpu().numpy()
+    pred_mesh = trimesh.Trimesh(pred_vertices, pred_faces)
+    pred_mesh.export(os.path.join(results_dir, 'mesh_pred.obj'))
+    visualize.save_mesh_vis(pred_mesh, mesh_pred_path,
+                            mag=mag, white_bg=white_bg)
+    
+    unmasked_indices = list(set(range(num_parts)) - set(masked_indices))
+
+    import itertools    
+    learned_obbs_of_interest = [learned_obbs_of_interest[x] for x in unmasked_indices]
+    learned_obbs_of_interest = list(itertools.chain(*learned_obbs_of_interest))
+    visualize.save_obbs_vis(learned_obbs_of_interest,
+                            learned_obbs_path, mag=mag, white_bg=white_bg,
+                            unmasked_indices=unmasked_indices)
+    
+    if not args.mask:
+        visualize.stitch_imges(
+            os.path.join(results_dir,f'{anno_id}_results.png'),
+            image_paths=lst_paths,
+            adj=100)
+    else:
+        # parts_str contains all the parts that are MASKED OUT
+        parts_str = '-'.join([str(x) for x in masked_indices.cpu().numpy().tolist()])
         visualize.stitch_imges(
             os.path.join(results_dir,f'{anno_id}_results_mask_{parts_str}.png'),
             image_paths=lst_paths,

@@ -30,6 +30,7 @@ parser.add_argument('--recon_the_rest', '--rt', action="store_true")
 parser.add_argument('--parts', '--p', nargs='+')
 parser.add_argument('--it', type=int)
 parser.add_argument('--asb', action="store_true")
+parser.add_argument('--asb_scaling', action="store_true")
 parser.add_argument('--of', action="store_true", default=False)
 parser.add_argument('--of_idx', '--oi', type=int)
 parser.add_argument('--inv', action="store_true")
@@ -651,13 +652,17 @@ if args.asb:
     # model_indices = [5, 4, 2, 8]
     # part_indices = [0, 1, 2, 3]
 
-    # model_indices = [500, 501, 506, 505]
-    # part_indices = [0, 1, 2, 3]
+    model_indices = [500, 501, 506, 505]
+    part_indices = [1, 0, 3, 2]
+
+    # model_indices = [500, 501, 502, 505]
+    # part_indices = [3, 0, 2, 1]
+    # part_indices = [3, 0, 1, 2]
 
     # model_indices = [255, 354, 28, 175]
     # model_indices = [343, 185, 370, 258]
-    model_indices = [347, 82, 292, 365]
-    part_indices = [int(x) for x in args.part_indices]
+    # model_indices = [347, 82, 292, 365]
+    # part_indices = [int(x) for x in args.part_indices]
 
     # {
     #     "chair_arm": 0,
@@ -841,6 +846,7 @@ if args.asb:
         pred_values2, _ = torch.max(occs2, dim=-1, keepdim=True)
 
     learned_xforms = learned_xforms[0].cpu().numpy()
+    learned_geom = learned_geom[0].cpu().numpy()
     gt_xforms = gt_xforms[0].cpu().numpy()
 
     obbs_of_interest = [[]] * num_parts
@@ -852,7 +858,9 @@ if args.asb:
         learned_xform[:3, 3] = -learned_xforms[i]
         gt_xform = np.eye(4)
         gt_xform[:3, 3] = -gt_xforms[i]
-        ext_xform = (ext, learned_xform)
+        learned_ext = learned_geom[i]
+        ext_xform = (learned_ext, learned_xform)
+        # ext_xform = (ext, learned_xform)
         prex_ext_xform = (ext, gt_xform)
         obbs_of_interest[i] = [ext_xform]
         prex_obbs_of_interest[i] = [prex_ext_xform]
@@ -925,7 +933,7 @@ if args.asb:
     exit(0)
 
 
-if args.inv and not args.sc:
+if args.inv and not args.sc and not args.asb_scaling:
     white_bg = True
     it = args.it
     model_idx = args.test_idx
@@ -1107,12 +1115,15 @@ if args.inv and not args.sc:
 
 
     learned_xforms = learned_xforms[0].cpu().numpy()
+    learned_geom = learned_geom[0].cpu().numpy()
     learned_obbs_of_interest = [[]] * num_parts
     for i in range(num_parts):
         ext = extents[model_idx, i]
         learned_xform = np.eye(4)
         learned_xform[:3, 3] = -learned_xforms[i]
-        ext_xform = (ext, learned_xform)
+        learned_ext = learned_geom[i]
+        # ext_xform = (ext, learned_xform)
+        ext_xform = (learned_ext, learned_xform)
         learned_obbs_of_interest[i] = [ext_xform]
 
     if args.mask:
@@ -1689,3 +1700,288 @@ if args.sc:
 
     exit(0)
 
+
+if args.asb_scaling:
+    # assembly shape from coarse parts
+    it = args.it
+
+    # model_indices = [500, 501, 506, 505]
+    # part_indices = [1, 0, 3, 2]
+    # model_indices = [500, 501, 502, 505]
+    # part_indices = [3, 0, 2, 1]
+    # part_indices = [3, 0, 1, 2]
+    # model_indices = [343, 185, 370, 258]
+    # part_indices = [0, 2, 1, 3]
+    # part_indices = [0, 2, 3, 1]
+    model_indices = [255, 354, 28, 175]
+    # part_indices = [0, 2, 3, 1]
+    part_indices = [3, 1, 2, 0]
+
+    anno_ids = [model_idx_to_anno_id[x] for x in model_indices]
+    # model_id = misc.anno_id_to_model_id(partnet_index_path)[anno_id]
+    # print(f"anno id: {anno_id}, model id: {model_id}")
+    print(anno_ids)
+
+    asb_str = '-'.join([str(x) for x in anno_ids+part_indices])
+    old_results_dir = results_dir
+    results_dir = os.path.join(results_dir, f'0assembly_{asb_str}')
+    misc.check_dir(results_dir)
+    print("results dir: ", results_dir)
+
+    with open(os.path.join(results_dir, 'anno_ids.txt'), 'w') as f:
+        anno_ids_str = '-'.join([str(x) for x in model_indices])
+        part_indices_str = '-'.join([str(x) for x in part_indices])
+        # f.write(anno_ids_str)
+        f.writelines([anno_ids_str, '\n', part_indices_str])
+
+    checkpoint = torch.load(os.path.join(ckpt_dir, f'model_{it}.pt'))
+    model.load_state_dict(checkpoint['model_state_dict'])
+
+    if not args.inv:
+        embeddings = torch.nn.Embedding(num_shapes, num_parts*each_part_feat)
+        embeddings.load_state_dict(checkpoint['embeddings_state_dict'])
+    else:
+        embeddings = torch.zeros(num_shapes, num_parts*each_part_feat)
+        all_paths = [os.path.join(old_results_dir, str(x), 'embedding.pth') for x in anno_ids]
+        for p in all_paths:
+            assert os.path.exists(p), "you haven't run shape inversion for all unseen models"
+        all_embeddings = [torch.load(p) for p in all_paths]
+        for i in range(len(all_embeddings)):
+            embeddings[i] = all_embeddings[i].weight.data[0]
+
+    all_part_num_obbs = []
+    # obbs_of_interest = [[]] * num_parts
+    # node features just have the extents
+    asb_node_feat = torch.zeros((num_union_nodes, 3)).to(torch.float32)
+    asb_part_nodes = torch.zeros((num_parts, num_union_nodes)).to(torch.long)
+    asb_adj = torch.zeros((num_union_nodes, num_union_nodes)).to(torch.long)
+    asb_embed = torch.zeros(1, num_parts*each_part_feat).to(torch.float32)
+    gt_xforms = torch.zeros((1, num_parts, 3)).to(torch.float32)
+    gt_exts = torch.zeros((num_parts, 3)).to(torch.float32)
+    for i, idx in enumerate(model_indices):
+        anno_id = model_idx_to_anno_id[idx]
+        part_idx = part_indices[i]
+        shape_node_feat = torch.from_numpy(node_features[idx, :, :3])    # 7, 3
+        shape_part_nodes = torch.from_numpy(part_nodes[idx])  # 4, 7
+        shape_adj = torch.from_numpy(adj[idx])
+        shape_xform = torch.from_numpy(xforms[idx, part_idx, :3, 3])
+        # shape_part_mask = shape_part_nodes[part_idx].unsqueeze(1)    # 7, 1
+        # asb_node_features += shape_node_feat * shape_part_mask
+        union_node_indices =\
+            torch.argwhere(shape_part_nodes[part_idx] == 1).flatten()
+        shape_ext = shape_node_feat[union_node_indices]
+        asb_node_feat[union_node_indices] = shape_ext
+        
+        asb_part_nodes[part_idx] = shape_part_nodes[part_idx]
+        
+        for uni in union_node_indices:
+            build_adj_matrix(uni, asb_adj, shape_adj)
+
+        if not args.inv:
+            asb_embed[:, part_idx*each_part_feat:(part_idx+1)*each_part_feat] =\
+                embeddings(torch.tensor(idx))[part_idx*each_part_feat:(part_idx+1)*each_part_feat]
+        else:
+            asb_embed[:, part_idx*each_part_feat:(part_idx+1)*each_part_feat] =\
+                embeddings[i, part_idx*each_part_feat:(part_idx+1)*each_part_feat]
+
+        gt_xforms[:, part_idx] = shape_xform
+        gt_exts[part_idx] = shape_ext
+
+    # build a tree that is a subset of the union tree (dense graph)
+    # using the bounding boxes
+    node_names = np.load(f'data/{cat_name}_union_node_names_12_{ds_start}_{ds_end}.npy')
+    recon_root = tree.recon_tree(asb_adj.numpy(), node_names)
+    UniqueDotExporter(recon_root,
+                      indent=0,
+                      nodenamefunc=lambda node: node.name,
+                      nodeattrfunc=lambda node: "shape=box",).to_picture(
+                          os.path.join(results_dir, 'asb_tree.png'))
+
+    batch_node_feat = asb_node_feat.unsqueeze(0).to(device)
+    batch_part_nodes = asb_part_nodes.unsqueeze(0).to(device)
+    batch_adj = asb_adj.unsqueeze(0).to(device)
+    batch_embed = asb_embed.to(device)
+    gt_xforms = gt_xforms.to(device)
+
+    # exit(0)
+    
+    gt_color = [31, 119, 180, 255]
+    pred_mesh_path = os.path.join(results_dir, 'pred_mesh.png')
+    prex_pred_mesh_path = os.path.join(results_dir, 'prex_pred_mesh.png')
+    obbs_path = os.path.join(results_dir, 'obbs.png')
+    prex_obbs_path = os.path.join(results_dir, 'prex_obbs.png') # pre-xform
+    lst_paths = [
+        prex_obbs_path,
+        prex_pred_mesh_path,
+        obbs_path,
+        pred_mesh_path
+        ]
+
+    query_points = reconstruct.make_query_points(pt_sample_res)
+    query_points = torch.from_numpy(query_points).to(device, torch.float32)
+    query_points = query_points.unsqueeze(0)
+    bs, num_points, _ = query_points.shape
+
+    with torch.no_grad():
+        if args.mask:
+            # parts = [args.part]
+            parts = args.parts
+            parts = [int(x) for x in parts]
+            if args.recon_one_part:
+                # only reconstruct part specified by parts
+                masked_indices = list(set(range(num_parts)) - set(parts))
+                masked_indices = torch.Tensor(masked_indices).to(device, torch.long)
+            if args.recon_the_rest:
+                # don't reconstruct stuff in masked_indices
+                masked_indices = torch.Tensor(parts).to(device, torch.long)
+        else:
+            masked_indices = torch.Tensor([]).to(device, torch.long)
+
+        if not args.mask:
+            print("reconstructing...")
+        else:
+            print(f"masking parts: {masked_indices.cpu().numpy().tolist()}")
+
+        parts_mask = torch.zeros((batch_embed.shape[0], num_parts)).to(device, torch.float32)
+        parts_mask[:, masked_indices] = 1
+        parts_mask = torch.repeat_interleave(parts_mask, each_part_feat, dim=-1)
+        
+        points_mask = torch.zeros((1, num_parts, 1, 1)).to(device, torch.float32)
+        points_mask[:, masked_indices] = 1
+
+        occ_mask = torch.zeros((1, 1, num_parts)).to(device, torch.float32)
+        occ_mask[:, :, masked_indices] = 1
+
+        # learning xforms
+        batch_vec = torch.arange(start=0, end=1).to(device)
+        batch_vec = torch.repeat_interleave(batch_vec, num_union_nodes)
+        batch_mask = torch.sum(batch_part_nodes, dim=1)
+        learned_geom, learned_xforms = model.learn_geom_xform(batch_node_feat,
+                                                    batch_adj,
+                                                    batch_mask,
+                                                    batch_vec)
+        learned_relations = learned_xforms[:, connectivity[:, 0], connectivity[:, 1], :]
+        learned_xforms = learned_xforms[:, [0, 1, 2, 3], [0, 1, 2, 3], :]
+
+        batch_geom = torch.einsum('ijk, ikm -> ijm',
+                                batch_part_nodes.to(torch.float32),
+                                batch_node_feat)
+
+        pairwise_xforms = learned_xforms[:, connectivity]
+        learned_relations = pairwise_xforms[:, :, 1] - pairwise_xforms[:, :, 0]
+
+        transformed_points = query_points.unsqueeze(1).expand(-1, num_parts, -1, -1) +\
+            gt_xforms.unsqueeze(2)
+        occs1 = model(transformed_points.masked_fill(points_mask==1,torch.tensor(0)),
+                      batch_embed.masked_fill(parts_mask==1, torch.tensor(0)))
+        occs1 = occs1.masked_fill(occ_mask==1,torch.tensor(float('-inf')))
+        pred_values1, _ = torch.max(occs1, dim=-1, keepdim=True)
+
+    # learned_xforms = learned_xforms[0].cpu().numpy()
+    learned_geom = learned_geom[0].cpu().numpy()
+    gt_xforms = gt_xforms[0].cpu().numpy()
+
+    obbs_of_interest = [[]] * num_parts
+    prex_obbs_of_interest = [[]] * num_parts
+
+    scales = learned_geom / gt_exts.numpy()
+    # print(scales)
+    # exit(0)
+
+    for i in range(num_parts):
+        ext = gt_exts[i].numpy()
+        learned_xform = np.eye(4)
+        learned_xform[:3, 3] = -learned_xforms[0].cpu().numpy()[i]
+        gt_xform = np.eye(4)
+        gt_xform[:3, 3] = -gt_xforms[i]
+        learned_ext = learned_geom[i]
+        ext_xform = (learned_ext, learned_xform)
+        # ext_xform = (ext, learned_xform)
+        prex_ext_xform = (ext, gt_xform)
+        obbs_of_interest[i] = [ext_xform]
+        prex_obbs_of_interest[i] = [prex_ext_xform]
+
+    # normal
+    query_points = torch.zeros((1, num_parts, pt_sample_res**3, 3)).to(torch.float32)
+    for i in range(num_parts):
+        part_query_points = reconstruct.make_query_points(
+            pt_sample_res,
+            limits=[(-0.5/scales[i, 0], 0.5/scales[i, 0]),
+                    (-0.5/scales[i, 1], 0.5/scales[i, 1]),
+                    (-0.5/scales[i, 2], 0.5/scales[i, 2])])
+        query_points[:, i] = torch.from_numpy(part_query_points)
+    query_points = query_points.to(device)
+
+    with torch.no_grad():
+        transformed_points = query_points + learned_xforms.unsqueeze(2)
+        occs2 = model(transformed_points.masked_fill(points_mask==1,torch.tensor(0)),
+                      batch_embed.masked_fill(parts_mask==1, torch.tensor(0)))
+        occs2 = occs2.masked_fill(occ_mask==1,torch.tensor(float('-inf')))
+        pred_values2, _ = torch.max(occs2, dim=-1, keepdim=True)
+
+    if args.mask:
+        mag = 0.8
+    else:
+        mag = 0.8
+
+    sdf_grid = torch.reshape(
+        pred_values1,
+        (1, pt_sample_res, pt_sample_res, pt_sample_res))
+    sdf_grid = torch.permute(sdf_grid, (0, 2, 1, 3))
+    vertices, faces =\
+        kaolin.ops.conversions.voxelgrids_to_trianglemeshes(sdf_grid)
+    vertices = kaolin.ops.pointcloud.center_points(
+        vertices[0].unsqueeze(0), normalize=True).squeeze(0)
+    pred_vertices = vertices.cpu().numpy()
+    pred_faces = faces[0].cpu().numpy()
+    prex_pred_mesh = trimesh.Trimesh(pred_vertices, pred_faces)
+    prex_pred_mesh.export(os.path.join(results_dir, 'prex_mesh_pred.obj'))
+    visualize.save_mesh_vis(prex_pred_mesh, prex_pred_mesh_path,
+                            mag=mag, white_bg=True)
+    
+    sdf_grid = torch.reshape(
+        pred_values2,
+        (1, pt_sample_res, pt_sample_res, pt_sample_res))
+    sdf_grid = torch.permute(sdf_grid, (0, 2, 1, 3))
+    vertices, faces =\
+        kaolin.ops.conversions.voxelgrids_to_trianglemeshes(sdf_grid)
+    vertices = kaolin.ops.pointcloud.center_points(
+        vertices[0].unsqueeze(0), normalize=True).squeeze(0)
+    pred_vertices = vertices.cpu().numpy()
+    pred_faces = faces[0].cpu().numpy()
+    pred_mesh = trimesh.Trimesh(pred_vertices, pred_faces)
+    pred_mesh.export(os.path.join(results_dir, 'mesh_pred.obj'))
+    visualize.save_mesh_vis(pred_mesh, pred_mesh_path,
+                            mag=mag, white_bg=True)
+    
+    # exit(0)
+    masked_indices = masked_indices.cpu().numpy()
+    unmasked_indices = list(set(range(num_parts)) - set(masked_indices))
+
+    import itertools
+    obbs_of_interest = [obbs_of_interest[x] for x in unmasked_indices]
+    obbs_of_interest = list(itertools.chain(*obbs_of_interest))
+    visualize.save_obbs_vis(obbs_of_interest,
+                            obbs_path, mag=mag, white_bg=True,
+                            unmasked_indices=unmasked_indices)
+    
+    prex_obbs_of_interest = [prex_obbs_of_interest[x] for x in unmasked_indices]
+    prex_obbs_of_interest = list(itertools.chain(*prex_obbs_of_interest))
+    visualize.save_obbs_vis(prex_obbs_of_interest,
+                            prex_obbs_path, mag=mag, white_bg=True,
+                            unmasked_indices=unmasked_indices)
+    
+    if not args.mask:
+        visualize.stitch_imges(
+            os.path.join(results_dir,f'assembly_results.png'),
+            image_paths=lst_paths,
+            adj=100)
+    else:
+        # parts_str contains all the parts that are MASKED OUT
+        parts_str = '-'.join([str(x) for x in masked_indices])
+        visualize.stitch_imges(
+            os.path.join(results_dir,f'assembly_results_mask_{parts_str}.png'),
+            image_paths=lst_paths,
+            adj=100)
+        
+    exit(0)
