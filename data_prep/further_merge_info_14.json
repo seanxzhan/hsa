@@ -1,0 +1,54 @@
+{
+    "chair_back": [
+        "back_surface",
+        "back_single_surface",
+        "back_surface_vertical_bar",
+        "back_surface_horizontal_bar",
+        "back_connector",
+        "back_frame",
+        "back_frame_vertical_bar",
+        "back_frame_horizontal_bar",
+        "back_holistic_frame",
+        "back_support"
+    ],
+    "chair_seat": [
+        "seat_surface",
+        "seat_single_surface",
+        "seat_surface_bar",
+        "seat_support",
+        "seat_frame",
+        "seat_frame_bar",
+        "seat_holistic_frame"
+    ],
+    "chair_base": [
+        "regular_leg_base",
+        "leg",
+        "bar_stretcher",
+        "runner",
+        "foot",
+        "rocker",
+        "star_leg_base",
+        "star_leg_set",
+        "caster",
+        "caster_stem",
+        "wheel",
+        "mechanical_control",
+        "lever",
+        "foot_base",
+        "pedestal_base",
+        "pedestal",
+        "central_support"
+    ],
+    "chair_arm": [
+        "arm_horizontal_bar",
+        "arm_near_vertical_bar",
+        "arm_connector",
+        "arm_sofa_style",
+        "arm_holistic_frame",
+        "arm_writing_table"
+    ],
+    "chair_head": [
+        "headrest",
+        "head_connector"
+    ]
+}
