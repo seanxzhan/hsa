@@ -288,7 +288,7 @@ def build_dense_graph(union_root: AnyNode, name_to_obbs: Dict, obbs,
     # connectivity[2, 3] = 1
     # connected_xforms = connectivity @ xforms[:, :3, 3]
 
-    connectivity = [(0, 1), (0, 2), (1, 2), (2, 3)]
+    connectivity = [(0, 1), (0, 3), (1, 3), (3, 2)]
     relations = np.zeros((len(connectivity), 4, 4), dtype=np.float32)
     
     for i, conn in enumerate(connectivity):
@@ -944,7 +944,6 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
     # pyg.process()
 
 
-
 def make_data_for_one_mp(q: Queue, anno_ids, unique_name_to_new_id,
                          entire_meshes, ori_ids_to_new_ids_list):
     for i, anno_id in enumerate(anno_ids):
@@ -986,6 +985,8 @@ def make_data_for_one(anno_id,
     
     partnet_pcd_part_points = []
     partnet_pcd_part_labels = []
+    print(anno_id)
+    print(unique_names)
     for un in unique_names:
         new_id = unique_name_to_new_id[un]
         part_indices = np.argwhere(new_labels == new_id)[:,0]
@@ -1133,7 +1134,8 @@ if __name__ == "__main__":
     ids_w_four_parts = [ids_w_four_parts[x] for x in good_indices]
 
     export_data(ids_w_four_parts, save_data=True,
-                start=0, end=len(ids_w_four_parts))
+                # start=0, end=len(ids_w_four_parts))
+                start=0, end=10)
     exit(0)
 
     # merge_partnet_after_merging('39446', info=True)

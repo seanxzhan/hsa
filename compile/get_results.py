@@ -1,7 +1,9 @@
 import os
 
+expt = 75
+
 # Path pattern for the images
-base_path = "/projects/hsa/results/local_74-bs-25/64/"
+base_path = f"/projects/hsa/results/local_{expt}-bs-25/64/"
 image_pattern = "{shape_idx}/{shape_idx}_results.png"
 disentang_pattern0 = "{shape_idx}/{shape_idx}_results_mask_1-2-3.png"
 disentang_pattern1 = "{shape_idx}/{shape_idx}_results_mask_0-2-3.png"
@@ -11,7 +13,7 @@ placeholder_path = "none.png"
 
 # Function to generate HTML content
 def generate_html(image_indices,
-                  output_file=os.path.join("/projects/hsa/results/local_74-bs-25/64/",
+                  output_file=os.path.join(f"/projects/hsa/results/local_{expt}-bs-25/64/",
                                            "shape_reconstruction_results.html")):
     html_content = """
     <!DOCTYPE html>
