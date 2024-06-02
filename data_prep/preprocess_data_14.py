@@ -935,13 +935,13 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
 
     hdf5_file.close()
 
-    # pyg = PartPtsDataset(f'data/{cat_name}_train_{pt_sample_res}_14_{start}_{end}',
-    #                      all_pts_data)
-    # pyg.process()
+    pyg = PartPtsDataset(f'data/{cat_name}_train_{pt_sample_res}_14_{start}_{end}',
+                         all_pts_data)
+    pyg.process()
 
-    # pyg = PartPtsDataset(f'data/{cat_name}_train_{pt_sample_res}_14_{start}_{end}_whole',
-    #                      all_pts_whole_data)
-    # pyg.process()
+    pyg = PartPtsDataset(f'data/{cat_name}_train_{pt_sample_res}_14_{start}_{end}_whole',
+                         all_pts_whole_data)
+    pyg.process()
 
 
 def make_data_for_one_mp(q: Queue, anno_ids, unique_name_to_new_id,
@@ -985,10 +985,10 @@ def make_data_for_one(anno_id,
     
     partnet_pcd_part_points = []
     partnet_pcd_part_labels = []
-    print(anno_id)
-    print(unique_names)
     for un in unique_names:
         new_id = unique_name_to_new_id[un]
+        if new_id not in new_labels:
+            continue
         part_indices = np.argwhere(new_labels == new_id)[:,0]
         part_points = partnet_pcd_in_fg_vox_grid[part_indices]
         part_points = kaolin.ops.pointcloud.center_points(
@@ -1134,8 +1134,8 @@ if __name__ == "__main__":
     ids_w_four_parts = [ids_w_four_parts[x] for x in good_indices]
 
     export_data(ids_w_four_parts, save_data=True,
-                # start=0, end=len(ids_w_four_parts))
-                start=0, end=10)
+                start=0, end=len(ids_w_four_parts))
+                # start=0, end=10)
     exit(0)
 
     # merge_partnet_after_merging('39446', info=True)
