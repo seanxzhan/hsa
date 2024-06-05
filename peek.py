@@ -100,6 +100,20 @@ def peek_11_id_to_idx(id):
     print(f"id: {id}, idx: {all_ids.index(id)}")
 
 
+def peek_occ():
+    import torch
+    import torch.nn.functional as F
+    occ = np.load('prex_occ.npy')
+    occ = torch.tensor(occ, dtype=torch.float32)
+    # temperature = 1
+    # soft_occ = F.sigmoid((occ - 0.5) / temperature)
+    # print(soft_occ)
+    # print(torch.unique(soft_occ))
+    hard_occ = (occ > 0.5).float()
+    print(torch.unique(hard_occ))
+    np.save('prex_occ_binary.npy', hard_occ.numpy())
+
+
 if __name__ == "__main__":
     # # part assembly examples
     # peek_11_id_to_idx('3344')
@@ -123,4 +137,6 @@ if __name__ == "__main__":
     # peek_11_id_to_idx('41378')
     # peek_11_id_to_idx('42992')
 
-    save_four_parts_further_merged_14_am()
+    # save_four_parts_further_merged_14_am()
+
+    peek_occ()

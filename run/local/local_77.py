@@ -411,11 +411,14 @@ if args.test:
     unique_names = list(unique_name_to_new_id.keys())
     model_part_names = list(name_to_obbs.keys())
 
+    existing_parts = []
+
     for i, un in enumerate(unique_names):
         if not un in model_part_names:
             part_obbs.append([])
             continue
         part_obbs.append([name_to_obbs[un]])
+        existing_parts.append(i)
 
     gt_color = [31, 119, 180, 255]
     mesh_pred_path = os.path.join(results_dir, 'mesh_pred.png')
@@ -497,14 +500,18 @@ if args.test:
     learned_xforms = learned_xforms[0].cpu().numpy()
     learned_obbs_of_interest = [[]] * num_parts
     for i in range(num_parts):
+        if i not in existing_parts:
+            continue
         ext = extents[model_idx, i]
         learned_xform = np.eye(4)
         learned_xform[:3, 3] = -learned_xforms[i]
         ext_xform = (ext, learned_xform)
         learned_obbs_of_interest[i] = [ext_xform]
 
+    # learned_obbs_of_interest = [learned_obbs_of_interest[i] for i in existing_parts]
+
     if args.mask:
-        mag = 1
+        mag = 0.8
     else:
         mag = 0.8
 
@@ -523,7 +530,9 @@ if args.test:
     visualize.save_mesh_vis(pred_mesh, mesh_pred_path,
                             mag=mag, white_bg=white_bg)
     
-    unmasked_indices = list(set(range(num_parts)) - set(masked_indices))
+    masked_indices = masked_indices.cpu().numpy().tolist()
+    unmasked_indices = list(set(existing_parts) - set(masked_indices))
+    # print(unmasked_indices)
 
     obj_dir = os.path.join(partnet_dir, anno_id, 'vox_models')
     assert os.path.exists(obj_dir)
@@ -559,13 +568,17 @@ if args.test:
                 concat_part_mesh = trimesh.util.concatenate(meshes)
                 lst_of_part_meshes.append(concat_part_mesh)
 
-        masked_indices = masked_indices.cpu().numpy().tolist()
-        unmasked_indices = list(set(range(num_parts)) - set(masked_indices))
+        # masked_indices = masked_indices.cpu().numpy().tolist()
+        # unmasked_indices = list(set(range(num_parts)) - set(masked_indices))
 
         if args.recon_one_part:
             # only show stuff in masked_indices
-            concat_mesh = trimesh.util.concatenate(
-                [lst_of_part_meshes[x] for x in parts])
+            try: 
+                concat_mesh = trimesh.util.concatenate(
+                    [lst_of_part_meshes[x] for x in parts])
+            except AttributeError as e:
+                print(f"This shape doesn't have parts {parts} -", e)
+                exit(0)
         if args.recon_the_rest:
             # don't show stuff in masked_indices
             concat_mesh = trimesh.util.concatenate(

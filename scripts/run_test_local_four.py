@@ -3,7 +3,7 @@ import subprocess
 
 devnull = open(os.devnull, 'w')
 
-for i in range(0, 20):
+for i in range(0, 100):
 # for i in [39, 86, 43, 41]:
-    subprocess.call([f"scripts/test_local_four_one_shape.sh 75 750 {i}"],
+    subprocess.call([f"scripts/test_local_four_one_shape.sh 82 2000 {i}"],
                     shell=True)

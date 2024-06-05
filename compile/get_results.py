@@ -1,9 +1,17 @@
 import os
+import importlib
 
-expt = 75
+expt = 82
+module = importlib.import_module(f"run.local.local_{expt}")
+model_idx_to_anno_id = getattr(module, "model_idx_to_anno_id")
+# from run.local.local_77 import model_idx_to_anno_id
+
+start = 0
+end = 100
+shape_indices = [model_idx_to_anno_id[i] for i in range(start, end)]
 
 # Path pattern for the images
-base_path = f"/projects/hsa/results/local_{expt}-bs-25/64/"
+base_path = f"/projects/hsa/results/local_{expt}-bs-15/64/"
 image_pattern = "{shape_idx}/{shape_idx}_results.png"
 disentang_pattern0 = "{shape_idx}/{shape_idx}_results_mask_1-2-3.png"
 disentang_pattern1 = "{shape_idx}/{shape_idx}_results_mask_0-2-3.png"
@@ -13,8 +21,8 @@ placeholder_path = "none.png"
 
 # Function to generate HTML content
 def generate_html(image_indices,
-                  output_file=os.path.join(f"/projects/hsa/results/local_{expt}-bs-25/64/",
-                                           "shape_reconstruction_results.html")):
+                  output_file=os.path.join(base_path,
+                                           f"shape_reconstruction_results_{start}_{end}.html")):
     html_content = """
     <!DOCTYPE html>
     <html>
@@ -87,11 +95,6 @@ def generate_html(image_indices,
         file.write(html_content)
 
     print(f"HTML file '{output_file}' generated successfully.")
-
-from run.local.local_74 import model_idx_to_anno_id
-
-n_shapes = 20
-shape_indices = [model_idx_to_anno_id[i] for i in range(n_shapes)]
 
 # Generate the HTML file
 generate_html(shape_indices)

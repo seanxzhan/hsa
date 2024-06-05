@@ -12,7 +12,7 @@ from torch.utils.tensorboard import SummaryWriter
 # from occ_networks.basic_decoder_nasa import SDFDecoder, get_embedder
 from occ_networks.xform_decoder_nasa_obbgnn_ae_58 import SDFDecoder, get_embedder
 from utils import misc, visualize, transform, ops, reconstruct, tree
-from data_prep import preprocess_data_12
+from data_prep import preprocess_data_14
 from typing import Dict, List
 from anytree.exporter import UniqueDotExporter
 from sklearn.decomposition import PCA
@@ -60,7 +60,7 @@ save_every = 100
 multires = 2
 pt_sample_res = 64        # point_sampling
 
-expt_id = 66
+expt_id = 81
 
 OVERFIT = args.of
 overfit_idx = args.of_idx
@@ -70,7 +70,7 @@ if OVERFIT:
     batch_size = 1
 
 ds_start = 0
-ds_end = 508
+ds_end = 1960
 
 shapenet_dir = '/datasets/ShapeNetCore'
 partnet_dir = '/datasets/PartNet'
@@ -83,7 +83,7 @@ name_to_cat = {
 cat_name = 'Chair'
 cat_id = name_to_cat[cat_name]
 
-train_new_ids_to_objs_path = f'data/{cat_name}_train_new_ids_to_objs_12_{ds_start}_{ds_end}.json'
+train_new_ids_to_objs_path = f'data/{cat_name}_train_new_ids_to_objs_14_{ds_start}_{ds_end}.json'
 with open(train_new_ids_to_objs_path, 'r') as f:
     train_new_ids_to_objs: Dict = json.load(f)
 model_idx_to_anno_id = {}
@@ -92,7 +92,7 @@ for model_idx, anno_id in enumerate(train_new_ids_to_objs.keys()):
 with open('results/mapping.json', 'w') as f:
     json.dump(model_idx_to_anno_id, f)
 
-train_data_path = f'data/{cat_name}_train_{pt_sample_res}_12_{ds_start}_{ds_end}.hdf5'
+train_data_path = f'data/{cat_name}_train_{pt_sample_res}_14_{ds_start}_{ds_end}.hdf5'
 train_data = h5py.File(train_data_path, 'r')
 if OVERFIT:
     part_num_indices = train_data['part_num_indices'][overfit_idx:overfit_idx+1]
@@ -126,7 +126,8 @@ else:
 #     "regular_leg_base": 3
 # }
 
-connectivity = [[0, 1], [0, 2], [1, 2], [2, 3]]
+# connectivity = [[0, 1], [0, 2], [1, 2], [2, 3]]
+connectivity = [[0, 1], [0, 3], [1, 3], [3, 2]]
 connectivity = torch.tensor(connectivity, dtype=torch.long).to(device)
 
 num_union_nodes = adj.shape[1]
@@ -134,11 +135,13 @@ num_points = normalized_points.shape[1]
 num_shapes, num_parts = part_num_indices.shape
 all_fg_part_indices = []
 for i in range(num_shapes):
-    indices = preprocess_data_12.convert_flat_list_to_fg_part_indices(
+    indices = preprocess_data_14.convert_flat_list_to_fg_part_indices(
         part_num_indices[i], all_indices[i])
     all_fg_part_indices.append(np.array(indices, dtype=object))
 
-n_batches = num_shapes // batch_size
+# n_batches = num_shapes // batch_size
+# up to 1900
+n_batches = 76
 
 if not OVERFIT:
     logs_path = os.path.join('logs', f'local_{expt_id}-bs-{batch_size}',
@@ -161,7 +164,7 @@ print("results dir: ", results_dir)
 writer = SummaryWriter(os.path.join(logs_path, 'summary'))
 
 # -------- model --------
-each_part_feat = 32
+each_part_feat = 64
 model = SDFDecoder(num_parts=num_parts,
                    feature_dims=each_part_feat,
                    internal_dims=128,
@@ -344,7 +347,7 @@ if args.train:
             info = f'-------- Iteration {it} - loss: {avg_batch_loss:.8f} --------'
             print(info)
 
-        save = 1000 if OVERFIT else 100
+        save = 1000 if OVERFIT else 250
         if (it) % save == 0 or it == (iterations - 1):
             torch.save({
                 'epoch': it,
@@ -398,9 +401,9 @@ if args.test:
 
     unique_part_names, name_to_ori_ids_and_objs,\
         orig_obbs, entire_mesh, name_to_obbs, _, _, _ =\
-        preprocess_data_12.merge_partnet_after_merging(anno_id)
+        preprocess_data_14.merge_partnet_after_merging(anno_id)
 
-    with open(f'data/{cat_name}_part_name_to_new_id_12_{ds_start}_{ds_end}.json', 'r') as f:
+    with open(f'data/{cat_name}_part_name_to_new_id_14_{ds_start}_{ds_end}.json', 'r') as f:
         unique_name_to_new_id = json.load(f)
 
     part_obbs = []
@@ -408,11 +411,14 @@ if args.test:
     unique_names = list(unique_name_to_new_id.keys())
     model_part_names = list(name_to_obbs.keys())
 
+    existing_parts = []
+
     for i, un in enumerate(unique_names):
         if not un in model_part_names:
             part_obbs.append([])
             continue
         part_obbs.append([name_to_obbs[un]])
+        existing_parts.append(i)
 
     gt_color = [31, 119, 180, 255]
     mesh_pred_path = os.path.join(results_dir, 'mesh_pred.png')
@@ -494,14 +500,18 @@ if args.test:
     learned_xforms = learned_xforms[0].cpu().numpy()
     learned_obbs_of_interest = [[]] * num_parts
     for i in range(num_parts):
+        if i not in existing_parts:
+            continue
         ext = extents[model_idx, i]
         learned_xform = np.eye(4)
         learned_xform[:3, 3] = -learned_xforms[i]
         ext_xform = (ext, learned_xform)
         learned_obbs_of_interest[i] = [ext_xform]
 
+    # learned_obbs_of_interest = [learned_obbs_of_interest[i] for i in existing_parts]
+
     if args.mask:
-        mag = 1
+        mag = 0.8
     else:
         mag = 0.8
 
@@ -520,7 +530,9 @@ if args.test:
     visualize.save_mesh_vis(pred_mesh, mesh_pred_path,
                             mag=mag, white_bg=white_bg)
     
-    unmasked_indices = list(set(range(num_parts)) - set(masked_indices))
+    masked_indices = masked_indices.cpu().numpy().tolist()
+    unmasked_indices = list(set(existing_parts) - set(masked_indices))
+    # print(unmasked_indices)
 
     obj_dir = os.path.join(partnet_dir, anno_id, 'vox_models')
     assert os.path.exists(obj_dir)
@@ -556,13 +568,17 @@ if args.test:
                 concat_part_mesh = trimesh.util.concatenate(meshes)
                 lst_of_part_meshes.append(concat_part_mesh)
 
-        masked_indices = masked_indices.cpu().numpy().tolist()
-        unmasked_indices = list(set(range(num_parts)) - set(masked_indices))
+        # masked_indices = masked_indices.cpu().numpy().tolist()
+        # unmasked_indices = list(set(range(num_parts)) - set(masked_indices))
 
         if args.recon_one_part:
             # only show stuff in masked_indices
-            concat_mesh = trimesh.util.concatenate(
-                [lst_of_part_meshes[x] for x in parts])
+            try: 
+                concat_mesh = trimesh.util.concatenate(
+                    [lst_of_part_meshes[x] for x in parts])
+            except AttributeError as e:
+                print(f"This shape doesn't have parts {parts} -", e)
+                exit(0)
         if args.recon_the_rest:
             # don't show stuff in masked_indices
             concat_mesh = trimesh.util.concatenate(
@@ -652,8 +668,8 @@ if args.asb:
     # model_indices = [5, 4, 2, 8]
     # part_indices = [0, 1, 2, 3]
 
-    # model_indices = [500, 501, 506, 505]
-    # part_indices = [1, 0, 3, 2]
+    model_indices = [500, 501, 506, 505]
+    part_indices = [1, 0, 3, 2]
 
     # model_indices = [500, 501, 502, 505]
     # part_indices = [3, 0, 2, 1]
@@ -671,20 +687,9 @@ if args.asb:
     #     "regular_leg_base": 3
     # }
 
-    # anno_ids = [model_idx_to_anno_id[x] for x in model_indices]
-    # # model_id = misc.anno_id_to_model_id(partnet_index_path)[anno_id]
-    # # print(f"anno id: {anno_id}, model id: {model_id}")
-    # print(anno_ids)
-
-    anno_ids = ['47914', '44979', '2243', '44164']
-    # anno_ids = ['37900', '39901', '37121', '2243']
-    # anno_ids = ['36685', '38091', '38567', '38816']
-    # anno_ids = ['38567', '36685', '2673', '38816']
-    part_indices = [0, 1, 2, 3]
-
-    anno_id_to_model_idx = {v: k for k, v in model_idx_to_anno_id.items()}
-    model_indices = [anno_id_to_model_idx[x] for x in anno_ids]
-    print(model_indices)
+    anno_ids = [model_idx_to_anno_id[x] for x in model_indices]
+    # model_id = misc.anno_id_to_model_id(partnet_index_path)[anno_id]
+    # print(f"anno id: {anno_id}, model id: {model_id}")
     print(anno_ids)
 
     asb_str = '-'.join([str(x) for x in anno_ids+part_indices])
@@ -754,7 +759,7 @@ if args.asb:
 
     # build a tree that is a subset of the union tree (dense graph)
     # using the bounding boxes
-    node_names = np.load(f'data/{cat_name}_union_node_names_12_{ds_start}_{ds_end}.npy')
+    node_names = np.load(f'data/{cat_name}_union_node_names_14_{ds_start}_{ds_end}.npy')
     recon_root = tree.recon_tree(asb_adj.numpy(), node_names)
     UniqueDotExporter(recon_root,
                       indent=0,
@@ -870,8 +875,8 @@ if args.asb:
         gt_xform = np.eye(4)
         gt_xform[:3, 3] = -gt_xforms[i]
         learned_ext = learned_geom[i]
-        # ext_xform = (learned_ext, learned_xform)
-        ext_xform = (ext, learned_xform)
+        ext_xform = (learned_ext, learned_xform)
+        # ext_xform = (ext, learned_xform)
         prex_ext_xform = (ext, gt_xform)
         obbs_of_interest[i] = [ext_xform]
         prex_obbs_of_interest[i] = [prex_ext_xform]
@@ -972,9 +977,9 @@ if args.inv and not args.sc and not args.asb_scaling:
 
     unique_part_names, name_to_ori_ids_and_objs,\
         orig_obbs, entire_mesh, name_to_obbs, _, _, _ =\
-        preprocess_data_12.merge_partnet_after_merging(anno_id)
+        preprocess_data_14.merge_partnet_after_merging(anno_id)
 
-    with open(f'data/{cat_name}_part_name_to_new_id_12_{ds_start}_{ds_end}.json', 'r') as f:
+    with open(f'data/{cat_name}_part_name_to_new_id_14_{ds_start}_{ds_end}.json', 'r') as f:
         unique_name_to_new_id = json.load(f)
 
     part_obbs = []
@@ -1313,9 +1318,9 @@ if args.samp:
 
     unique_part_names, name_to_ori_ids_and_objs,\
         orig_obbs, entire_mesh, name_to_obbs, _, _, _ =\
-        preprocess_data_12.merge_partnet_after_merging(anno_id)
+        preprocess_data_14.merge_partnet_after_merging(anno_id)
 
-    with open(f'data/{cat_name}_part_name_to_new_id_12_{ds_start}_{ds_end}.json', 'r') as f:
+    with open(f'data/{cat_name}_part_name_to_new_id_14_{ds_start}_{ds_end}.json', 'r') as f:
         unique_name_to_new_id = json.load(f)
 
     part_obbs = []
@@ -1566,9 +1571,9 @@ if args.sc:
 
     unique_part_names, name_to_ori_ids_and_objs,\
         orig_obbs, entire_mesh, name_to_obbs, _, _, _ =\
-        preprocess_data_12.merge_partnet_after_merging(anno_id)
+        preprocess_data_14.merge_partnet_after_merging(anno_id)
 
-    with open(f'data/{cat_name}_part_name_to_new_id_12_{ds_start}_{ds_end}.json', 'r') as f:
+    with open(f'data/{cat_name}_part_name_to_new_id_14_{ds_start}_{ds_end}.json', 'r') as f:
         unique_name_to_new_id = json.load(f)
 
     part_obbs = []
@@ -1724,21 +1729,13 @@ if args.asb_scaling:
     # model_indices = [343, 185, 370, 258]
     # part_indices = [0, 2, 1, 3]
     # part_indices = [0, 2, 3, 1]
-    # model_indices = [255, 354, 28, 175]
+    model_indices = [255, 354, 28, 175]
     # part_indices = [0, 2, 3, 1]
-    # part_indices = [3, 1, 2, 0]
+    part_indices = [3, 1, 2, 0]
 
-    # anno_ids = [model_idx_to_anno_id[x] for x in model_indices]
-    
-    anno_ids = ['47914', '44979', '2243', '44164']
-    # anno_ids = ['37900', '39901', '37121', '2243']
-    # anno_ids = ['36685', '38091', '38567', '38816']
-    # anno_ids = ['38567', '36685', '2673', '38816']
-    part_indices = [0, 1, 2, 3]
-
-    anno_id_to_model_idx = {v: k for k, v in model_idx_to_anno_id.items()}
-    model_indices = [anno_id_to_model_idx[x] for x in anno_ids]
-    print(model_indices)
+    anno_ids = [model_idx_to_anno_id[x] for x in model_indices]
+    # model_id = misc.anno_id_to_model_id(partnet_index_path)[anno_id]
+    # print(f"anno id: {anno_id}, model id: {model_id}")
     print(anno_ids)
 
     asb_str = '-'.join([str(x) for x in anno_ids+part_indices])
@@ -1747,11 +1744,11 @@ if args.asb_scaling:
     misc.check_dir(results_dir)
     print("results dir: ", results_dir)
 
-    with open(os.path.join(results_dir, 'model_indices.txt'), 'w') as f:
-        model_indices_str = '-'.join([str(x) for x in model_indices])
+    with open(os.path.join(results_dir, 'anno_ids.txt'), 'w') as f:
+        anno_ids_str = '-'.join([str(x) for x in model_indices])
         part_indices_str = '-'.join([str(x) for x in part_indices])
         # f.write(anno_ids_str)
-        f.writelines([model_indices_str, '\n', part_indices_str])
+        f.writelines([anno_ids_str, '\n', part_indices_str])
 
     checkpoint = torch.load(os.path.join(ckpt_dir, f'model_{it}.pt'))
     model.load_state_dict(checkpoint['model_state_dict'])
@@ -1808,7 +1805,7 @@ if args.asb_scaling:
 
     # build a tree that is a subset of the union tree (dense graph)
     # using the bounding boxes
-    node_names = np.load(f'data/{cat_name}_union_node_names_12_{ds_start}_{ds_end}.npy')
+    node_names = np.load(f'data/{cat_name}_union_node_names_14_{ds_start}_{ds_end}.npy')
     recon_root = tree.recon_tree(asb_adj.numpy(), node_names)
     UniqueDotExporter(recon_root,
                       indent=0,
@@ -1904,10 +1901,6 @@ if args.asb_scaling:
     prex_obbs_of_interest = [[]] * num_parts
 
     scales = learned_geom / gt_exts.numpy()
-    scales = np.clip(scales, 0.5, 1.5)
-
-    # print(learned_geom)
-    # print(gt_exts)
     # print(scales)
     # exit(0)
 
@@ -1917,8 +1910,7 @@ if args.asb_scaling:
         learned_xform[:3, 3] = -learned_xforms[0].cpu().numpy()[i]
         gt_xform = np.eye(4)
         gt_xform[:3, 3] = -gt_xforms[i]
-        # learned_ext = learned_geom[i]
-        learned_ext = scales[i] * gt_exts.numpy()[i]
+        learned_ext = learned_geom[i]
         ext_xform = (learned_ext, learned_xform)
         # ext_xform = (ext, learned_xform)
         prex_ext_xform = (ext, gt_xform)
@@ -1952,8 +1944,6 @@ if args.asb_scaling:
         pred_values1,
         (1, pt_sample_res, pt_sample_res, pt_sample_res))
     sdf_grid = torch.permute(sdf_grid, (0, 2, 1, 3))
-    np.save(os.path.join(results_dir, 'prex_occ.npy'),
-            sdf_grid.cpu().numpy())
     vertices, faces =\
         kaolin.ops.conversions.voxelgrids_to_trianglemeshes(sdf_grid)
     vertices = kaolin.ops.pointcloud.center_points(
@@ -1969,8 +1959,6 @@ if args.asb_scaling:
         pred_values2,
         (1, pt_sample_res, pt_sample_res, pt_sample_res))
     sdf_grid = torch.permute(sdf_grid, (0, 2, 1, 3))
-    np.save(os.path.join(results_dir, 'occ.npy'),
-            sdf_grid.cpu().numpy())
     vertices, faces =\
         kaolin.ops.conversions.voxelgrids_to_trianglemeshes(sdf_grid)
     vertices = kaolin.ops.pointcloud.center_points(
