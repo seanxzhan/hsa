@@ -9,10 +9,10 @@ import argparse
 import numpy as np
 from tqdm import tqdm
 from torch.utils.tensorboard import SummaryWriter
-# from occ_networks.basic_decoder_nasa import SDFDecoder, get_embedder
-from occ_networks.xform_decoder_nasa_obbgnn_ae_58 import SDFDecoder, get_embedder
+# from occ_networks.basic_decoder_nasa import SDFDecoder, get_embedd er
+from occ_networks.xform_decoder_nasa_obbgnn_ae_83 import SDFDecoder, get_embedder
 from utils import misc, visualize, transform, ops, reconstruct, tree
-from data_prep import preprocess_data_14
+from data_prep import preprocess_data_15
 from typing import Dict, List
 from anytree.exporter import UniqueDotExporter
 from sklearn.decomposition import PCA
@@ -60,17 +60,17 @@ save_every = 100
 multires = 2
 pt_sample_res = 64        # point_sampling
 
-expt_id = 82
+expt_id = 83
 
 OVERFIT = args.of
 overfit_idx = args.of_idx
 
-batch_size = 15
+batch_size = 10
 if OVERFIT:
     batch_size = 1
 
 ds_start = 0
-ds_end = 1960
+ds_end = 1982
 
 shapenet_dir = '/datasets/ShapeNetCore'
 partnet_dir = '/datasets/PartNet'
@@ -83,7 +83,7 @@ name_to_cat = {
 cat_name = 'Chair'
 cat_id = name_to_cat[cat_name]
 
-train_new_ids_to_objs_path = f'data/{cat_name}_train_new_ids_to_objs_14_{ds_start}_{ds_end}.json'
+train_new_ids_to_objs_path = f'data/{cat_name}_train_new_ids_to_objs_15_{ds_start}_{ds_end}.json'
 with open(train_new_ids_to_objs_path, 'r') as f:
     train_new_ids_to_objs: Dict = json.load(f)
 model_idx_to_anno_id = {}
@@ -92,7 +92,7 @@ for model_idx, anno_id in enumerate(train_new_ids_to_objs.keys()):
 with open('results/mapping.json', 'w') as f:
     json.dump(model_idx_to_anno_id, f)
 
-train_data_path = f'data/{cat_name}_train_{pt_sample_res}_14_{ds_start}_{ds_end}.hdf5'
+train_data_path = f'data/{cat_name}_train_{pt_sample_res}_15_{ds_start}_{ds_end}.hdf5'
 train_data = h5py.File(train_data_path, 'r')
 if OVERFIT:
     part_num_indices = train_data['part_num_indices'][overfit_idx:overfit_idx+1]
@@ -127,21 +127,23 @@ else:
 # }
 
 # connectivity = [[0, 1], [0, 2], [1, 2], [2, 3]]
-connectivity = [[0, 1], [0, 3], [1, 3], [3, 2]]
-connectivity = torch.tensor(connectivity, dtype=torch.long).to(device)
+# connectivity = [[0, 1], [0, 3], [1, 3], [3, 2]]
+# connectivity = torch.tensor(connectivity, dtype=torch.long).to(device)
 
 num_union_nodes = adj.shape[1]
 num_points = normalized_points.shape[1]
 num_shapes, num_parts = part_num_indices.shape
 all_fg_part_indices = []
 for i in range(num_shapes):
-    indices = preprocess_data_14.convert_flat_list_to_fg_part_indices(
+    indices = preprocess_data_15.convert_flat_list_to_fg_part_indices(
         part_num_indices[i], all_indices[i])
     all_fg_part_indices.append(np.array(indices, dtype=object))
 
 # n_batches = num_shapes // batch_size
 # up to 1900
-n_batches = 127
+# n_batches = 127
+# n_batches = 10
+n_batches = 190
 
 if not OVERFIT:
     logs_path = os.path.join('logs', f'local_{expt_id}-bs-{batch_size}',
@@ -164,10 +166,10 @@ print("results dir: ", results_dir)
 writer = SummaryWriter(os.path.join(logs_path, 'summary'))
 
 # -------- model --------
-each_part_feat = 64
+each_part_feat = 32
 model = SDFDecoder(num_parts=num_parts,
                    feature_dims=each_part_feat,
-                   internal_dims=256,
+                   internal_dims=128,
                    hidden=4,
                    multires=2).to(device)
 
@@ -265,15 +267,18 @@ def train_one_itr(it, b,
                                             batch_adj,
                                             batch_mask,
                                             batch_vec)
-    learned_relations = learned_xforms[:, connectivity[:, 0], connectivity[:, 1], :]
-    learned_xforms = learned_xforms[:, [0, 1, 2, 3], [0, 1, 2, 3], :]
+    # learned_relations = learned_xforms[:, connectivity[:, 0], connectivity[:, 1], :]
+    # learned_xforms = learned_xforms[:, [0, 1, 2, 3], [0, 1, 2, 3], :]
+    # print(learned_xforms.shape)
+    # print(batch_xforms.shape)
+    # exit(0)
 
     batch_geom = torch.einsum('ijk, ikm -> ijm',
                                batch_part_nodes.to(torch.float32),
                                batch_node_feat)
 
-    pairwise_xforms = learned_xforms[:, connectivity]
-    learned_relations = pairwise_xforms[:, :, 1] - pairwise_xforms[:, :, 0]
+    # pairwise_xforms = learned_xforms[:, connectivity]
+    # learned_relations = pairwise_xforms[:, :, 1] - pairwise_xforms[:, :, 0]
 
     transformed_points = batch_points.unsqueeze(1).expand(-1, num_parts, -1, -1) +\
         learned_xforms.unsqueeze(2)
@@ -299,17 +304,18 @@ def train_one_itr(it, b,
     loss_xform = loss_f_xform(
         embed_fn(learned_xforms.view(-1, 3)),
         embed_fn(batch_xforms.view(-1, 3)))
-    loss_relations = loss_f_xform(
-        embed_fn(learned_relations.view(-1, 3)),
-        embed_fn(batch_relations.view(-1, 3)))
+    # loss_relations = loss_f_xform(
+    #     embed_fn(learned_relations.view(-1, 3)),
+    #     embed_fn(batch_relations.view(-1, 3)))
     
-    loss += 10 * loss_xform + 10 * loss_relations
+    # loss += 10 * loss_xform + 10 * loss_relations
+    loss += 10 * loss_xform
 
     if b == n_batches - 1:
         writer.add_scalar('occ loss', loss1 + loss2, it)
         writer.add_scalar('bbox geom loss', loss_bbox_geom, it)
         writer.add_scalar('xform loss', loss_xform, it)
-        writer.add_scalar('relations loss', loss_relations, it)
+        # writer.add_scalar('relations loss', loss_relations, it)
 
     optimizer.zero_grad()
     loss.backward()
@@ -371,7 +377,7 @@ def compute_iou(voxel_grid1, voxel_grid2):
 
 
 if args.test:
-    white_bg = False
+    white_bg = True
     it = args.it
     if not OVERFIT:
         model_idx = args.test_idx
@@ -401,9 +407,9 @@ if args.test:
 
     unique_part_names, name_to_ori_ids_and_objs,\
         orig_obbs, entire_mesh, name_to_obbs, _, _, _ =\
-        preprocess_data_14.merge_partnet_after_merging(anno_id)
+        preprocess_data_15.merge_partnet_after_merging(anno_id)
 
-    with open(f'data/{cat_name}_part_name_to_new_id_14_{ds_start}_{ds_end}.json', 'r') as f:
+    with open(f'data/{cat_name}_part_name_to_new_id_15_{ds_start}_{ds_end}.json', 'r') as f:
         unique_name_to_new_id = json.load(f)
 
     part_obbs = []
@@ -421,22 +427,10 @@ if args.test:
         existing_parts.append(i)
 
     gt_color = [31, 119, 180, 255]
-    # mesh_pred_path = os.path.join(results_dir, 'mesh_pred.png')
+    mesh_pred_path = os.path.join(results_dir, 'mesh_pred.png')
     mesh_gt_path = os.path.join(results_dir, 'mesh_gt.png')
+    learned_obbs_path = os.path.join(results_dir, 'obbs_pred.png')
     obbs_path = os.path.join(results_dir, 'obbs_gt.png')
-    if not args.mask:
-        learned_obbs_path = os.path.join(results_dir, 'obbs_pred.png')
-        mesh_pred_path = os.path.join(results_dir, 'mesh_pred.png')
-    else:
-        parts = args.parts
-        parts = [int(x) for x in parts]
-        if args.recon_one_part:
-            parts_indices = list(set(range(num_parts)) - set(parts))
-        else:
-            parts_indices = parts
-        parts_str = '-'.join([str(x) for x in parts_indices])
-        learned_obbs_path = os.path.join(results_dir, f'obbs_pred_{parts_str}.png')
-        mesh_pred_path = os.path.join(results_dir, f'mesh_pred_{parts_str}.png')
     lst_paths = [
         obbs_path,
         mesh_gt_path,
@@ -491,15 +485,15 @@ if args.test:
                                                     batch_adj,
                                                     batch_mask,
                                                     batch_vec)
-        learned_relations = learned_xforms[:, connectivity[:, 0], connectivity[:, 1], :]
-        learned_xforms = learned_xforms[:, [0, 1, 2, 3], [0, 1, 2, 3], :]
+        # learned_relations = learned_xforms[:, connectivity[:, 0], connectivity[:, 1], :]
+        # learned_xforms = learned_xforms[:, [0, 1, 2, 3], [0, 1, 2, 3], :]
 
         batch_geom = torch.einsum('ijk, ikm -> ijm',
                                 batch_part_nodes.to(torch.float32),
                                 batch_node_feat)
 
-        pairwise_xforms = learned_xforms[:, connectivity]
-        learned_relations = pairwise_xforms[:, :, 1] - pairwise_xforms[:, :, 0]
+        # pairwise_xforms = learned_xforms[:, connectivity]
+        # learned_relations = pairwise_xforms[:, :, 1] - pairwise_xforms[:, :, 0]
 
         transformed_points = query_points.unsqueeze(1).expand(-1, num_parts, -1, -1) +\
             learned_xforms.unsqueeze(2)
@@ -538,10 +532,7 @@ if args.test:
     pred_vertices = vertices.cpu().numpy()
     pred_faces = faces[0].cpu().numpy()
     pred_mesh = trimesh.Trimesh(pred_vertices, pred_faces)
-    if not args.mask:
-        pred_mesh.export(os.path.join(results_dir, 'mesh_pred.obj'))
-    else:
-        pred_mesh.export(os.path.join(results_dir, f'mesh_pred_{parts_str}.obj'))
+    pred_mesh.export(os.path.join(results_dir, 'mesh_pred.obj'))
     visualize.save_mesh_vis(pred_mesh, mesh_pred_path,
                             mag=mag, white_bg=white_bg)
     
@@ -774,7 +765,7 @@ if args.asb:
 
     # build a tree that is a subset of the union tree (dense graph)
     # using the bounding boxes
-    node_names = np.load(f'data/{cat_name}_union_node_names_14_{ds_start}_{ds_end}.npy')
+    node_names = np.load(f'data/{cat_name}_union_node_names_15_{ds_start}_{ds_end}.npy')
     recon_root = tree.recon_tree(asb_adj.numpy(), node_names)
     UniqueDotExporter(recon_root,
                       indent=0,
@@ -852,15 +843,15 @@ if args.asb:
                                                     batch_adj,
                                                     batch_mask,
                                                     batch_vec)
-        learned_relations = learned_xforms[:, connectivity[:, 0], connectivity[:, 1], :]
-        learned_xforms = learned_xforms[:, [0, 1, 2, 3], [0, 1, 2, 3], :]
+        # learned_relations = learned_xforms[:, connectivity[:, 0], connectivity[:, 1], :]
+        # learned_xforms = learned_xforms[:, [0, 1, 2, 3], [0, 1, 2, 3], :]
 
         batch_geom = torch.einsum('ijk, ikm -> ijm',
                                 batch_part_nodes.to(torch.float32),
                                 batch_node_feat)
 
-        pairwise_xforms = learned_xforms[:, connectivity]
-        learned_relations = pairwise_xforms[:, :, 1] - pairwise_xforms[:, :, 0]
+        # pairwise_xforms = learned_xforms[:, connectivity]
+        # learned_relations = pairwise_xforms[:, :, 1] - pairwise_xforms[:, :, 0]
 
         transformed_points = query_points.unsqueeze(1).expand(-1, num_parts, -1, -1) +\
             gt_xforms.unsqueeze(2)
@@ -992,9 +983,9 @@ if args.inv and not args.sc and not args.asb_scaling:
 
     unique_part_names, name_to_ori_ids_and_objs,\
         orig_obbs, entire_mesh, name_to_obbs, _, _, _ =\
-        preprocess_data_14.merge_partnet_after_merging(anno_id)
+        preprocess_data_15.merge_partnet_after_merging(anno_id)
 
-    with open(f'data/{cat_name}_part_name_to_new_id_14_{ds_start}_{ds_end}.json', 'r') as f:
+    with open(f'data/{cat_name}_part_name_to_new_id_15_{ds_start}_{ds_end}.json', 'r') as f:
         unique_name_to_new_id = json.load(f)
 
     part_obbs = []
@@ -1046,15 +1037,15 @@ if args.inv and not args.sc and not args.asb_scaling:
                                                             batch_adj,
                                                             batch_mask,
                                                             batch_vec)
-                learned_relations = learned_xforms[:, connectivity[:, 0], connectivity[:, 1], :]
-                learned_xforms = learned_xforms[:, [0, 1, 2, 3], [0, 1, 2, 3], :]
+                # learned_relations = learned_xforms[:, connectivity[:, 0], connectivity[:, 1], :]
+                # learned_xforms = learned_xforms[:, [0, 1, 2, 3], [0, 1, 2, 3], :]
             # learned_xforms = batch_xforms
 
             batch_geom = torch.einsum('ijk, ikm -> ijm',
                                     batch_part_nodes.to(torch.float32),
                                     batch_node_feat)
 
-            pairwise_xforms = learned_xforms[:, connectivity]
+            # pairwise_xforms = learned_xforms[:, connectivity]
             # learned_relations = pairwise_xforms[:, :, 1] - pairwise_xforms[:, :, 0]
 
             transformed_points = gt_points.unsqueeze(1).expand(-1, num_parts, -1, -1) +\
@@ -1126,15 +1117,15 @@ if args.inv and not args.sc and not args.asb_scaling:
                                                     batch_adj,
                                                     batch_mask,
                                                     batch_vec)
-        learned_relations = learned_xforms[:, connectivity[:, 0], connectivity[:, 1], :]
-        learned_xforms = learned_xforms[:, [0, 1, 2, 3], [0, 1, 2, 3], :]
+        # learned_relations = learned_xforms[:, connectivity[:, 0], connectivity[:, 1], :]
+        # learned_xforms = learned_xforms[:, [0, 1, 2, 3], [0, 1, 2, 3], :]
 
         batch_geom = torch.einsum('ijk, ikm -> ijm',
                                 batch_part_nodes.to(torch.float32),
                                 batch_node_feat)
 
-        pairwise_xforms = learned_xforms[:, connectivity]
-        learned_relations = pairwise_xforms[:, :, 1] - pairwise_xforms[:, :, 0]
+        # pairwise_xforms = learned_xforms[:, connectivity]
+        # learned_relations = pairwise_xforms[:, :, 1] - pairwise_xforms[:, :, 0]
 
         transformed_points = query_points.unsqueeze(1).expand(-1, num_parts, -1, -1) +\
             learned_xforms.unsqueeze(2)
@@ -1333,9 +1324,9 @@ if args.samp:
 
     unique_part_names, name_to_ori_ids_and_objs,\
         orig_obbs, entire_mesh, name_to_obbs, _, _, _ =\
-        preprocess_data_14.merge_partnet_after_merging(anno_id)
+        preprocess_data_15.merge_partnet_after_merging(anno_id)
 
-    with open(f'data/{cat_name}_part_name_to_new_id_14_{ds_start}_{ds_end}.json', 'r') as f:
+    with open(f'data/{cat_name}_part_name_to_new_id_15_{ds_start}_{ds_end}.json', 'r') as f:
         unique_name_to_new_id = json.load(f)
 
     part_obbs = []
@@ -1407,15 +1398,15 @@ if args.samp:
                                                     batch_adj,
                                                     batch_mask,
                                                     batch_vec)
-        learned_relations = learned_xforms[:, connectivity[:, 0], connectivity[:, 1], :]
-        learned_xforms = learned_xforms[:, [0, 1, 2, 3], [0, 1, 2, 3], :]
+        # learned_relations = learned_xforms[:, connectivity[:, 0], connectivity[:, 1], :]
+        # learned_xforms = learned_xforms[:, [0, 1, 2, 3], [0, 1, 2, 3], :]
 
         batch_geom = torch.einsum('ijk, ikm -> ijm',
                                 batch_part_nodes.to(torch.float32),
                                 batch_node_feat)
 
-        pairwise_xforms = learned_xforms[:, connectivity]
-        learned_relations = pairwise_xforms[:, :, 1] - pairwise_xforms[:, :, 0]
+        # pairwise_xforms = learned_xforms[:, connectivity]
+        # learned_relations = pairwise_xforms[:, :, 1] - pairwise_xforms[:, :, 0]
 
         transformed_points = query_points.unsqueeze(1).expand(-1, num_parts, -1, -1) +\
             learned_xforms.unsqueeze(2)
@@ -1586,9 +1577,9 @@ if args.sc:
 
     unique_part_names, name_to_ori_ids_and_objs,\
         orig_obbs, entire_mesh, name_to_obbs, _, _, _ =\
-        preprocess_data_14.merge_partnet_after_merging(anno_id)
+        preprocess_data_15.merge_partnet_after_merging(anno_id)
 
-    with open(f'data/{cat_name}_part_name_to_new_id_14_{ds_start}_{ds_end}.json', 'r') as f:
+    with open(f'data/{cat_name}_part_name_to_new_id_15_{ds_start}_{ds_end}.json', 'r') as f:
         unique_name_to_new_id = json.load(f)
 
     part_obbs = []
@@ -1660,15 +1651,15 @@ if args.sc:
                                                     batch_adj,
                                                     batch_mask,
                                                     batch_vec)
-        learned_relations = learned_xforms[:, connectivity[:, 0], connectivity[:, 1], :]
-        learned_xforms = learned_xforms[:, [0, 1, 2, 3], [0, 1, 2, 3], :]
+        # learned_relations = learned_xforms[:, connectivity[:, 0], connectivity[:, 1], :]
+        # learned_xforms = learned_xforms[:, [0, 1, 2, 3], [0, 1, 2, 3], :]
 
         batch_geom = torch.einsum('ijk, ikm -> ijm',
                                 batch_part_nodes.to(torch.float32),
                                 batch_node_feat)
 
-        pairwise_xforms = learned_xforms[:, connectivity]
-        learned_relations = pairwise_xforms[:, :, 1] - pairwise_xforms[:, :, 0]
+        # pairwise_xforms = learned_xforms[:, connectivity]
+        # learned_relations = pairwise_xforms[:, :, 1] - pairwise_xforms[:, :, 0]
 
         transformed_points = query_points.unsqueeze(1).expand(-1, num_parts, -1, -1) +\
             learned_xforms.unsqueeze(2)
@@ -1820,7 +1811,7 @@ if args.asb_scaling:
 
     # build a tree that is a subset of the union tree (dense graph)
     # using the bounding boxes
-    node_names = np.load(f'data/{cat_name}_union_node_names_14_{ds_start}_{ds_end}.npy')
+    node_names = np.load(f'data/{cat_name}_union_node_names_15_{ds_start}_{ds_end}.npy')
     recon_root = tree.recon_tree(asb_adj.numpy(), node_names)
     UniqueDotExporter(recon_root,
                       indent=0,
@@ -1891,15 +1882,15 @@ if args.asb_scaling:
                                                     batch_adj,
                                                     batch_mask,
                                                     batch_vec)
-        learned_relations = learned_xforms[:, connectivity[:, 0], connectivity[:, 1], :]
-        learned_xforms = learned_xforms[:, [0, 1, 2, 3], [0, 1, 2, 3], :]
+        # learned_relations = learned_xforms[:, connectivity[:, 0], connectivity[:, 1], :]
+        # learned_xforms = learned_xforms[:, [0, 1, 2, 3], [0, 1, 2, 3], :]
 
         batch_geom = torch.einsum('ijk, ikm -> ijm',
                                 batch_part_nodes.to(torch.float32),
                                 batch_node_feat)
 
-        pairwise_xforms = learned_xforms[:, connectivity]
-        learned_relations = pairwise_xforms[:, :, 1] - pairwise_xforms[:, :, 0]
+        # pairwise_xforms = learned_xforms[:, connectivity]
+        # learned_relations = pairwise_xforms[:, :, 1] - pairwise_xforms[:, :, 0]
 
         transformed_points = query_points.unsqueeze(1).expand(-1, num_parts, -1, -1) +\
             gt_xforms.unsqueeze(2)

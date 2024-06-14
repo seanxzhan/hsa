@@ -187,6 +187,8 @@ def save_obbs_vis(obbs, out_path, mesh_y_rot=-45, mag=1,
                     base_color = [173.0/255, 157.0/255, 190.0/255, 0.9]
                 if unmasked_indices == [0]:
                     base_color = [150.0/255, 118.0/255, 96.0/255, 0.9]
+            # base_color = [148.0/255, 201.0/255, 107.0/255, 0.9]
+            base_color = [0.0] * 4
             # else:
             #     # base_color = [0.0, 0.0, 0.0, 0.0]
             #     continue
