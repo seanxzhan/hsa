@@ -1,7 +1,8 @@
 import os
 import importlib
 
-expt = 83
+expt = 85
+batch_size = 25
 module = importlib.import_module(f"run.local.local_{expt}")
 model_idx_to_anno_id = getattr(module, "model_idx_to_anno_id")
 # from run.local.local_77 import model_idx_to_anno_id
@@ -11,7 +12,7 @@ end = 100
 shape_indices = [model_idx_to_anno_id[i] for i in range(start, end)]
 
 # Path pattern for the images
-base_path = f"/projects/hsa/results/local_{expt}-bs-15/64/"
+base_path = f"/projects/hsa/results/local_{expt}-bs-{batch_size}/64/"
 image_pattern = "{shape_idx}/{shape_idx}_results.png"
 disentang_pattern0 = "{shape_idx}/{shape_idx}_results_mask_1-2-3.png"
 disentang_pattern1 = "{shape_idx}/{shape_idx}_results_mask_0-2-3.png"
