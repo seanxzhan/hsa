@@ -226,7 +226,7 @@ def build_dense_graph(union_root: AnyNode, name_to_obbs: Dict, obbs,
     # node features, len = num_union_nodes
     node_features = []
     # xforms
-    xforms = [np.zeros((1, 4, 4), dtype=np.float32)] * num_unique_part_classes
+    xforms = [np.eye(4, dtype=np.float32)[None, :]] * num_unique_part_classes
     # extents
     extents = [np.zeros((1, 3), dtype=np.float32)] * num_unique_part_classes
     # for each unique part, whare are the valid nodes in this specific shape
@@ -994,6 +994,8 @@ def make_data_for_one(anno_id,
     partnet_pcd_part_labels = []
     for un in unique_names:
         new_id = unique_name_to_new_id[un]
+        if new_id not in new_labels:
+            continue
         part_indices = np.argwhere(new_labels == new_id)[:,0]
         part_points = partnet_pcd_in_fg_vox_grid[part_indices]
         part_points = kaolin.ops.pointcloud.center_points(
@@ -1127,7 +1129,7 @@ if __name__ == "__main__":
     # exit(0)
     
     # pass two to create the four_parts dataset
-    good_indices = np.load('data/chair_four_parts_16_0_4489.npy')
+    good_indices = np.load('data/chair_am_four_parts_16_0_4489.npy')
     data_pt = 'data/Chair_train_new_ids_to_objs_16_0_4489.json'
     with open(data_pt, 'r') as f:
         data: Dict = json.load(f)

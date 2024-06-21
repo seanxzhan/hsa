@@ -47,6 +47,30 @@ def save_four_parts_further_merged():
     np.save('data/chair_four_parts_16_0_4489.npy', indices)
 
 
+def save_four_parts_further_merged_am():
+    # this gives more shapes than save_four_parts because hier is further merged
+    # data_pt = 'data/Chair_train_new_ids_to_objs_8_0_2000.json'
+    data_pt = 'data/Chair_train_new_ids_to_objs_16_0_4489.json'
+    with open(data_pt, 'r') as f:
+        data: Dict = json.load(f)
+    all_ids = np.array(list(data.keys()))
+
+    counter = 0
+    indices = []
+    for id, parts in data.items():
+        parts_lst = list(parts.keys())
+        # if '3' in parts_lst and '4' in parts_lst and '12' in parts_lst and '15' in parts_lst:
+        if set(parts_lst) <= set(['0', '1', '4', '8']):
+            indices.append(counter)
+        counter += 1
+
+    print(len(indices))
+    # print(indices)
+    print(all_ids[indices])
+    # np.save('data/chair_four_parts_8_0_2000.npy', indices)
+    np.save('data/chair_am_four_parts_16_0_4489.npy', indices)
+
+
 def save_four_parts_further_merged_14():
     # this gives more shapes than save_four_parts because hier is further merged
     data_pt = 'data/Chair_train_new_ids_to_objs_14_0_2000.json'
@@ -139,7 +163,8 @@ if __name__ == "__main__":
     # peek_11_id_to_idx('41378')
     # peek_11_id_to_idx('42992')
 
-    save_four_parts_further_merged()
+    # save_four_parts_further_merged()
+    save_four_parts_further_merged_am()
 
     # save_four_parts_further_merged_14_am()
 
