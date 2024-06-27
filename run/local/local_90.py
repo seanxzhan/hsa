@@ -9,7 +9,7 @@ import argparse
 import numpy as np
 from tqdm import tqdm
 from torch.utils.tensorboard import SummaryWriter
-from occ_networks.xform_decoder_nasa_obbgnn_ae_84 import SDFDecoder, get_embedder
+from occ_networks.xform_decoder_nasa_obbgnn_ae_58 import SDFDecoder, get_embedder
 from utils import misc, visualize, reconstruct, tree
 from data_prep import preprocess_data_16
 from typing import Dict
@@ -59,7 +59,7 @@ save_every = 100
 multires = 2
 pt_sample_res = 64        # point_sampling
 
-expt_id = 88
+expt_id = 90
 
 OVERFIT = args.of
 overfit_idx = args.of_idx

@@ -84,7 +84,8 @@ class SmallMLPs(torch.nn.Module):
     def forward(self, p, feature):
         if self.embed_fn is not None:
             p = self.embed_fn(p)
-        p = torch.concatenate((p, feature), dim=-1)
+        # p = torch.concatenate((p, feature), dim=-1)
+        p = torch.concat((p, feature), dim=-1)
         out = self.net(p)
         return out
 

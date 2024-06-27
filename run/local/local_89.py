@@ -59,7 +59,7 @@ save_every = 100
 multires = 2
 pt_sample_res = 64        # point_sampling
 
-expt_id = 88
+expt_id = 89
 
 OVERFIT = args.of
 overfit_idx = args.of_idx
@@ -208,9 +208,7 @@ def loss_f(pred_values, gt_values):
 
 
 def loss_f_xform(pred_xforms, gt_xforms):
-    # xform_loss = mse(pred_xforms, gt_xforms)
-    xform_loss = (gt_xforms - pred_xforms) ** 2
-    xform_loss = torch.mean(torch.sum(xform_loss, dim=-1))
+    xform_loss = mse(pred_xforms, gt_xforms)
     return xform_loss
 
 
@@ -290,29 +288,19 @@ def train_one_itr(it, b,
 
     loss = loss1 + loss2
 
-    # loss_bbox_geom = loss_f(
-    #     embed_fn(learned_geom.view(-1, 3)),
-    #     embed_fn(batch_geom.view(-1, 3)),)
     loss_bbox_geom = loss_f(
-        learned_geom.view(-1, 3),
-        batch_geom.view(-1, 3))
+        embed_fn(learned_geom.view(-1, 3)),
+        embed_fn(batch_geom.view(-1, 3)),)
     loss += loss_bbox_geom
 
-    # loss_xform = loss_f_xform(
-    #     embed_fn(learned_xforms.view(-1, 3)),
-    #     embed_fn(batch_xforms.view(-1, 3)))
     loss_xform = loss_f_xform(
-        learned_xforms.view(-1, 3),
-        batch_xforms.view(-1, 3))
-    # loss_relations = loss_f_xform(
-    #     embed_fn(learned_relations.view(-1, 3)),
-    #     embed_fn(batch_relations.view(-1, 3)))
+        embed_fn(learned_xforms.view(-1, 3)),
+        embed_fn(batch_xforms.view(-1, 3)))
     loss_relations = loss_f_xform(
-        learned_relations.view(-1, 3),
-        batch_relations.view(-1, 3))
+        embed_fn(learned_relations.view(-1, 3)),
+        embed_fn(batch_relations.view(-1, 3)))
     
-    # loss += 10 * loss_xform + 10 * loss_relations
-    loss += loss_xform + loss_relations
+    loss += 10 * loss_xform + 10 * loss_relations
 
     if b == n_batches - 1:
         writer.add_scalar('occ loss', loss1 + loss2, it)

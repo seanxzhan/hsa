@@ -1,7 +1,7 @@
 import os
 import importlib
 
-expt = 84
+expt = 89
 batch_size = 25
 module = importlib.import_module(f"run.local.local_{expt}")
 model_idx_to_anno_id = getattr(module, "model_idx_to_anno_id")
