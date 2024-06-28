@@ -9,7 +9,7 @@ import numpy as np
 import torch
 import trimesh
 import kaolin
-# import nvdiffrast.torch as dr
+import nvdiffrast.torch as dr
 
 ###############################################################################
 # Functions adapted from https://github.com/NVlabs/nvdiffrec
@@ -116,7 +116,7 @@ def xfm_points(points, matrix):
         assert torch.all(torch.isfinite(out)), "Output of xfm_points contains inf or NaN"
     return out
 
-# def interpolate(attr, rast, attr_idx, rast_db=None):
-#     return dr.interpolate(
-#         attr, rast, attr_idx, rast_db=rast_db,
-#         diff_attrs=None if rast_db is None else 'all')
+def interpolate(attr, rast, attr_idx, rast_db=None):
+    return dr.interpolate(
+        attr, rast, attr_idx, rast_db=rast_db,
+        diff_attrs=None if rast_db is None else 'all')

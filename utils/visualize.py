@@ -5,21 +5,13 @@ import numpy as np
 import pyrender
 import colorsys
 from PIL import Image
-from tqdm import tqdm
 from scipy.spatial.transform import Rotation as R
-import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d.art3d import Poly3DCollection
-from mpl_toolkits.mplot3d import Axes3D
 from pyrender.constants import RenderFlags
-
 
 LIMITS = [(-0.5, 0.5), (-0.5, 0.5), (-0.5, 0.5)]
 
-
-
 def hex2rgb(h):
     return [int(h[i:i+2], 16) for i in (0, 2, 4)]
-
 
 def increase_saturation(rgb, percent):
     # convert RGB values to HSV (hue, saturation, value) format
@@ -30,11 +22,9 @@ def increase_saturation(rgb, percent):
     rgb = tuple(max(0, min(int(x * 255), 255)) for x in colorsys.hsv_to_rgb(hsv[0], hsv[1], hsv[2]))
     return rgb
 
-
 def hex2rgb_sat(h, percent):
     color = hex2rgb(h)
     return increase_saturation(color, percent)
-
 
 def get_tab_20():
     return [
@@ -60,7 +50,6 @@ def get_tab_20():
         hex2rgb('9edae5'),
     ] * 3
 
-
 def get_tab_20_saturated(percent):
     return [
         hex2rgb_sat('17becf', percent),
@@ -85,7 +74,6 @@ def get_tab_20_saturated(percent):
         hex2rgb_sat('9edae5', percent),
     ] * 3
 
-
 def save_fig(plt, title, img_path, rotate=False, transparent=False):
     plt.title(title)
     plt.savefig(img_path, bbox_inches='tight', pad_inches=0, dpi=300, 
@@ -94,7 +82,6 @@ def save_fig(plt, title, img_path, rotate=False, transparent=False):
         im = Image.open(img_path)
         im = im.rotate(90)
         im.save(img_path)
-
 
 def save_mesh_vis(trimesh_obj, out_path, mesh_y_rot=-45, mag=1,
                   white_bg=False, save_img=True):
@@ -314,7 +301,6 @@ def save_obbs_vis(obbs, out_path, mesh_y_rot=-45, mag=1,
     if save_img:
         im.save(out_path)
     return im
-
 
 def compute_obb_edges(extents, transform):
     # Define the 8 vertices in local coordinates

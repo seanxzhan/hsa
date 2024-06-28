@@ -10,13 +10,11 @@ import copy
 import math
 from ipywidgets import interactive, HBox, VBox, FloatLogSlider, IntSlider
 
-# import os
-# os.environ['PYOPENGL_PLATFORM'] = 'egl'
-
 import torch
 import nvdiffrast.torch as dr
 import kaolin as kal
-import flexicubes.util as util
+
+import flexi.util as util
 
 ###############################################################################
 # Functions adapted from https://github.com/NVlabs/nvdiffrec
@@ -73,6 +71,7 @@ def get_rotate_camera(itr, fovy = np.deg2rad(45), iter_res=[512,512], cam_near_f
         mv     = util.translate(0, 0, -cam_radius) @ (util.rotate_x(-0.4) @ util.rotate_y(ang))
         mvp    = proj_mtx @ mv
         return mv.to(device), mvp.to(device)
+
 
 glctx = dr.RasterizeGLContext()
 def render_mesh(mesh, camera, iter_res, return_types = ["mask", "depth"], white_bg=False, wireframe_thickness=0.4):
