@@ -2206,17 +2206,17 @@ if args.post_process:
     
     from dmtet_networks import dmtet_utils, dmtet_network
 
-    # dmtet_model = dmtet_network.Decoder(multires=multires).to(device)
-    dmtet_model = dmtet_network.Decoder(input_dims=3+each_part_feat*4,
-                                        multires=multires).to(device)
+    dmtet_model = dmtet_network.Decoder(multires=multires).to(device)
+    # dmtet_model = dmtet_network.Decoder(input_dims=3+each_part_feat*4,
+    #                                     multires=multires).to(device)
     sdf = - 2 * pred_values + 1
     # sdf = 1 - pred_values
     # sdf /= torch.sum(sdf)
+    dmtet_model.pre_train_sphere(10000)
     # dmtet_model.pre_train_chair(10000,
     #                             query_points.squeeze(0),
     #                             sdf.squeeze(0).squeeze(-1))
-    # dmtet_model.pre_train_sphere(10000)
-    dmtet_model.pre_train_sphere_feat(10000, batch_embed)
+    # dmtet_model.pre_train_sphere_feat(10000, batch_embed)
     # dmtet_model.pre_train_chair_feat(10000,
     #                                  query_points.squeeze(0),
     #                                  sdf.squeeze(0).squeeze(-1),
@@ -2229,8 +2229,8 @@ if args.post_process:
 
     iterations = 10000
     for it in range(iterations):
-        # pred = dmtet_model(tet_verts) # predict SDF and per-vertex deformation
-        pred = dmtet_model.forward_feat(tet_verts, batch_embed) # predict SDF and per-vertex deformation
+        pred = dmtet_model(tet_verts) # predict SDF and per-vertex deformation
+        # pred = dmtet_model.forward_feat(tet_verts, batch_embed) # predict SDF and per-vertex deformation
         sdf, deform = pred[:,0], pred[:,1:]
         verts_deformed = tet_verts + torch.tanh(deform) / grid_res # constraint deformation to avoid flipping tets
         mesh_verts, mesh_faces = kaolin.ops.conversions.marching_tetrahedra(
@@ -2273,7 +2273,7 @@ if args.post_process_fc:
     model.load_state_dict(checkpoint['model_state_dict'])
     embeddings = torch.nn.Embedding(num_shapes, num_parts*each_part_feat).to(device)
     embeddings.load_state_dict(checkpoint['embeddings_state_dict'])
-    optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+    # optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
 
     results_dir = os.path.join(results_dir, anno_id)
     misc.check_dir(results_dir)
@@ -2405,7 +2405,7 @@ if args.post_process_fc:
     # visualize.save_mesh_vis(aligned_gt_mesh, mesh_gt_path,
     #                         mag=mag, white_bg=white_bg)
     
-    timelapse = kaolin.visualize.Timelapse(os.path.join(results_dir, 'timelapse'))
+    timelapse = kaolin.visualize.Timelapse(os.path.join(results_dir, 'timelapse_flexi'))
     timelapse.add_mesh_batch(category='gt_mesh',
                              vertices_list=[torch.from_numpy(aligned_gt_mesh.vertices)],
                              faces_list=[torch.from_numpy(aligned_gt_mesh.faces)])
@@ -2416,92 +2416,106 @@ if args.post_process_fc:
     
     # pcd, _ = trimesh.sample.sample_surface(aligned_gt_mesh, 10000, seed=319)
     # pcd = torch.from_numpy(pcd).to(device, torch.float32)
-    
+
     from flexi.flexicubes import FlexiCubes
     from flexi.util import *
     from flexi import render, loss
     import imageio
 
+    glctx = dr.RasterizeGLContext()
     gt_mesh = load_mesh(aligned_gt_mesh_path, device)
     gt_mesh.auto_normals()
 
-    voxel_grid_res = 64
+    voxel_grid_res = 32
 
     fc = FlexiCubes(device)
-    x_nx3, cube_fx8 = fc.construct_voxel_grid(voxel_grid_res)
-    x_nx3 *= 2 # scale up the grid so that it's larger than the target object
+    x_nx3_orig, cube_fx8 = fc.construct_voxel_grid(voxel_grid_res)
+    x_nx3 = 2*x_nx3_orig # scale up the grid so that it's larger than the target object
+    # x_nx3 = x_nx3_orig
+
+    with torch.no_grad():
+        if args.mask:
+            # parts = [args.part]
+            parts = args.parts
+            parts = [int(x) for x in parts]
+            if args.recon_one_part:
+                # only reconstruct part specified by parts
+                masked_indices = list(set(range(num_parts)) - set(parts))
+                masked_indices = torch.Tensor(masked_indices).to(device, torch.long)
+            if args.recon_the_rest:
+                # don't reconstruct stuff in masked_indices
+                masked_indices = torch.Tensor(parts).to(device, torch.long)
+        else:
+            masked_indices = torch.Tensor([]).to(device, torch.long)
+
+        if not args.mask:
+            print("reconstructing...")
+        else:
+            print(f"masking parts: {masked_indices.cpu().numpy().tolist()}")
+
+        parts_mask = torch.zeros((batch_embed.shape[0], num_parts)).to(device, torch.float32)
+        parts_mask[:, masked_indices] = 1
+        parts_mask = torch.repeat_interleave(parts_mask, each_part_feat, dim=-1)
+        
+        points_mask = torch.zeros((1, num_parts, 1, 1)).to(device, torch.float32)
+        points_mask[:, masked_indices] = 1
+
+        occ_mask = torch.zeros((1, 1, num_parts)).to(device, torch.float32)
+        occ_mask[:, :, masked_indices] = 1
+
+        # learning xforms
+        batch_vec = torch.arange(start=0, end=1).to(device)
+        batch_vec = torch.repeat_interleave(batch_vec, num_union_nodes)
+        batch_mask = torch.sum(batch_part_nodes, dim=1)
+        learned_geom, learned_xforms = model.learn_geom_xform(batch_node_feat,
+                                                    batch_adj,
+                                                    batch_mask,
+                                                    batch_vec)
+        learned_relations = learned_xforms[:, connectivity[:, 0], connectivity[:, 1], :]
+        learned_xforms = learned_xforms[:, [0, 1, 2, 3], [0, 1, 2, 3], :]
+
+        batch_geom = torch.einsum('ijk, ikm -> ijm',
+                                batch_part_nodes.to(torch.float32),
+                                batch_node_feat)
+
+        pairwise_xforms = learned_xforms[:, connectivity]
+        learned_relations = pairwise_xforms[:, :, 1] - pairwise_xforms[:, :, 0]
+
+        transformed_points = x_nx3_orig.unsqueeze(0).unsqueeze(1).expand(-1, num_parts, -1, -1) +\
+            learned_xforms.unsqueeze(2)
+
+        occs1 = model(transformed_points.masked_fill(points_mask==1,torch.tensor(0)),
+                      batch_embed.masked_fill(parts_mask==1, torch.tensor(0)))
+        occs1 = occs1.masked_fill(occ_mask==1,torch.tensor(float('-inf')))
+        pred_values, _ = torch.max(occs1, dim=-1, keepdim=True)
     
-    sdf = torch.rand_like(x_nx3[:,0]) - 0.1 # randomly init SDF
-    sdf = torch.nn.Parameter(sdf.clone().detach(), requires_grad=True)
+    # sdf = torch.rand_like(x_nx3[:,0]) - 0.1 # randomly init SDF
+    
+    sdf = - 2 * pred_values + 1
+    sdf = torch.squeeze(sdf)
+
+    sdf    = torch.nn.Parameter(sdf.clone().detach(), requires_grad=True)
+    
     # set per-cube learnable weights to zeros
     weight = torch.zeros((cube_fx8.shape[0], 21), dtype=torch.float, device='cuda') 
-    weight = torch.nn.Parameter(weight.clone().detach(), requires_grad=True)
+    weight    = torch.nn.Parameter(weight.clone().detach(), requires_grad=True)
     deform = torch.nn.Parameter(torch.zeros_like(x_nx3), requires_grad=True)
-
+    
     #  Retrieve all the edges of the voxel grid; these edges will be utilized to 
     #  compute the regularization loss in subsequent steps of the process.    
     all_edges = cube_fx8[:, fc.cube_edges].reshape(-1, 2)
     grid_edges = torch.unique(all_edges, dim=0)
 
-    learning_rate = 0.5
+    learning_rate = 0.01
     sdf_regularizer = 0.2
 
     def lr_schedule(iter):
         return max(0.0, 10**(-(iter)*0.0002)) # Exponential falloff from [1.0, 0.1] over 5k epochs.    
 
-    optimizer = torch.optim.Adam([sdf, weight,deform], lr=learning_rate)
-    scheduler = torch.optim.lr_scheduler.LambdaLR(
-        optimizer, lr_lambda=lambda x: lr_schedule(x)) 
-
-    # # initialization (random)
-    # grid_verts = x_nx3 + (2-1e-8) / (voxel_grid_res * 2) * torch.tanh(deform) # apply deformation to the grid vertices
-    # vertices, faces, L_dev = fc(
-    #     grid_verts, sdf, cube_fx8, voxel_grid_res,
-    #     beta_fx12=weight[:,:12], alpha_fx8=weight[:,12:20],
-    #     gamma_f=weight[:,20], training=False) # run isosurfacing to extract the mesh
-    # init_mesh = kaolin.rep.SurfaceMesh(vertices=vertices, faces=faces)
-
-    # timelapse.add_mesh_batch(category='init_mesh',
-    #                          vertices_list=[vertices],
-    #                          faces_list=[faces])
+    optimizer = torch.optim.Adam([sdf, weight, deform], lr=learning_rate)
+    scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda x: lr_schedule(x)) 
     
     iterations = 1000
-    # for it in range(iterations): 
-    #     optimizer.zero_grad()
-    #     # extract and render FlexiCubes mesh
-    #     grid_verts = x_nx3 + (2-1e-8) / (voxel_grid_res * 2) * torch.tanh(deform)
-    #     vertices, faces, L_dev = fc(grid_verts, sdf, cube_fx8, voxel_grid_res,
-    #                                 beta_fx12=weight[:,:12], alpha_fx8=weight[:,12:20],
-    #                                 gamma_f=weight[:,20], training=True)
-    #     flexicubes_mesh = util_fc.Mesh(vertices, faces)
-
-    #     pred_points = kaolin.ops.mesh.sample_points(
-    #         vertices.unsqueeze(0), faces, 10000)[0][0]
-    #     chamfer = kaolin.metrics.pointcloud.chamfer_distance(
-    #         pred_points.unsqueeze(0), pcd.unsqueeze(0)).mean()
-
-    #     # evaluate regularization losses
-    #     t_iter = it / iterations
-    #     # this is the regularization loss described in Equation 2 of the nvdiffrec paper by Munkberg et al., which serves to remove internal floating elements that are not visible to the user.
-    #     sdf_weight = sdf_regularizer - (sdf_regularizer - sdf_regularizer/20)*min(1.0, 4.0 * t_iter)
-    #     reg_loss = loss.sdf_reg_loss(sdf, grid_edges).mean() * sdf_weight 
-
-    #     reg_loss += L_dev.mean() * 0.5 # L_dev as in Equation 8 of our paper
-    #     reg_loss += (weight[:,:20]).abs().mean() * 0.1 # regularize weights to be zeros to improve the stability of the optimization process
-    #     total_loss = chamfer + reg_loss
-    #     total_loss.backward()
-    #     optimizer.step()
-    #     scheduler.step()
-    #     if (it) % 100 == 0 or it == (iterations - 1): 
-    #         print ('Iteration {} - loss: {:.5f}, # of mesh vertices: {}, # of mesh faces: {}'.format(
-    #             it, total_loss, vertices.shape[0], faces.shape[0]))
-    #         # save reconstructed mesh
-    #         timelapse.add_mesh_batch(
-    #             iteration=it+1,
-    #             category='extracted_mesh',
-    #             vertices_list=[vertices.cpu()],
-    #             faces_list=[faces.cpu()]
-    #         )
 
     train_res = [2048, 2048]
     display_res = [512, 512]
@@ -2514,9 +2528,7 @@ if args.post_process_fc:
         # sample random camera poses
         mv, mvp = render.get_random_camera_batch(8, iter_res=train_res, device=device, use_kaolin=False)
         # render gt mesh
-        # print("before render mesh paper")
         target = render.render_mesh_paper(gt_mesh, mv, mvp, train_res)
-        # print("after render mesh paper")
         # extract and render FlexiCubes mesh
         grid_verts = x_nx3 + (2-1e-8) / (voxel_grid_res * 2) * torch.tanh(deform)
         vertices, faces, L_dev = fc(grid_verts, sdf, cube_fx8, voxel_grid_res, beta_fx12=weight[:,:12], alpha_fx8=weight[:,12:20],
@@ -2535,43 +2547,51 @@ if args.post_process_fc:
         reg_loss += (weight[:,:20]).abs().mean() * 0.1
         total_loss = mask_loss + depth_loss + reg_loss
 
-        with torch.no_grad():
-            pts = sample_random_points(1000, gt_mesh)
-            gt_sdf = compute_sdf(pts, gt_mesh.vertices, gt_mesh.faces)
-        pred_sdf = compute_sdf(pts, flexicubes_mesh.vertices, flexicubes_mesh.faces)
-        total_loss += torch.nn.functional.mse_loss(pred_sdf, gt_sdf) * 2e3
+        # with torch.no_grad():
+        #     pts = sample_random_points(1000, gt_mesh)
+        #     gt_sdf = compute_sdf(pts, gt_mesh.vertices, gt_mesh.faces)
+        # pred_sdf = compute_sdf(pts, flexicubes_mesh.vertices, flexicubes_mesh.faces)
+        # total_loss += torch.nn.functional.mse_loss(pred_sdf, gt_sdf) * 2e3
         
-        # if (it) % 100 == 0 or it == (iterations - 1): 
-        #     with torch.no_grad():
-        #         # extract mesh with training=False
-        #         vertices, faces, L_dev = fc(
-        #             grid_verts, sdf, cube_fx8, voxel_grid_res,
-        #             beta_fx12=weight[:,:12], alpha_fx8=weight[:,12:20],
-        #             gamma_f=weight[:,20], training=False)
-        #     print ('Iteration {} - loss: {:.5f}, # of mesh vertices: {}, # of mesh faces: {}'.format(
-        #         it, total_loss, vertices.shape[0], faces.shape[0]))
-        #     # save reconstructed mesh
-        #     timelapse.add_mesh_batch(
-        #         iteration=it+1,
-        #         category='extracted_mesh',
-        #         vertices_list=[vertices.cpu()],
-        #         faces_list=[faces.cpu()]
-        #     )
-        save_every = 20
-        if (it % save_every == 0 or it == (iterations-1)): # save normal image for visualization
+        total_loss.backward()
+        optimizer.step()
+        scheduler.step()
+
+        if (it) % 100 == 0 or it == (iterations - 1): 
             with torch.no_grad():
                 # extract mesh with training=False
-                vertices, faces, L_dev = fc(grid_verts, sdf, cube_fx8, voxel_grid_res, beta_fx12=weight[:,:12], alpha_fx8=weight[:,12:20],
-                gamma_f=weight[:,20], training=False)
-                flexicubes_mesh = Mesh(vertices, faces)
+                vertices, faces, L_dev = fc(
+                    grid_verts, sdf, cube_fx8, voxel_grid_res,
+                    beta_fx12=weight[:,:12], alpha_fx8=weight[:,12:20],
+                    gamma_f=weight[:,20], training=False)
+            print ('Iteration {} - loss: {:.5f}, # of mesh vertices: {}, # of mesh faces: {}'.format(
+                it, total_loss, vertices.shape[0], faces.shape[0]))
+            # save reconstructed mesh
+            timelapse.add_mesh_batch(
+                iteration=it+1,
+                category='extracted_mesh',
+                vertices_list=[vertices.cpu()],
+                faces_list=[faces.cpu()]
+            )
+
+        # save_every = 20
+        # if (it % save_every == 0 or it == (iterations-1)): # save normal image for visualization
+        #     with torch.no_grad():
+        #         # extract mesh with training=False
+        #         vertices, faces, L_dev = fc(grid_verts, sdf, cube_fx8, voxel_grid_res, beta_fx12=weight[:,:12], alpha_fx8=weight[:,12:20],
+        #         gamma_f=weight[:,20], training=False)
+        #         flexicubes_mesh = Mesh(vertices, faces)
                 
-                flexicubes_mesh.auto_normals() # compute face normals for visualization
-                mv, mvp = render.get_rotate_camera(it//save_every, iter_res=display_res, device=device,use_kaolin=False)
-                val_buffers = render.render_mesh_paper(flexicubes_mesh, mv.unsqueeze(0), mvp.unsqueeze(0), display_res, return_types=["normal"], white_bg=True)
-                val_image = ((val_buffers["normal"][0].detach().cpu().numpy()+1)/2*255).astype(np.uint8)
+        #         flexicubes_mesh.auto_normals() # compute face normals for visualization
+        #         mv, mvp = render.get_rotate_camera(it//save_every, iter_res=display_res, device=device,use_kaolin=False)
+        #         val_buffers = render.render_mesh_paper(flexicubes_mesh, mv.unsqueeze(0), mvp.unsqueeze(0), display_res, return_types=["normal"], white_bg=True)
+        #         val_image = ((val_buffers["normal"][0].detach().cpu().numpy()+1)/2*255).astype(np.uint8)
                 
-                gt_buffers = render.render_mesh_paper(gt_mesh, mv.unsqueeze(0), mvp.unsqueeze(0), display_res, return_types=["normal"], white_bg=True)
-                gt_image = ((gt_buffers["normal"][0].detach().cpu().numpy()+1)/2*255).astype(np.uint8)
-                imageio.imwrite(os.path.join(train_img_dir, '{:04d}.png'.format(it)), np.concatenate([val_image, gt_image], 1))
-                print(f"Optimization Step [{it}/{iterations}], Loss: {total_loss.item():.4f}")
-            
+        #         gt_buffers = render.render_mesh_paper(gt_mesh, mv.unsqueeze(0), mvp.unsqueeze(0), display_res, return_types=["normal"], white_bg=True)
+        #         gt_image = ((gt_buffers["normal"][0].detach().cpu().numpy()+1)/2*255).astype(np.uint8)
+        #         imageio.imwrite(os.path.join(train_img_dir, '{:04d}.png'.format(it)), np.concatenate([val_image, gt_image], 1))
+        #         print(f"Optimization Step [{it}/{iterations}], Loss: {total_loss.item():.4f}")
+        
+
+    mesh_np = trimesh.Trimesh(vertices = vertices.detach().cpu().numpy(), faces=faces.detach().cpu().numpy(), process=False)
+    mesh_np.export(os.path.join(results_dir, 'flexi_mesh.obj'))

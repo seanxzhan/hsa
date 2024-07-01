@@ -11,9 +11,9 @@ import torch
 import nvdiffrast.torch as dr
 import trimesh
 import os
-from util import *
-import render
-import loss
+from flexi.util import *
+import flexi.render as render
+import flexi.loss as loss
 import imageio
 
 import sys
@@ -28,7 +28,7 @@ sys.path.append('..')
 # distribution of this software and related documentation without an express
 # license agreement from NVIDIA CORPORATION & AFFILIATES is strictly prohibited.
 import torch
-from tables import *
+from flexi.tables import *
 
 __all__ = [
     'FlexiCubes'

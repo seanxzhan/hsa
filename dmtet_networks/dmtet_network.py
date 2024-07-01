@@ -29,7 +29,7 @@ class Decoder(torch.nn.Module):
         if self.embed_fn is not None:
             p = self.embed_fn(p)
         out = self.net(
-            torch.concatenate((p,
+            torch.concat((p,
                 feature.expand(p.shape[0], -1)), dim=-1
             ))
         return out
