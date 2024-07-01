@@ -3,4 +3,5 @@ hsa.egg-info
 __pycache__
 data
 logs
+out
 results
