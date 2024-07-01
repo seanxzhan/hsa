@@ -2508,35 +2508,46 @@ if args.post_process_fc:
             super().__init__()
             internal_dims = 64
 
-            net = (torch.nn.Linear(feature_dims, internal_dims),
+            net = (torch.nn.Linear(feature_dims, internal_dims, bias=False),
                    torch.nn.ReLU())
             for i in range(hidden-1):
                 net = net + (
-                    torch.nn.Linear(internal_dims, internal_dims),
+                    torch.nn.Linear(internal_dims, internal_dims, bias=False),
                     torch.nn.ReLU())
-            net = net + (torch.nn.Linear(internal_dims, output_dims),)
+            net = net + (torch.nn.Linear(internal_dims, output_dims, bias=False),)
             self.net = torch.nn.Sequential(*net)
 
-        def forward(self, feature):
+        def forward(self, feature, final_layer=False):
             x = self.net(feature)
+            # if final_layer:
+            #     x = torch.nn.Tanh()(x)
             return x
     
     batch_embed_sdf_deform = batch_embed.expand(x_nx3.shape[0], -1)
     batch_embed_weight = batch_embed.expand(cube_fx8.shape[0], -1)
 
-    sdf_model = PPNet(num_parts*each_part_feat, output_dims=1, hidden=3).to(device)
+    sdf_model = PPNet(3 + num_parts*each_part_feat, output_dims=1, hidden=5).to(device)
     sdf_params = [p for _, p in sdf_model.named_parameters()]
 
+    # sdf_in = torch.concat([x_nx3_orig,
+    #                       batch_embed_sdf_deform], dim=-1)
+
     # # pretrain SDF model
-    # pred_values = torch.squeeze(pred_values)
-    # loss_fn = torch.nn.MSELoss()
-    # for i in tqdm(range(5000)):
-    #     output = sdf_model(batch_embed_sdf_deform)
-    #     loss = loss_fn(output[...,0], pred_values)
-    #     optimizer.zero_grad()
-    #     loss.backward()
-    #     optimizer.step()
-    # print("Pre-trained SDF", loss.item())
+    # # pred_values = torch.squeeze(pred_values)
+    # pre_t_optimizer = torch.optim.Adam(list(sdf_model.parameters()), lr=1e-4)
+    # pre_t_loss_fn = torch.nn.MSELoss()
+    # for i in tqdm(range(10000)):
+    #     output = sdf_model(sdf_in
+    #                     #    , final_layer=True
+    #                        )
+    #     # output = sdf_model(batch_embed_sdf_deform)
+    #     pre_t_loss = pre_t_loss_fn(output[...,0], sdf)
+    #     pre_t_optimizer.zero_grad()
+    #     pre_t_loss.backward()
+    #     pre_t_optimizer.step()
+    # print("Pre-trained SDF", pre_t_loss.item())
+
+    # exit(0)
 
     weight_model = PPNet(num_parts*each_part_feat, output_dims=21).to(device)
     weight_params = [p for _, p in weight_model.named_parameters()]
@@ -2562,6 +2573,7 @@ if args.post_process_fc:
     # optimizer = torch.optim.Adam([sdf, weight, deform], lr=learning_rate)
     # optimizer = torch.optim.Adam([{"sdf": sdf, "weight": weight, "params": params}], lr=learning_rate)
     optimizer = torch.optim.Adam([sdf, weight] + deform_params, lr=learning_rate)
+    # optimizer = torch.optim.Adam([weight] + sdf_params + deform_params, lr=learning_rate)
     # optimizer = torch.optim.Adam([sdf, weight], lr=learning_rate)
     # optimizer = torch.optim.Adam([weight], lr=learning_rate)
     # optimizer = torch.optim.Adam([{"params": weight_params, "lr": learning_rate},
@@ -2569,7 +2581,7 @@ if args.post_process_fc:
     # optimizer = torch.optim.Adam([{"params": weight_params, "lr": learning_rate},
     #                               {"params": deform_params, "lr": learning_rate},
     #                               {"params": sdf_params, "lr": learning_rate}])
-    # optimizer = torch.optim.Adam(weight_params + deform_params, lr=learning_rate)
+    # optimizer = torch.optim.Adam(weight_params + sdf_params + deform_params, lr=learning_rate)
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda x: lr_schedule(x)) 
     
     iterations = 1000
@@ -2581,6 +2593,7 @@ if args.post_process_fc:
 
     print("second pass with FlexiCubes...")
     for it in range(iterations):
+        # print(it)
         optimizer.zero_grad()
         # sample random camera poses
         mv, mvp = render.get_random_camera_batch(8, iter_res=train_res, device=device, use_kaolin=False)
@@ -2594,13 +2607,17 @@ if args.post_process_fc:
         grid_verts = x_nx3 + (2-1e-8) / (voxel_grid_res * 2) * torch.tanh(deform)
         
         # learn sdf from code
-        # sdf = sdf_model(batch_embed_sdf_deform)
+        # sdf = sdf_model(sdf_in
+        #                 # , final_layer=True
+        #                 )
+        # print(torch.min(sdf), torch.max(sdf))
         
         # learn weight from code
         # weight = weight_model(batch_embed_weight)
         
         vertices, faces, L_dev = fc(grid_verts, sdf, cube_fx8, voxel_grid_res, beta_fx12=weight[:,:12], alpha_fx8=weight[:,12:20],
             gamma_f=weight[:,20], training=True)
+        # print(faces)
         flexicubes_mesh = Mesh(vertices, faces)
         buffers = render.render_mesh_paper(flexicubes_mesh, mv, mvp, train_res)
         
