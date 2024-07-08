@@ -63,7 +63,7 @@ save_every = 100
 multires = 2
 pt_sample_res = 64        # point_sampling
 
-expt_id = 91
+expt_id = 93
 
 OVERFIT = args.of
 overfit_idx = args.of_idx
@@ -220,6 +220,10 @@ np.random.seed(319)
 
 embed_fn, _ = get_embedder(2)
 
+fc = FlexiCubes(device)
+x_nx3_orig, cube_fx8 = fc.construct_voxel_grid(32)
+x_nx3 = 2*x_nx3_orig # scale up the grid so that it's larger than the target object
+
 
 def train_one_itr(it, b,
                   all_fg_part_indices, 
@@ -304,6 +308,15 @@ def train_one_itr(it, b,
         embed_fn(batch_relations.view(-1, 3)))
     
     loss += 10 * loss_xform + 10 * loss_relations
+
+    transformed_points_2 = x_nx3_orig.unsqueeze(1).expand(-1, num_parts, -1, -1) +\
+        learned_xforms.unsqueeze(2)
+
+    occs3 = model(transformed_points_2,
+                  batch_embed)
+    pred_values3, _ = torch.max(occs3, dim=-1, keepdim=True)
+    sdf = -2 * pred_values3 + 1
+    
 
     if b == n_batches - 1:
         writer.add_scalar('occ loss', loss1 + loss2, it)
@@ -2414,8 +2427,8 @@ if args.post_process_fc:
                              vertices_list=[torch.from_numpy(pred_mesh.vertices)],
                              faces_list=[torch.from_numpy(pred_mesh.faces)])
     
-    # pcd, _ = trimesh.sample.sample_surface(aligned_gt_mesh, 10000, seed=319)
-    # pcd = torch.from_numpy(pcd).to(device, torch.float32)
+    pcd, _ = trimesh.sample.sample_surface(aligned_gt_mesh, 10000, seed=319)
+    pcd = torch.from_numpy(pcd).to(device, torch.float32)
 
     from flexi.flexicubes import FlexiCubes
     from flexi.util import *
@@ -2529,119 +2542,64 @@ if args.post_process_fc:
     # sdf_model = PPNet(3 + num_parts*each_part_feat, output_dims=1, hidden=5).to(device)
     # sdf_params = [p for _, p in sdf_model.named_parameters()]
 
-    # sdf_in = torch.concat([x_nx3_orig,
-    #                       batch_embed_sdf_deform], dim=-1)
-
-    # # pretrain SDF model
-    # # pred_values = torch.squeeze(pred_values)
-    # pre_t_optimizer = torch.optim.Adam(list(sdf_model.parameters()), lr=1e-4)
-    # pre_t_loss_fn = torch.nn.MSELoss()
-    # for i in tqdm(range(10000)):
-    #     output = sdf_model(sdf_in
-    #                     #    , final_layer=True
-    #                        )
-    #     # output = sdf_model(batch_embed_sdf_deform)
-    #     pre_t_loss = pre_t_loss_fn(output[...,0], sdf)
-    #     pre_t_optimizer.zero_grad()
-    #     pre_t_loss.backward()
-    #     pre_t_optimizer.step()
-    # print("Pre-trained SDF", pre_t_loss.item())
-
-    # exit(0)
-
     weight_model = PPNet(num_parts*each_part_feat, output_dims=21, hidden=0).to(device)
     weight_params = [p for _, p in weight_model.named_parameters()]
 
     deform_model = PPNet(num_parts*each_part_feat, output_dims=3, hidden=0).to(device)
     deform_params = [p for _, p in deform_model.named_parameters()]
 
-    # batch_embed.requires_grad_()
-    # print(batch_embed.requires_grad)
-    # exit(0)
-
     #  Retrieve all the edges of the voxel grid; these edges will be utilized to 
     #  compute the regularization loss in subsequent steps of the process.    
     all_edges = cube_fx8[:, fc.cube_edges].reshape(-1, 2)
     grid_edges = torch.unique(all_edges, dim=0)
 
-    learning_rate = 0.01
+    learning_rate = 0.005
     sdf_regularizer = 0.2
 
     def lr_schedule(iter):
         return max(0.0, 10**(-(iter)*0.0002)) # Exponential falloff from [1.0, 0.1] over 5k epochs.    
 
-    # optimizer = torch.optim.Adam([sdf, weight, deform], lr=learning_rate)
-    # optimizer = torch.optim.Adam([sdf, deform], lr=learning_rate)
-    optimizer = torch.optim.Adam([sdf] + deform_params, lr=learning_rate)
-    # optimizer = torch.optim.Adam([{"sdf": sdf, "weight": weight, "params": params}], lr=learning_rate)
-    # optimizer = torch.optim.Adam([sdf, weight] + deform_params, lr=learning_rate)
-    # optimizer = torch.optim.Adam([sdf] + weight_params + deform_params, lr=learning_rate)
-    # optimizer = torch.optim.Adam([weight] + sdf_params + deform_params, lr=learning_rate)
-    # optimizer = torch.optim.Adam([sdf, weight], lr=learning_rate)
-    # optimizer = torch.optim.Adam([weight], lr=learning_rate)
-    # optimizer = torch.optim.Adam([{"params": weight_params, "lr": learning_rate},
-    #                               {"params": deform_params, "lr": learning_rate}])
-    # optimizer = torch.optim.Adam([{"params": weight_params, "lr": learning_rate},
-    #                               {"params": deform_params, "lr": learning_rate},
-    #                               {"params": sdf_params, "lr": learning_rate}])
-    # optimizer = torch.optim.Adam(weight_params + sdf_params + deform_params, lr=learning_rate)
+    # optimizer = torch.optim.Adam([sdf] + deform_params, lr=learning_rate)
+    optimizer = torch.optim.Adam([sdf, deform], lr=learning_rate)
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda x: lr_schedule(x)) 
     
-    iterations = 1000
+    iterations = 10000
 
     train_res = [2048, 2048]
     display_res = [512, 512]
     train_img_dir = os.path.join(results_dir, 'flexi_out')
     misc.check_dir(train_img_dir)
 
+    from dmtet_networks import dmtet_utils
+
+    pcd *= 2
+
     print("second pass with FlexiCubes...")
     for it in range(iterations):
         # print(it)
         optimizer.zero_grad()
-        # sample random camera poses
-        mv, mvp = render.get_random_camera_batch(8, iter_res=train_res, device=device, use_kaolin=False)
-        # render gt mesh
-        target = render.render_mesh_paper(gt_mesh, mv, mvp, train_res)
-        
+
         # learn deform from code
-        deform = deform_model(batch_embed_sdf_deform)
+        # deform = deform_model(batch_embed_sdf_deform)
         
         # extract and render FlexiCubes mesh
         grid_verts = x_nx3 + (2-1e-8) / (voxel_grid_res * 2) * torch.tanh(deform)
-        
-        # learn sdf from code
-        # sdf = sdf_model(sdf_in
-        #                 # , final_layer=True
-        #                 )
-        # print(torch.min(sdf), torch.max(sdf))
-        
-        # learn weight from code
-        # weight = weight_model(batch_embed_weight)
         
         # vertices, faces, L_dev = fc(grid_verts, sdf, cube_fx8, voxel_grid_res, beta_fx12=weight[:,:12], alpha_fx8=weight[:,12:20],
         #     gamma_f=weight[:,20], training=True)
         vertices, faces, L_dev = fc(grid_verts, sdf, cube_fx8, voxel_grid_res, training=True)
         # print(faces)
-        flexicubes_mesh = Mesh(vertices, faces)
-        buffers = render.render_mesh_paper(flexicubes_mesh, mv, mvp, train_res)
-        
-        # evaluate reconstruction loss
-        mask_loss = (buffers['mask'] - target['mask']).abs().mean()
-        depth_loss = (((((buffers['depth'] - (target['depth']))* target['mask'])**2).sum(-1)+1e-8)).sqrt().mean() * 10
-    
+        # flexicubes_mesh = Mesh(vertices, faces)
+
         t_iter = it / iterations
         sdf_weight = sdf_regularizer - (sdf_regularizer - sdf_regularizer/20)*min(1.0, 4.0 * t_iter)
         reg_loss = loss.sdf_reg_loss(sdf, grid_edges).mean() * sdf_weight # Loss to eliminate internal floaters that are not visible
         reg_loss += L_dev.mean() * 0.5
         reg_loss += (weight[:,:20]).abs().mean() * 0.1
-        total_loss = mask_loss + depth_loss + reg_loss
+        total_loss = reg_loss
 
-        # with torch.no_grad():
-        #     pts = sample_random_points(1000, gt_mesh)
-        #     gt_sdf = compute_sdf(pts, gt_mesh.vertices, gt_mesh.faces)
-        # pred_sdf = compute_sdf(pts, flexicubes_mesh.vertices, flexicubes_mesh.faces)
-        # total_loss += torch.nn.functional.mse_loss(pred_sdf, gt_sdf) * 2e3
-        
+        total_loss += dmtet_utils.loss_f(iterations, vertices, faces, pcd, it)
+
         total_loss.backward()
         optimizer.step()
         scheduler.step()

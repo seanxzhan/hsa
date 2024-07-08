@@ -63,7 +63,7 @@ save_every = 100
 multires = 2
 pt_sample_res = 64        # point_sampling
 
-expt_id = 91
+expt_id = 94
 
 OVERFIT = args.of
 overfit_idx = args.of_idx
@@ -2522,6 +2522,8 @@ if args.post_process_fc:
             # if final_layer:
             #     x = torch.nn.Tanh()(x)
             return x
+        
+    # class 
     
     batch_embed_sdf_deform = batch_embed.expand(x_nx3.shape[0], -1)
     batch_embed_weight = batch_embed.expand(cube_fx8.shape[0], -1)
