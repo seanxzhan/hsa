@@ -17,6 +17,9 @@ from data_prep import preprocess_data_12
 from typing import Dict, List
 from anytree.exporter import UniqueDotExporter
 from sklearn.decomposition import PCA
+from flexi.flexicubes import FlexiCubes
+# from flexi.util import *
+from flexi import render, loss, util
 
 
 parser = argparse.ArgumentParser()
@@ -95,6 +98,13 @@ for model_idx, anno_id in enumerate(train_new_ids_to_objs.keys()):
 with open('results/mapping.json', 'w') as f:
     json.dump(model_idx_to_anno_id, f)
 
+def my_load_mesh(model_idx):
+    anno_id = model_idx_to_anno_id[model_idx]
+    obj_dir = os.path.join(partnet_dir, anno_id, 'vox_models')
+    assert os.path.exists(obj_dir)
+    gt_mesh_path = os.path.join(obj_dir, f'{anno_id}.obj')
+    return util.load_mesh(gt_mesh_path, device)
+
 train_data_path = f'data/{cat_name}_train_{pt_sample_res}_12_{ds_start}_{ds_end}.hdf5'
 train_data = h5py.File(train_data_path, 'r')
 if OVERFIT:
@@ -141,7 +151,8 @@ for i in range(num_shapes):
         part_num_indices[i], all_indices[i])
     all_fg_part_indices.append(np.array(indices, dtype=object))
 
-n_batches = num_shapes // batch_size
+# n_batches = num_shapes // batch_size
+n_batches = 4
 
 if not OVERFIT:
     logs_path = os.path.join('logs', f'local_{expt_id}-bs-{batch_size}',
@@ -175,6 +186,29 @@ mse = torch.nn.MSELoss()
 
 params = [p for _, p in model.named_parameters()]
 
+class PPNet(torch.nn.Module):
+    def __init__(self, feature_dims=32*4, output_dims=3, hidden=0):
+        super().__init__()
+        internal_dims = 64
+
+        net = (torch.nn.Linear(feature_dims, internal_dims, bias=False),
+                torch.nn.ReLU())
+        for i in range(hidden-1):
+            net = net + (
+                torch.nn.Linear(internal_dims, internal_dims, bias=False),
+                torch.nn.ReLU())
+        net = net + (torch.nn.Linear(internal_dims, output_dims, bias=False),)
+        self.net = torch.nn.Sequential(*net)
+
+    def forward(self, feature, final_layer=False):
+        x = self.net(feature)
+        # if final_layer:
+        #     x = torch.nn.Tanh()(x)
+        return x
+
+deform_model = PPNet(num_parts*each_part_feat, output_dims=3, hidden=0).to(device)
+deform_params = [p for _, p in deform_model.named_parameters()]
+
 import math
 embeddings = torch.nn.Embedding(num_shapes,
                                 num_parts*each_part_feat).to(device)
@@ -199,7 +233,8 @@ def load_batch(batch_idx, batch_size):
         torch.from_numpy(relations[start:end, :, :3, 3]).to(device, torch.float32)
 
 optimizer = torch.optim.Adam([{"params": params, "lr": lr},
-                              {"params": embeddings.parameters(), "lr": lr}])
+                              {"params": embeddings.parameters(), "lr": lr},
+                              {"params": deform_params, "lr": lr}])
 scheduler = torch.optim.lr_scheduler.LambdaLR(
     optimizer,
     lr_lambda=lambda x: max(0.0, 10**(-x*0.0002)))
@@ -221,9 +256,13 @@ np.random.seed(319)
 embed_fn, _ = get_embedder(2)
 
 fc = FlexiCubes(device)
-x_nx3_orig, cube_fx8 = fc.construct_voxel_grid(32)
+fc_voxel_grid_res = 31
+x_nx3_orig, cube_fx8 = fc.construct_voxel_grid(fc_voxel_grid_res)
 x_nx3 = 2*x_nx3_orig # scale up the grid so that it's larger than the target object
 
+x_nx3_orig = x_nx3_orig.unsqueeze(0).expand(batch_size, -1, -1)
+
+train_res = [1024, 1024]
 
 def train_one_itr(it, b,
                   all_fg_part_indices, 
@@ -312,11 +351,30 @@ def train_one_itr(it, b,
     transformed_points_2 = x_nx3_orig.unsqueeze(1).expand(-1, num_parts, -1, -1) +\
         learned_xforms.unsqueeze(2)
 
-    occs3 = model(transformed_points_2,
-                  batch_embed)
+    occs3 = model(transformed_points_2, batch_embed)
     pred_values3, _ = torch.max(occs3, dim=-1, keepdim=True)
     sdf = -2 * pred_values3 + 1
-    
+
+    for ele in range(batch_size):
+        gt_mesh = my_load_mesh(batch_size*b + ele)
+        mv, mvp = render.get_random_camera_batch(
+            8, iter_res=train_res, device=device, use_kaolin=False)
+        target = render.render_mesh_paper(gt_mesh, mv, mvp, train_res)
+
+        batch_embed_sdf_deform = batch_embed[ele].expand(x_nx3.shape[0], -1)
+        deform = deform_model(batch_embed_sdf_deform)
+        grid_verts = x_nx3 + (2-1e-8) / (fc_voxel_grid_res * 2) * torch.tanh(deform)
+        vertices, faces, L_dev = fc(
+            grid_verts, torch.squeeze(sdf[ele]),
+            cube_fx8, fc_voxel_grid_res, training=True)
+
+        flexicubes_mesh = util.Mesh(vertices, faces)
+        buffers = render.render_mesh_paper(flexicubes_mesh, mv, mvp, train_res)
+
+        mask_loss = (buffers['mask'] - target['mask']).abs().mean()
+        depth_loss = (((((buffers['depth'] - (target['depth']))* target['mask'])**2).sum(-1)+1e-8)).sqrt().mean() * 10
+
+        loss += mask_loss + depth_loss
 
     if b == n_batches - 1:
         writer.add_scalar('occ loss', loss1 + loss2, it)

@@ -2507,12 +2507,13 @@ if args.post_process_fc:
         def __init__(self, feature_dims=32*4, output_dims=3, hidden=0):
             super().__init__()
             internal_dims = 64
+            use_bias = True
 
-            net = (torch.nn.Linear(feature_dims, internal_dims, bias=False),
+            net = (torch.nn.Linear(feature_dims, internal_dims, bias=use_bias),
                    torch.nn.ReLU())
             for i in range(hidden-1):
                 net = net + (
-                    torch.nn.Linear(internal_dims, internal_dims, bias=False),
+                    torch.nn.Linear(internal_dims, internal_dims, bias=use_bias),
                     torch.nn.ReLU())
             net = net + (torch.nn.Linear(internal_dims, output_dims, bias=False),)
             self.net = torch.nn.Sequential(*net)
@@ -2552,7 +2553,7 @@ if args.post_process_fc:
     weight_model = PPNet(num_parts*each_part_feat, output_dims=21, hidden=0).to(device)
     weight_params = [p for _, p in weight_model.named_parameters()]
 
-    deform_model = PPNet(num_parts*each_part_feat, output_dims=3, hidden=0).to(device)
+    deform_model = PPNet(num_parts*each_part_feat, output_dims=3, hidden=1).to(device)
     deform_params = [p for _, p in deform_model.named_parameters()]
 
     # batch_embed.requires_grad_()
