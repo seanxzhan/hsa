@@ -36,7 +36,7 @@ name_to_cat = {
     'Chair': '03001627',
     'Lamp': '03636649'
 }
-cat_name = 'Chair'
+cat_name = 'Lamp'
 cat_id = name_to_cat[cat_name]
 
 pt_sample_res = 64
@@ -313,6 +313,7 @@ def merge_partnet_after_merging(anno_id, info=False):
     2: partnet doesn't have information for which parts got merged
         (example: 38725 seat_frame_slant_bar --> seat_frame)
     """    
+    info = True
     # ori: original, before merging
     ori_nodes, ori_id_to_ori_nodes_idx =\
         tree.build_tree_from_json(
@@ -500,12 +501,13 @@ def merge_partnet_after_merging(anno_id, info=False):
             else:
                 merged_parts_info[node.name] += accum_part_info
     
-    merged_root_node = AMNode(ori_id=root_node.ori_id,
-                              id=root_node.id,
-                              objs=root_node.objs,
-                              name=root_node.name,)
-    for child in root_node.children:
-        further_merge_parts(merged_root_node, child)
+    # merged_root_node = AMNode(ori_id=root_node.ori_id,
+    #                           id=root_node.id,
+    #                           objs=root_node.objs,
+    #                           name=root_node.name,)
+    # for child in root_node.children:
+    #     further_merge_parts(merged_root_node, child)
+    merged_root_node = root_node
 
     if info:
         with open(f'data_prep/tmp/{anno_id}_merged_parts_info.json', 'w') as f:
@@ -608,7 +610,7 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
     set_dict(dict_all_root_nodes, split_ids[start:end])
     set_dict(dict_all_valid_anno_ids, split_ids[start:end])
 
-    num_workers = 2
+    num_workers = 1
     list_of_lists = misc.chunks(split_ids[start:end], num_workers)
     q = Queue()
     workers = [
@@ -1126,7 +1128,8 @@ def convert_flat_list_to_fg_part_indices(part_num_indices, all_indices):
 if __name__ == "__main__":
     # pass one to create the preprocess_16 dataset
     # export_data(train_ids, save_data=False, start=0, end=4489)
-    # exit(0)
+    export_data(train_ids, save_data=False, start=0, end=1554)
+    exit(0)
     
     # pass two to create the four_parts dataset
     good_indices = np.load('data/chair_am_four_parts_16_0_4489.npy')
