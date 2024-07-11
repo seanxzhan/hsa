@@ -1,6 +1,7 @@
 import json
 import numpy as np
 from anytree import AnyNode, NodeMixin, findall_by_attr
+from typing import Dict
 
 
 def add_node_to_union_class(union_root, node_to_add, parent_name):
@@ -181,7 +182,7 @@ def build_tree_from_json_after_merge(json_path):
     """This only works with result_after_merging.json (after merging)
     """
     with open(json_path, 'r') as f:
-        data = json.load(f)[0]
+        data: Dict = json.load(f)[0]
 
     # ori_ids = []
     all_anynodes = []
@@ -209,9 +210,10 @@ def build_tree_from_json_after_merge(json_path):
                                objs=data['objs'],
                                name=data['name']))
 
-    assert data['children']
-    for node in data['children']:
-        traverse(node, all_anynodes[0])
+    # assert data['children']
+    if 'children' in list(data.keys()):
+        for node in data['children']:
+            traverse(node, all_anynodes[0])
 
     return all_anynodes, ori_id_to_list_idx
 

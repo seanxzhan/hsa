@@ -2499,7 +2499,9 @@ if args.post_process_fc:
     orig_sdf = sdf.clone().detach()
     # orig_sdf.clone().detach()
 
-    # sdf    = torch.nn.Parameter(sdf.clone().detach(), requires_grad=True)
+    np.save(os.path.join(results_dir, 'old_sdf.npy'), sdf.cpu().numpy())
+
+    sdf    = torch.nn.Parameter(sdf.clone().detach(), requires_grad=True)
     # sdf    = sdf.clone().detach()
 
     # set per-cube learnable weights to zeros
@@ -2590,7 +2592,7 @@ if args.post_process_fc:
     def lr_schedule(iter):
         return max(0.0, 10**(-(iter)*0.0002)) # Exponential falloff from [1.0, 0.1] over 5k epochs.    
 
-    # optimizer = torch.optim.Adam([sdf, weight, deform], lr=learning_rate)
+    optimizer = torch.optim.Adam([sdf, weight, deform], lr=learning_rate)
     # optimizer = torch.optim.Adam([sdf, deform], lr=learning_rate)
     # optimizer = torch.optim.Adam([sdf] + deform_params, lr=learning_rate)
     # optimizer = torch.optim.Adam(sdf_params + deform_params, lr=learning_rate)
@@ -2607,9 +2609,9 @@ if args.post_process_fc:
     #                               {"params": deform_params, "lr": learning_rate},
     #                               {"params": sdf_params, "lr": learning_rate}])
     # optimizer = torch.optim.Adam(weight_params + sdf_params + deform_params, lr=learning_rate)
-    optimizer = torch.optim.Adam([{"params": sdf_params, "lr": lr},
-                                  {"params": sdf_embed.parameters(), "lr": lr},
-                                  {"params": deform_params, "lr": lr}])
+    # optimizer = torch.optim.Adam([{"params": sdf_params, "lr": lr},
+    #                               {"params": sdf_embed.parameters(), "lr": lr},
+    #                               {"params": deform_params, "lr": lr}])
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda x: lr_schedule(x)) 
     
     iterations = 1000
@@ -2629,7 +2631,7 @@ if args.post_process_fc:
         target = render.render_mesh_paper(gt_mesh, mv, mvp, train_res)
         
         # learn deform from code
-        deform = deform_model(batch_embed_sdf_deform)
+        # deform = deform_model(batch_embed_sdf_deform)
         
         # extract and render FlexiCubes mesh
         grid_verts = x_nx3 + (2-1e-8) / (voxel_grid_res * 2) * torch.tanh(deform)
@@ -2638,19 +2640,19 @@ if args.post_process_fc:
         # sdf = sdf_model(sdf_in
         #                 # , final_layer=True
         #                 )
-        delta_sdf = sdf_model(sdf_in
-                              , final_layer=True
-                             )
-        sdf = orig_sdf.unsqueeze(-1) + delta_sdf
+        # delta_sdf = sdf_model(sdf_in
+        #                       , final_layer=True
+        #                      )
+        # sdf = orig_sdf.unsqueeze(-1) + delta_sdf
         # print(torch.min(sdf), torch.max(sdf))
         # print(torch.min(delta_sdf), torch.max(delta_sdf))
         
         # learn weight from code
         # weight = weight_model(batch_embed_weight)
         
-        # vertices, faces, L_dev = fc(grid_verts, sdf, cube_fx8, voxel_grid_res, beta_fx12=weight[:,:12], alpha_fx8=weight[:,12:20],
-        #     gamma_f=weight[:,20], training=True)
-        vertices, faces, L_dev = fc(grid_verts, sdf, cube_fx8, voxel_grid_res, training=True)
+        vertices, faces, L_dev = fc(grid_verts, sdf, cube_fx8, voxel_grid_res, beta_fx12=weight[:,:12], alpha_fx8=weight[:,12:20],
+            gamma_f=weight[:,20], training=True)
+        # vertices, faces, L_dev = fc(grid_verts, sdf, cube_fx8, voxel_grid_res, training=True)
         # print(faces)
         flexicubes_mesh = Mesh(vertices, faces)
         buffers = render.render_mesh_paper(flexicubes_mesh, mv, mvp, train_res)
@@ -2679,13 +2681,13 @@ if args.post_process_fc:
         if (it) % 100 == 0 or it == (iterations - 1): 
             with torch.no_grad():
                 # extract mesh with training=False
-                # vertices, faces, L_dev = fc(
-                #     grid_verts, sdf, cube_fx8, voxel_grid_res,
-                #     beta_fx12=weight[:,:12], alpha_fx8=weight[:,12:20],
-                #     gamma_f=weight[:,20], training=False)
                 vertices, faces, L_dev = fc(
                     grid_verts, sdf, cube_fx8, voxel_grid_res,
-                    training=False)
+                    beta_fx12=weight[:,:12], alpha_fx8=weight[:,12:20],
+                    gamma_f=weight[:,20], training=False)
+                # vertices, faces, L_dev = fc(
+                #     grid_verts, sdf, cube_fx8, voxel_grid_res,
+                #     training=False)
             print ('Iteration {} - loss: {:.5f}, # of mesh vertices: {}, # of mesh faces: {}'.format(
                 it, total_loss, vertices.shape[0], faces.shape[0]))
             # save reconstructed mesh
@@ -2714,6 +2716,7 @@ if args.post_process_fc:
         #         imageio.imwrite(os.path.join(train_img_dir, '{:04d}.png'.format(it)), np.concatenate([val_image, gt_image], 1))
         #         print(f"Optimization Step [{it}/{iterations}], Loss: {total_loss.item():.4f}")
         
+    np.save(os.path.join(results_dir, 'new_sdf.npy'), sdf.detach().cpu().numpy())
 
     mesh_np = trimesh.Trimesh(vertices = vertices.detach().cpu().numpy(), faces=faces.detach().cpu().numpy(), process=False)
     mesh_np.export(os.path.join(results_dir, 'flexi_mesh.obj'))

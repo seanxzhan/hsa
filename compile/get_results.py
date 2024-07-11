@@ -1,14 +1,14 @@
 import os
 import importlib
 
-expt = 92
+expt = 95
 batch_size = 25
 module = importlib.import_module(f"run.local.local_{expt}")
 model_idx_to_anno_id = getattr(module, "model_idx_to_anno_id")
 # from run.local.local_77 import model_idx_to_anno_id
 
 start = 0
-end = 100
+end = 10
 shape_indices = [model_idx_to_anno_id[i] for i in range(start, end)]
 
 # Path pattern for the images

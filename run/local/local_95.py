@@ -13,7 +13,7 @@ from torch.utils.tensorboard import SummaryWriter
 from occ_networks.xform_decoder_nasa_obbgnn_ae_58 import SDFDecoder, get_embedder
 from utils import misc, reconstruct, tree
 # from utils import visualize
-from data_prep import preprocess_data_12
+from data_prep import preprocess_data_17
 from typing import Dict, List
 from anytree.exporter import UniqueDotExporter
 from sklearn.decomposition import PCA
@@ -75,7 +75,8 @@ if OVERFIT:
     batch_size = 1
 
 ds_start = 0
-ds_end = 508
+# ds_end = 3272
+ds_end = 100
 
 shapenet_dir = '/datasets/ShapeNetCore'
 partnet_dir = '/datasets/PartNet'
@@ -88,7 +89,7 @@ name_to_cat = {
 cat_name = 'Chair'
 cat_id = name_to_cat[cat_name]
 
-train_new_ids_to_objs_path = f'data/{cat_name}_train_new_ids_to_objs_12_{ds_start}_{ds_end}.json'
+train_new_ids_to_objs_path = f'data/{cat_name}_train_new_ids_to_objs_17_{ds_start}_{ds_end}.json'
 with open(train_new_ids_to_objs_path, 'r') as f:
     train_new_ids_to_objs: Dict = json.load(f)
 model_idx_to_anno_id = {}
@@ -97,7 +98,7 @@ for model_idx, anno_id in enumerate(train_new_ids_to_objs.keys()):
 with open('results/mapping.json', 'w') as f:
     json.dump(model_idx_to_anno_id, f)
 
-train_data_path = f'data/{cat_name}_train_{pt_sample_res}_12_{ds_start}_{ds_end}.hdf5'
+train_data_path = f'data/{cat_name}_train_{pt_sample_res}_17_{ds_start}_{ds_end}.hdf5'
 train_data = h5py.File(train_data_path, 'r')
 if OVERFIT:
     part_num_indices = train_data['part_num_indices'][overfit_idx:overfit_idx+1]
@@ -116,6 +117,7 @@ else:
     all_indices = train_data['all_indices']
     normalized_points = train_data['normalized_points']
     values = train_data['values']
+    occ = train_data['occ']
     part_nodes = train_data['part_nodes']
     xforms = train_data['xforms']
     extents = train_data['extents']
@@ -139,11 +141,12 @@ num_points = normalized_points.shape[1]
 num_shapes, num_parts = part_num_indices.shape
 all_fg_part_indices = []
 for i in range(num_shapes):
-    indices = preprocess_data_12.convert_flat_list_to_fg_part_indices(
+    indices = preprocess_data_17.convert_flat_list_to_fg_part_indices(
         part_num_indices[i], all_indices[i])
     all_fg_part_indices.append(np.array(indices, dtype=object))
 
 n_batches = num_shapes // batch_size
+# n_batches = 128
 
 if not OVERFIT:
     logs_path = os.path.join('logs', f'local_{expt_id}-bs-{batch_size}',
@@ -193,6 +196,7 @@ def load_batch(batch_idx, batch_size):
     return all_fg_part_indices[start:end],\
         torch.from_numpy(normalized_points[start:end]).to(device, torch.float32),\
         torch.from_numpy(values[start:end]).to(device, torch.float32),\
+        torch.from_numpy(occ[start:end]).to(device, torch.float32),\
         embeddings(torch.arange(start, end).to(device)),\
         torch.from_numpy(node_features[start:end, :, :3]).to(device, torch.float32),\
         torch.from_numpy(adj[start:end]).to(device, torch.long),\
@@ -225,7 +229,7 @@ embed_fn, _ = get_embedder(2)
 
 def train_one_itr(it, b,
                   all_fg_part_indices, 
-                  batch_points, batch_values,
+                  batch_points, batch_values, batch_occ,
                   batch_embed,
                   batch_node_feat, batch_adj, batch_part_nodes,
                   batch_xforms, batch_relations):
@@ -236,7 +240,7 @@ def train_one_itr(it, b,
 
     masked_indices = torch.from_numpy(rand_indices).to(device, torch.long)
     # make gt value mask
-    val_mask = torch.ones_like(batch_values).to(device, torch.float32)
+    val_mask = torch.ones_like(batch_occ).to(device, torch.float32)
     for i in range(batch_size):
         fg_part_indices = all_fg_part_indices[i]
         fg_part_indices_masked = fg_part_indices[masked_indices.cpu().numpy()]
@@ -245,7 +249,7 @@ def train_one_itr(it, b,
         else:
             fg_part_indices_masked = np.array([])
         val_mask[i][fg_part_indices_masked] = 0
-    modified_values = batch_values * val_mask
+    modified_values = batch_occ * val_mask
 
     parts_mask = torch.zeros((batch_embed.shape[0], num_parts)).to(device, torch.float32)
     if len(masked_indices) != 0:
@@ -289,7 +293,7 @@ def train_one_itr(it, b,
     occs2 = model(transformed_points,
                   batch_embed)
     pred_values2, _ = torch.max(occs2, dim=-1, keepdim=True)
-    loss2 = loss_f(pred_values2, batch_values)
+    loss2 = loss_f(pred_values2, batch_occ)
 
     loss = loss1 + loss2
 
@@ -328,7 +332,7 @@ if args.train:
         batch_loss = 0
         for b in range(n_batches):
             batch_fg_part_indices,\
-                batch_normalized_points, batch_values,\
+                batch_normalized_points, batch_values, batch_occ,\
                 batch_embed, \
                 batch_node_feat, batch_adj, batch_part_nodes,\
                 batch_xforms, batch_relations =\
@@ -337,6 +341,7 @@ if args.train:
                                  batch_fg_part_indices,
                                  batch_normalized_points,
                                  batch_values,
+                                 batch_occ,
                                  batch_embed,
                                  batch_node_feat, batch_adj, batch_part_nodes,
                                  batch_xforms, batch_relations)
@@ -405,9 +410,9 @@ if args.test:
 
     unique_part_names, name_to_ori_ids_and_objs,\
         orig_obbs, entire_mesh, name_to_obbs, _, _, _ =\
-        preprocess_data_12.merge_partnet_after_merging(anno_id)
+        preprocess_data_17.merge_partnet_after_merging(anno_id)
 
-    with open(f'data/{cat_name}_part_name_to_new_id_12_{ds_start}_{ds_end}.json', 'r') as f:
+    with open(f'data/{cat_name}_part_name_to_new_id_17_{ds_start}_{ds_end}.json', 'r') as f:
         unique_name_to_new_id = json.load(f)
 
     part_obbs = []
@@ -415,11 +420,14 @@ if args.test:
     unique_names = list(unique_name_to_new_id.keys())
     model_part_names = list(name_to_obbs.keys())
 
+    existing_parts = []
+
     for i, un in enumerate(unique_names):
         if not un in model_part_names:
             part_obbs.append([])
             continue
         part_obbs.append([name_to_obbs[un]])
+        existing_parts.append(i)
 
     gt_color = [31, 119, 180, 255]
     mesh_pred_path = os.path.join(results_dir, 'mesh_pred.png')
@@ -501,6 +509,8 @@ if args.test:
     learned_xforms = learned_xforms[0].cpu().numpy()
     learned_obbs_of_interest = [[]] * num_parts
     for i in range(num_parts):
+        if i not in existing_parts:
+            continue
         ext = extents[model_idx, i]
         learned_xform = np.eye(4)
         learned_xform[:3, 3] = -learned_xforms[i]
@@ -763,7 +773,7 @@ if args.asb:
 
     # build a tree that is a subset of the union tree (dense graph)
     # using the bounding boxes
-    node_names = np.load(f'data/{cat_name}_union_node_names_12_{ds_start}_{ds_end}.npy')
+    node_names = np.load(f'data/{cat_name}_union_node_names_17_{ds_start}_{ds_end}.npy')
     recon_root = tree.recon_tree(asb_adj.numpy(), node_names)
     UniqueDotExporter(recon_root,
                       indent=0,
@@ -983,9 +993,9 @@ if args.inv and not args.sc and not args.asb_scaling:
 
     unique_part_names, name_to_ori_ids_and_objs,\
         orig_obbs, entire_mesh, name_to_obbs, _, _, _ =\
-        preprocess_data_12.merge_partnet_after_merging(anno_id)
+        preprocess_data_17.merge_partnet_after_merging(anno_id)
 
-    with open(f'data/{cat_name}_part_name_to_new_id_12_{ds_start}_{ds_end}.json', 'r') as f:
+    with open(f'data/{cat_name}_part_name_to_new_id_17_{ds_start}_{ds_end}.json', 'r') as f:
         unique_name_to_new_id = json.load(f)
 
     part_obbs = []
@@ -1326,9 +1336,9 @@ if args.samp:
 
     unique_part_names, name_to_ori_ids_and_objs,\
         orig_obbs, entire_mesh, name_to_obbs, _, _, _ =\
-        preprocess_data_12.merge_partnet_after_merging(anno_id)
+        preprocess_data_17.merge_partnet_after_merging(anno_id)
 
-    with open(f'data/{cat_name}_part_name_to_new_id_12_{ds_start}_{ds_end}.json', 'r') as f:
+    with open(f'data/{cat_name}_part_name_to_new_id_17_{ds_start}_{ds_end}.json', 'r') as f:
         unique_name_to_new_id = json.load(f)
 
     part_obbs = []
@@ -1580,9 +1590,9 @@ if args.shape_complete:
 
     unique_part_names, name_to_ori_ids_and_objs,\
         orig_obbs, entire_mesh, name_to_obbs, _, _, _ =\
-        preprocess_data_12.merge_partnet_after_merging(anno_id)
+        preprocess_data_17.merge_partnet_after_merging(anno_id)
 
-    with open(f'data/{cat_name}_part_name_to_new_id_12_{ds_start}_{ds_end}.json', 'r') as f:
+    with open(f'data/{cat_name}_part_name_to_new_id_17_{ds_start}_{ds_end}.json', 'r') as f:
         unique_name_to_new_id = json.load(f)
 
     part_obbs = []
@@ -1824,7 +1834,7 @@ if args.asb_scaling:
 
     # build a tree that is a subset of the union tree (dense graph)
     # using the bounding boxes
-    node_names = np.load(f'data/{cat_name}_union_node_names_12_{ds_start}_{ds_end}.npy')
+    node_names = np.load(f'data/{cat_name}_union_node_names_17_{ds_start}_{ds_end}.npy')
     recon_root = tree.recon_tree(asb_adj.numpy(), node_names)
     UniqueDotExporter(recon_root,
                       indent=0,
@@ -2064,9 +2074,9 @@ if args.post_process:
 
     unique_part_names, name_to_ori_ids_and_objs,\
         orig_obbs, entire_mesh, name_to_obbs, _, _, _ =\
-        preprocess_data_12.merge_partnet_after_merging(anno_id)
+        preprocess_data_17.merge_partnet_after_merging(anno_id)
 
-    with open(f'data/{cat_name}_part_name_to_new_id_12_{ds_start}_{ds_end}.json', 'r') as f:
+    with open(f'data/{cat_name}_part_name_to_new_id_17_{ds_start}_{ds_end}.json', 'r') as f:
         unique_name_to_new_id = json.load(f)
 
     gt_color = [31, 119, 180, 255]
@@ -2288,9 +2298,9 @@ if args.post_process_fc:
 
     unique_part_names, name_to_ori_ids_and_objs,\
         orig_obbs, entire_mesh, name_to_obbs, _, _, _ =\
-        preprocess_data_12.merge_partnet_after_merging(anno_id)
+        preprocess_data_17.merge_partnet_after_merging(anno_id)
 
-    with open(f'data/{cat_name}_part_name_to_new_id_12_{ds_start}_{ds_end}.json', 'r') as f:
+    with open(f'data/{cat_name}_part_name_to_new_id_17_{ds_start}_{ds_end}.json', 'r') as f:
         unique_name_to_new_id = json.load(f)
 
     gt_color = [31, 119, 180, 255]

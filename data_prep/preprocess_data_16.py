@@ -36,7 +36,7 @@ name_to_cat = {
     'Chair': '03001627',
     'Lamp': '03636649'
 }
-cat_name = 'Lamp'
+cat_name = 'Chair'
 cat_id = name_to_cat[cat_name]
 
 pt_sample_res = 64
@@ -313,7 +313,6 @@ def merge_partnet_after_merging(anno_id, info=False):
     2: partnet doesn't have information for which parts got merged
         (example: 38725 seat_frame_slant_bar --> seat_frame)
     """    
-    info = True
     # ori: original, before merging
     ori_nodes, ori_id_to_ori_nodes_idx =\
         tree.build_tree_from_json(
@@ -443,6 +442,7 @@ def merge_partnet_after_merging(anno_id, info=False):
             json.dump(parts_info, f)
 
     with open('data_prep/further_merge_info_8.json', 'r') as f:
+    # with open(f'data_prep/{cat_name}_further_merge_info_16.json', 'r') as f:
         further_merge_info = json.load(f)
     further_merge_parents = list(further_merge_info.keys())
     further_merge_children = []
@@ -501,13 +501,13 @@ def merge_partnet_after_merging(anno_id, info=False):
             else:
                 merged_parts_info[node.name] += accum_part_info
     
-    # merged_root_node = AMNode(ori_id=root_node.ori_id,
-    #                           id=root_node.id,
-    #                           objs=root_node.objs,
-    #                           name=root_node.name,)
-    # for child in root_node.children:
-    #     further_merge_parts(merged_root_node, child)
-    merged_root_node = root_node
+    merged_root_node = AMNode(ori_id=root_node.ori_id,
+                              id=root_node.id,
+                              objs=root_node.objs,
+                              name=root_node.name,)
+    for child in root_node.children:
+        further_merge_parts(merged_root_node, child)
+    # merged_root_node = root_node
 
     if info:
         with open(f'data_prep/tmp/{anno_id}_merged_parts_info.json', 'w') as f:
@@ -541,6 +541,7 @@ def merge_partnet_after_merging(anno_id, info=False):
             complete_hier_to_part_class_hier(new_root_node, child)
 
     new_root_node = AnyNode(name="chair", obb=None)
+    # new_root_node = AnyNode(name="lamp", obb=None)
     complete_hier_to_part_class_hier(new_root_node, merged_root_node)
 
     if info:
@@ -721,6 +722,7 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
 
     # # union of trees, based on part classes
     union_root_part = AnyNode(name='chair')
+    # union_root_part = AnyNode(name='lamp')
     for root in all_root_nodes:
         tree.traverse_and_add_class(union_root_part, root)
     UniqueDotExporter(union_root_part,
@@ -1128,8 +1130,8 @@ def convert_flat_list_to_fg_part_indices(part_num_indices, all_indices):
 if __name__ == "__main__":
     # pass one to create the preprocess_16 dataset
     # export_data(train_ids, save_data=False, start=0, end=4489)
-    export_data(train_ids, save_data=False, start=0, end=1554)
-    exit(0)
+    # export_data(train_ids, save_data=False, start=0, end=1554)
+    # exit(0)
     
     # pass two to create the four_parts dataset
     good_indices = np.load('data/chair_am_four_parts_16_0_4489.npy')
@@ -1143,11 +1145,10 @@ if __name__ == "__main__":
             ids_w_four_parts.append(x)
     ids_w_four_parts = [ids_w_four_parts[x] for x in good_indices]
 
-    print(len(ids_w_four_parts))
-    exit(0)
-
+    # export_data(ids_w_four_parts, save_data=True,
+    #             start=0, end=len(ids_w_four_parts))
     export_data(ids_w_four_parts, save_data=True,
-                start=0, end=len(ids_w_four_parts))
+                start=0, end=100)
     exit(0)
 
     # merge_partnet_after_merging('39446', info=True)

@@ -1,5 +1,12 @@
-# part classes, generates 170 shapes each with only 3 parts
+# part classes, includes specified number of shape with variable parts
 # NOTE: obb xform is consistent throughout shapes
+# NOTE: further merges some parts
+# NOTE: further merges some parts
+# NOTE: also get partnet surface points
+# NOTE: axis aligned bounding boxes
+# NOTE: using flexicubes tet verts as points
+
+# inherited from preprocess_data_12
 
 import os
 import json
@@ -12,20 +19,25 @@ import trimesh
 import numpy as np
 from tqdm import tqdm
 from anytree import RenderTree, AnyNode, findall_by_attr, PreOrderIter
+import trimesh.bounds
 from utils import tree, misc, visualize, ops, transform
 from utils.tree import OriNode, AMNode
 from data_prep import gather_hdf5
 from typing import List, Dict
+import queue
+from multiprocessing import Queue, Process
 from torch.nn.utils.rnn import pad_sequence
 from anytree.exporter import UniqueDotExporter
 from collections import defaultdict
+from torch_geometric.data import Data
+from data_prep.partnet_pts_dataset import PartPtsDataset
 
 
 name_to_cat = {
     'Chair': '03001627',
     'Lamp': '03636649'
 }
-cat_name = 'Lamp'
+cat_name = 'Chair'
 cat_id = name_to_cat[cat_name]
 
 pt_sample_res = 64
@@ -42,6 +54,9 @@ OBB_REP_SIZE = 15
 
 train_f = open(train_models_path); val_f = open(val_models_path); test_f = open(test_models_path)
 train_ids = json.load(train_f); val_ids = json.load(val_f); test_ids = json.load(test_f)
+
+# print(len(train_ids))
+# exit(0)
 
 # -------- get tableau colors for visualization -------- 
 all_colors = np.array(visualize.get_tab_20_saturated(50))[:20]
@@ -166,7 +181,6 @@ def build_obbs(anno_id, part_info: Dict):
     # part_info: new_am_nodes_modified dictionary
     obbs = []
     name_to_obbs = {}
-    obb_to_ori_ids = None
     count = 0
     # all_mesh_parts = []
     up_to_now = 0
@@ -178,7 +192,7 @@ def build_obbs(anno_id, part_info: Dict):
             up_to_now += curr_num_meshes
             count += 1
         mesh = trimesh.util.concatenate(meshes)
-        obb: trimesh.primitives.Box = mesh.bounding_box_oriented
+        obb: trimesh.primitives.Box = mesh.bounding_box
         ext = np.array(obb.primitive.extents)
         xform = np.array(obb.primitive.transform)
         ext_xform = align_xform(ext, xform)
@@ -187,7 +201,7 @@ def build_obbs(anno_id, part_info: Dict):
     
     entire_mesh_orig = trimesh.util.concatenate(all_mesh_parts)
 
-    return obbs, entire_mesh_orig, name_to_obbs, obb_to_ori_ids
+    return obbs, entire_mesh_orig, name_to_obbs
 
 
 def condense_obbs(obbs):
@@ -213,7 +227,7 @@ def build_dense_graph(union_root: AnyNode, name_to_obbs: Dict, obbs,
     # node features, len = num_union_nodes
     node_features = []
     # xforms
-    xforms = [np.zeros((1, 4, 4), dtype=np.float32)] * num_unique_part_classes
+    xforms = [np.eye(4, dtype=np.float32)[None, :]] * num_unique_part_classes
     # extents
     extents = [np.zeros((1, 3), dtype=np.float32)] * num_unique_part_classes
     # for each unique part, whare are the valid nodes in this specific shape
@@ -271,10 +285,28 @@ def build_dense_graph(union_root: AnyNode, name_to_obbs: Dict, obbs,
     adj = adj[None, :]
     part_nodes = part_nodes[None, :]
 
-    return node_features, adj, part_nodes, xforms, extents
+    # relation information
+
+    # connectivity = np.zeros((num_unique_part_classes, num_unique_part_classes))
+    # connectivity[0, 1] = 1
+    # connectivity[0, 2] = 1
+    # connectivity[1, 2] = 1
+    # connectivity[2, 3] = 1
+    # connected_xforms = connectivity @ xforms[:, :3, 3]
+
+    connectivity = [(0, 1), (0, 2), (1, 2), (2, 3)]
+    relations = np.zeros((len(connectivity), 4, 4), dtype=np.float32)
+    
+    for i, conn in enumerate(connectivity):
+        src = xforms[conn[0]]
+        tgt = xforms[conn[1]]
+        tgt_in_src = np.linalg.inv(src) @ tgt
+        relations[i] = tgt_in_src
+
+    return node_features, adj, part_nodes, xforms, extents, relations
 
 
-def merge_partnet_after_merging(anno_id):
+def merge_partnet_after_merging(anno_id, info=False):
     """Resolves inconsistencies within partnet
     1: result_after_merging misses labels for certain parts
         (parts exist, but annotation doesn't)
@@ -287,16 +319,9 @@ def merge_partnet_after_merging(anno_id):
         tree.build_tree_from_json(
             os.path.join(partnet_dir, anno_id, 'result.json'))
     # am: after merging
-    try:
-        am_nodes, am_id_to_am_nodes_idx =\
-            tree.build_tree_from_json_after_merge(
-                os.path.join(partnet_dir, anno_id, 'result_after_merging.json'))
-    except Exception as e:
-        import logging, traceback
-        logging.error(traceback.format_exc())
-        print(anno_id)
-        print(os.path.join(partnet_dir, anno_id, 'result_after_merging.json'))
-        exit(0)
+    am_nodes, am_id_to_am_nodes_idx =\
+        tree.build_tree_from_json_after_merge(
+            os.path.join(partnet_dir, anno_id, 'result_after_merging.json'))
 
     # solution to issue 1:
     # for each node n, if objs list has more than all objs lists of children,
@@ -343,9 +368,9 @@ def merge_partnet_after_merging(anno_id):
         nonlocal num_unmatched
         objs_matched_up, _, children_ids = check_objs(node)
         new_node = AMNode(ori_id=node.ori_id,
-                            id=node.id,
-                            objs=node.objs,
-                            name=node.name)
+                          id=node.id,
+                          objs=node.objs,
+                          name=node.name)
         new_node.parent = parent
         new_am_nodes.append(new_node)
         if objs_matched_up:
@@ -368,7 +393,7 @@ def merge_partnet_after_merging(anno_id):
     for pn in unique_part_names:
         parts_info[pn] = []
 
-    def traverse_new_tree(node: AMNode):
+    def build_parts_info_from_tree(node: AMNode):
         if node.is_leaf_node():
             packet = {}
             packet['id'] = node.id
@@ -377,9 +402,12 @@ def merge_partnet_after_merging(anno_id):
             parts_info[node.name].append(packet)
         else:
             for child in node.children:
-                traverse_new_tree(child)
+                build_parts_info_from_tree(child)
     
-    traverse_new_tree(new_am_nodes[0])
+    build_parts_info_from_tree(new_am_nodes[0])
+
+    # with open(f'data_prep/tmp/{anno_id}_parts_info_before.json', 'w') as f:
+    #     json.dump(parts_info, f)
 
     # as of now, issue 1 is resolved. now on to issue 2
 
@@ -387,7 +415,7 @@ def merge_partnet_after_merging(anno_id):
     # for each leaf node in new_am_nodes, check if ori_node n with the same
     # ori_id has more children. if so, modify parts_info by appending 
     # n's children to ori_id(s) list
-    def check_ori_nodes(node: AMNode):
+    def update_parts_info(node: AMNode):
         """takes in node from new_am_tree
         """
         if node.is_leaf_node():
@@ -403,14 +431,96 @@ def merge_partnet_after_merging(anno_id):
                         parts_info[node.name][i] = packet
         else:
             for child in node.children:
-                check_ori_nodes(child)
+                update_parts_info(child)
     
-    check_ori_nodes(new_am_nodes[0])
+    update_parts_info(new_am_nodes[0])
 
-    root_node = new_am_nodes[0]
+    root_node: AMNode = new_am_nodes[0]
+
+    if info:
+        print(RenderTree(root_node))
+        with open(f'data_prep/tmp/{anno_id}_parts_info.json', 'w') as f:
+            json.dump(parts_info, f)
+
+    with open('data_prep/further_merge_info_8.json', 'r') as f:
+    # with open(f'data_prep/{cat_name}_further_merge_info_16.json', 'r') as f:
+        further_merge_info = json.load(f)
+    further_merge_parents = list(further_merge_info.keys())
+    further_merge_children = []
+    for p, kids in further_merge_info.items():
+        further_merge_children += kids
+
+    merged_parts_info = {}
+    parts_info_keys = list(parts_info.keys())
+
+    def further_merge_parts(merged_root_node: AMNode,
+                            node: AMNode):
+        """merges smaller parts together
+        effectively reconstruct a tree while skipping some nodes
+        """
+        parent = findall_by_attr(merged_root_node, node.parent.id, name="id")[0]
+        node_to_add = AMNode(ori_id=node.ori_id,
+                             id=node.id,
+                             objs=node.objs,
+                             name=node.name)
+        node_to_add.parent = parent
+
+        if node.name not in further_merge_parents:
+            # node isn't a part that needs to have children merged
+            if node.name in parts_info_keys:
+                packet: List = parts_info[node.name]
+                this_node_info = list(filter(lambda x: x["id"] == node.id,
+                                             packet))
+                if node.name not in list(merged_parts_info.keys()):
+                    merged_parts_info[node.name] = this_node_info
+                else:
+                    merged_parts_info[node.name] += this_node_info
+            for child in node.children:
+                further_merge_parts(merged_root_node, child)
+        else:
+            # if node.is_leaf_node():
+            #     print(node.name)
+            #     merged_parts_info[node.name] = parts_info[node.name]
+            #     return
+
+            # node is a part that needs to have children merged
+            node_leaf_descs = list(filter(lambda x: x.is_leaf_node(),
+                                          node.descendants))
+            # assumes that all leaf nodes under a mergable parent are merged
+            accum_part_info = []
+            if node.name in list(parts_info.keys()):
+                packet = parts_info[node.name]
+                this_node_info = list(filter(lambda x: x["id"] == node.id, packet))
+                accum_part_info += this_node_info
+            for desc in node_leaf_descs:
+                packet: List = parts_info[desc.name]
+                this_desc_info = list(filter(lambda x: x["id"] == desc.id,
+                                             packet))
+                accum_part_info += this_desc_info
+            if node.name not in list(merged_parts_info.keys()):
+                merged_parts_info[node.name] = accum_part_info
+            else:
+                merged_parts_info[node.name] += accum_part_info
     
-    obbs, entire_mesh, name_to_obbs, obb_indices_to_ori_ids =\
-        build_obbs(anno_id, parts_info)
+    merged_root_node = AMNode(ori_id=root_node.ori_id,
+                              id=root_node.id,
+                              objs=root_node.objs,
+                              name=root_node.name,)
+    for child in root_node.children:
+        further_merge_parts(merged_root_node, child)
+    # merged_root_node = root_node
+
+    if info:
+        with open(f'data_prep/tmp/{anno_id}_merged_parts_info.json', 'w') as f:
+            json.dump(merged_parts_info, f)
+        print(RenderTree(merged_root_node))
+    
+    if merged_parts_info == {}:
+        valid = False
+        return None, None, None, None, None, None, anno_id, valid
+
+    # -------- build bounding boxes --------
+    obbs, entire_mesh, name_to_obbs = build_obbs(anno_id, merged_parts_info)
 
     def complete_hier_to_part_class_hier(new_root_node, node_to_add):
         """only add to new node if the name is new in new_root_node
@@ -431,12 +541,18 @@ def merge_partnet_after_merging(anno_id):
         for child in node_to_add.children:
             complete_hier_to_part_class_hier(new_root_node, child)
 
-    new_root_node = AnyNode(name="lamp", obb=None)
-    complete_hier_to_part_class_hier(new_root_node, root_node)
+    new_root_node = AnyNode(name="chair", obb=None)
+    # new_root_node = AnyNode(name="lamp", obb=None)
+    complete_hier_to_part_class_hier(new_root_node, merged_root_node)
+
+    if info:
+        # print(RenderTree(new_root_node))
+        for pre, _, node in RenderTree(new_root_node):
+            print("%s%s" % (pre, node.name))
 
     # map from name to list of ori_ids and list of objs
     name_to_ori_ids_and_objs = {}
-    for name, lst_of_parts in parts_info.items():
+    for name, lst_of_parts in merged_parts_info.items():
         packet = {}
         packet['ori_ids'] = []
         packet['objs'] = []
@@ -445,9 +561,21 @@ def merge_partnet_after_merging(anno_id):
             packet['objs'] += p['objs']
         name_to_ori_ids_and_objs[name] = packet
 
+    if info:
+        with open(f'data_prep/tmp/{anno_id}_part_map.json', 'w') as f:
+            json.dump(name_to_ori_ids_and_objs, f)
+
+    unique_part_names = sorted(list(merged_parts_info.keys()))
+
+    valid = True
     return unique_part_names, name_to_ori_ids_and_objs,\
-        obbs, entire_mesh, name_to_obbs, obb_indices_to_ori_ids,\
-        new_root_node
+        obbs, entire_mesh, name_to_obbs, new_root_node,\
+        anno_id, valid
+
+
+def merge_partnet_after_merging_mp(q: Queue, id_pairs):
+    for id_pair in id_pairs:
+        q.put(merge_partnet_after_merging(id_pair['anno_id']))
 
 
 def export_data(split_ids: Dict, save_data=True, start=0, end=0,
@@ -462,48 +590,92 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
     fg_part_indices with convert_fg_part_indices_to_flat_list and 
     convert_flat_list_to_gf_part_indices
     """
-    num_shapes = end - start
-    # get the unique part names for a set of shapes
-    all_unique_names = []
-    all_names_to_ori_ids_and_objs: List[Dict] = []
-    all_obbs = []
-    all_entire_meshes = []
-    # all_name_to_obb_indices = []
-    all_name_to_obbs = []
-    all_obb_indices_to_ori_ids = []
-    each_shape_unique_names = []
-    all_root_nodes = []
-    print("gathering shape information")
-    for id_pair in tqdm(split_ids[start:end]):
-        anno_id = id_pair['anno_id']
+    dict_each_shape_unique_names = {}
+    all_unique_names = set()
+    dict_all_names_to_ori_ids_and_objs = {}
+    dict_all_obbs = {}
+    dict_all_entire_meshes = {}
+    dict_all_name_to_obbs = {}
+    dict_all_root_nodes = {}
+    dict_all_valid_anno_ids = {}
 
-        # # peek the bounding box xforms
-        # if anno_id not in ['3069', '40105', '36545', '41936']:
-        #     continue
+    def set_dict(book, id_pairs):
+        for pair in id_pairs:
+            anno_id = pair['anno_id']
+            book[anno_id] = None
 
-        unique_names, part_map,\
-            obbs, entire_mesh, name_to_obbs, obb_indices_to_ori_ids,\
-            root_node =\
-                merge_partnet_after_merging(anno_id)
-        
-        # # peek the bounding box xforms
-        # print(anno_id)
-        # visualize.save_obbs_vis(obbs, f'data_prep/tmp/{anno_id}_obb_corrected.png',
-        #                         white_bg=False, mag=0.7, show_coord=True,
-        #                         name_to_obbs=name_to_obbs)
+    set_dict(dict_each_shape_unique_names, split_ids[start:end])
+    set_dict(dict_all_names_to_ori_ids_and_objs, split_ids[start:end])
+    set_dict(dict_all_obbs, split_ids[start:end])
+    set_dict(dict_all_entire_meshes, split_ids[start:end])
+    set_dict(dict_all_name_to_obbs, split_ids[start:end])
+    set_dict(dict_all_root_nodes, split_ids[start:end])
+    set_dict(dict_all_valid_anno_ids, split_ids[start:end])
 
-        each_shape_unique_names.append(unique_names)
-        all_unique_names = list(set(all_unique_names) | set(unique_names))
-        all_names_to_ori_ids_and_objs.append(part_map)
-        all_obbs.append(obbs)
-        all_entire_meshes.append(entire_mesh)
-        all_name_to_obbs.append(name_to_obbs)
-        all_obb_indices_to_ori_ids.append(obb_indices_to_ori_ids)
-        all_root_nodes.append(root_node)
-    all_unique_names = sorted(all_unique_names)
+    num_workers = 1
+    list_of_lists = misc.chunks(split_ids[start:end], num_workers)
+    q = Queue()
+    workers = [
+        Process(target=merge_partnet_after_merging_mp, args=(q, lst))
+        for lst in list_of_lists]
+    for p in workers:
+        p.start()
+    pbar = tqdm(total=len(split_ids[start:end]))
+    while True:
+        flag = True
+        try:
+            unique_names, part_map, obbs, entire_mesh, name_to_obbs, root_node,\
+                anno_id, valid = q.get(True, 1.0)
+        except queue.Empty:
+            flag = False
+        if flag:
+            if valid:
+                dict_each_shape_unique_names[anno_id] = unique_names
+                all_unique_names.update(set(unique_names))
+                dict_all_names_to_ori_ids_and_objs[anno_id] = part_map
+                dict_all_obbs[anno_id] = obbs
+                dict_all_entire_meshes[anno_id] = entire_mesh
+                dict_all_name_to_obbs[anno_id] = name_to_obbs
+                dict_all_root_nodes[anno_id] = root_node
+                dict_all_valid_anno_ids[anno_id] = True
+            else:
+                dict_all_valid_anno_ids[anno_id] = False
+                print("invalid shape: ", anno_id)
+            pbar.update(1)
+        all_exited = True
+        for p in workers:
+            if p.exitcode is None:
+                all_exited = False
+                break
+        if all_exited and q.empty():
+            break
+    pbar.close()
+    for p in workers:
+        p.join()
+    all_unique_names = sorted(list(all_unique_names))
     num_parts = len(all_unique_names)
 
-    # exit(0)
+    each_shape_unique_names = []
+    all_names_to_ori_ids_and_objs = []
+    all_obbs = []
+    all_entire_meshes = []
+    all_name_to_obbs = []
+    all_root_nodes = []
+    all_valid_anno_ids = []
+
+    for k, v in dict_all_valid_anno_ids.items():
+        if v:
+            each_shape_unique_names.append(dict_each_shape_unique_names[k])
+            all_names_to_ori_ids_and_objs.append(dict_all_names_to_ori_ids_and_objs[k])
+            all_obbs.append(dict_all_obbs[k])
+            all_entire_meshes.append(dict_all_entire_meshes[k])
+            all_name_to_obbs.append(dict_all_name_to_obbs[k])
+            all_root_nodes.append(dict_all_root_nodes[k])
+            all_valid_anno_ids.append(k)
+
+    print("number of valid shapes: ", len(all_valid_anno_ids))
+    
+    num_shapes = len(all_valid_anno_ids)
 
     # make frequency map
     name_freq = {}
@@ -524,7 +696,7 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
     for i, un in enumerate(all_unique_names):
         unique_name_to_new_id[un] = i
     with open(
-        f'data/{cat_name}_part_name_to_new_id_3_{start}_{end}.json',
+        f'data/{cat_name}_part_name_to_new_id_17_{start}_{end}.json',
         'w') as f:
         json.dump(unique_name_to_new_id, f)
     
@@ -542,28 +714,23 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
                 ori_ids_to_new_ids[oi] = new_id_for_part
             new_ids_to_objs[new_id_for_part] = objs
         all_ori_ids_to_new_ids.append(ori_ids_to_new_ids)
-        all_new_ids_to_objs[split_ids[start+i]['anno_id']] = new_ids_to_objs
+        all_new_ids_to_objs[all_valid_anno_ids[i]] = new_ids_to_objs
 
     with open(
-        f'data/{cat_name}_train_new_ids_to_objs_3_{start}_{end}.json',
+        f'data/{cat_name}_train_new_ids_to_objs_17_{start}_{end}.json',
         'w') as f:
         json.dump(all_new_ids_to_objs, f)
 
-    max_num_bbox_per_part = 1
-
-    if not save_data:
-        return unique_name_to_new_id, all_entire_meshes, all_ori_ids_to_new_ids,\
-            max_num_bbox_per_part, all_obbs, all_name_to_obbs, all_obb_indices_to_ori_ids
-
     # # union of trees, based on part classes
-    union_root_part = AnyNode(name='lamp')
+    union_root_part = AnyNode(name='chair')
+    # union_root_part = AnyNode(name='lamp')
     for root in all_root_nodes:
         tree.traverse_and_add_class(union_root_part, root)
     UniqueDotExporter(union_root_part,
                       indent=0,
                       nodenamefunc=lambda node: node.name,
                       nodeattrfunc=lambda node: "shape=box",).to_picture(
-                          f"data_prep/tmp/tree_union_class_3_{start}_{end}.png")
+                          f"data_prep/tmp/tree_union_class_17_{start}_{end}.png")
     num_union_nodes_class = sum(1 for _ in PreOrderIter(union_root_part))
     print("num_union_nodes_class: ", num_union_nodes_class)
 
@@ -582,7 +749,7 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
             make_edges(child)
     make_edges(union_root_part)
 
-    np.save(f'data/{cat_name}_union_node_names_3_{start}_{end}.npy',
+    np.save(f'data/{cat_name}_union_node_names_17_{start}_{end}.npy',
             union_node_names)
     
     # reconstruct a tree from adj
@@ -592,7 +759,7 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
                       nodenamefunc=lambda node: node.name,
                       nodeattrfunc=lambda node: "shape=box",
                       ).to_picture(
-                          f"data_prep/tmp/recon_tree_union_3_{start}_{end}.png")
+                          f"data_prep/tmp/recon_tree_union_17_{start}_{end}.png")
 
     print("making dense graphs")
     all_node_features = []
@@ -600,10 +767,11 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
     all_part_nodes = []
     all_xforms = []
     all_extents = []
+    all_relations = []
     for i in tqdm(range(num_shapes)):
         # print(f"------------ {i} ------------")
         node_features, adj, part_nodes,\
-            xforms, extents =\
+            xforms, extents, relations =\
             build_dense_graph(union_root_part,
                               all_name_to_obbs[i],
                               all_obbs[i],
@@ -615,9 +783,16 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
         all_part_nodes.append(part_nodes)
         all_xforms.append(xforms)
         all_extents.append(extents)
+        all_relations.append(relations)
+    
 
-    exit(0)
-    fn = f'data/{cat_name}_train_{pt_sample_res}_3_{start}_{end}.hdf5'
+    if not save_data:
+        return unique_name_to_new_id, all_entire_meshes, all_ori_ids_to_new_ids,\
+            all_obbs, all_name_to_obbs
+    
+    # exit(0)
+
+    fn = f'data/{cat_name}_train_{pt_sample_res}_17_{start}_{end}.hdf5'
     hdf5_file = h5py.File(fn, 'w')
     hdf5_file.create_dataset(
         'part_num_indices', [num_shapes, num_parts],
@@ -630,6 +805,9 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
         dtype=np.float32)
     hdf5_file.create_dataset(
         'values', [num_shapes, (pt_sample_res/2)**3, 1],
+        dtype=np.float32)
+    hdf5_file.create_dataset(
+        'occ', [num_shapes, (pt_sample_res/2)**3, 1],
         dtype=np.float32)
     hdf5_file.create_dataset(
         'node_features', [num_shapes, num_union_nodes_class, OBB_REP_SIZE],
@@ -652,12 +830,98 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
     hdf5_file.create_dataset(
         'empty_parts', [num_shapes, (pt_sample_res/2)**3, num_parts],
         dtype=np.uint8)
+    hdf5_file.create_dataset(
+        'relations', [num_shapes, 4, 4, 4],
+        dtype=np.float32)
 
-    # TODO: before creating dataset, run get_info_from_voxels with multiprocessing
-    #       to parse all shapes
-    print(f"creating dataset: {fn}")
-    for i, id_pair in enumerate(tqdm(split_ids[start:end])):
-        anno_id = id_pair['anno_id']
+    # all_pts_data = [None] * num_shapes
+    # all_pts_whole_data = [None] * num_shapes
+
+    # valid_anno_id_to_idx = {}
+    # for i, x in enumerate(all_valid_anno_ids):
+    #     valid_anno_id_to_idx[x] = i
+
+    # # lol: list of lists 
+    # num_workers = 2
+    # lol_anno_ids = misc.chunks(all_valid_anno_ids, num_workers)
+    # lol_entire_meshes = misc.chunks(all_entire_meshes, num_workers)
+    # lol_ori_ids_to_new_ids = misc.chunks(all_ori_ids_to_new_ids, num_workers)
+
+    # n_lists = len(lol_anno_ids)
+    # assert n_lists == len(lol_entire_meshes)
+    # assert n_lists == len(lol_ori_ids_to_new_ids)
+
+    # q = Queue()
+    # workers = [
+    #     Process(target=make_data_for_one_mp,
+    #             args=(q, lol_anno_ids[i],
+    #                   unique_name_to_new_id,
+    #                   lol_entire_meshes[i],
+    #                   lol_ori_ids_to_new_ids[i]))
+    #     for i in range(n_lists)
+    # ]
+    # for p in workers:
+    #     p.start()
+
+    # # print(f"creating dataset: {fn}")
+    # pbar = tqdm(total=len(all_valid_anno_ids))
+    # while True:
+    #     flag = True
+    #     try:
+    #         anno_id, out = q.get(True, 1.0)
+    #     except queue.Empty:
+    #         flag = False
+    #     if flag:
+    #         idx = valid_anno_id_to_idx[anno_id]
+    #         # hdf5_file['part_num_indices'][idx] = out['part_num_indices']
+    #         # hdf5_file['all_indices'][idx] = out['all_indices']
+    #         # hdf5_file['normalized_points'][idx] = out['normalized_points']
+    #         # hdf5_file['values'][idx] = out['values']
+    #         # hdf5_file['node_features'][idx] = all_node_features[idx]
+    #         # hdf5_file['adj'][idx] = all_adj[idx]
+    #         # hdf5_file['part_nodes'][idx] = all_part_nodes[idx]
+    #         # hdf5_file['xforms'][idx] = all_xforms[idx]
+    #         # hdf5_file['extents'][idx] = all_extents[idx]
+    #         # all_pts_data[idx] = out['pts_data']
+    #         all_pts_whole_data[idx] = out['pts_whole_data']
+
+    #         # for p in range(num_parts):
+    #         #     xform = all_xforms[idx][p]
+    #         #     pts = out['normalized_points'][0]
+    #         #     hdf5_file['transformed_points'][idx, p] =\
+    #         #         transform.transform_points(pts, xform)
+    #         # hdf5_file['empty_parts'][idx] = 1-torch.from_numpy(
+    #         #     all_part_nodes[idx][0]).sum(1).unsqueeze(1).expand(
+    #         #         -1, len(pts)).transpose(0, 1).numpy()
+            
+    #         pbar.update(1)
+    #     all_exited = True
+    #     for p in workers:
+    #         if p.exitcode is None:
+    #             all_exited = False
+    #             break
+    #     if all_exited and q.empty():
+    #         break
+    # pbar.close()
+    # for p in workers:
+    #     p.join()
+
+    # # hdf5_file.close()
+    
+    # # pyg = PartPtsDataset(f'data/{cat_name}_train_{pt_sample_res}_16_{start}_{end}',
+    # #                      all_pts_data)
+    # # pyg.process()
+
+    # pyg = PartPtsDataset(f'data/{cat_name}_train_{pt_sample_res}_16_{start}_{end}_whole',
+    #                      all_pts_whole_data)
+    # pyg.process()
+
+    all_pts_data = []
+    all_pts_whole_data = []
+
+    # print(f"creating dataset: {fn}")
+    for i, anno_id in enumerate(tqdm(all_valid_anno_ids)):
+        # print(anno_id)
         out = make_data_for_one(anno_id, unique_name_to_new_id,
                                 all_entire_meshes[i],
                                 all_ori_ids_to_new_ids[i])
@@ -665,11 +929,15 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
         hdf5_file['all_indices'][i] = out['all_indices']
         hdf5_file['normalized_points'][i] = out['normalized_points']
         hdf5_file['values'][i] = out['values']
+        hdf5_file['occ'][i] = out['occ']
         hdf5_file['node_features'][i] = all_node_features[i]
         hdf5_file['adj'][i] = all_adj[i]
         hdf5_file['part_nodes'][i] = all_part_nodes[i]
         hdf5_file['xforms'][i] = all_xforms[i]
         hdf5_file['extents'][i] = all_extents[i]
+        hdf5_file['relations'][i] = all_relations[i]
+        all_pts_data.append(out['pts_data'])
+        all_pts_whole_data.append(out['pts_whole_data'])
 
         for p in range(num_parts):
             xform = all_xforms[i][p]
@@ -681,6 +949,24 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
                 -1, len(pts)).transpose(0, 1).numpy()
 
     hdf5_file.close()
+
+    pyg = PartPtsDataset(f'data/{cat_name}_train_{pt_sample_res}_17_{start}_{end}',
+                         all_pts_data)
+    pyg.process()
+
+    pyg = PartPtsDataset(f'data/{cat_name}_train_{pt_sample_res}_17_{start}_{end}_whole',
+                         all_pts_whole_data)
+    pyg.process()
+
+
+
+def make_data_for_one_mp(q: Queue, anno_ids, unique_name_to_new_id,
+                         entire_meshes, ori_ids_to_new_ids_list):
+    for i, anno_id in enumerate(anno_ids):
+        q.put((anno_id, make_data_for_one(anno_id,
+                                unique_name_to_new_id,
+                                entire_meshes[i],
+                                ori_ids_to_new_ids_list[i])))
 
 
 def make_data_for_one(anno_id,
@@ -700,29 +986,85 @@ def make_data_for_one(anno_id,
         new_labels.append(ori_ids_to_new_ids[ol])
     new_labels = np.array(new_labels)
 
+    # return None
+
     partnet_pcd_orig: trimesh.points.PointCloud = trimesh.load(partnet_points_ply)
+
+    # print(partnet_pcd_orig.shape)
 
     fg_voxels, fg_binvox_xform = get_info_from_voxels(
         anno_id, pt_sample_res, entire_mesh)
     partnet_pcd_in_fg_vox_grid = transform.mesh_space_to_voxel_space_centered(
         fg_binvox_xform, partnet_pcd_orig.vertices)
+    
+    partnet_pcd_part_points = []
+    partnet_pcd_part_labels = []
+    for un in unique_names:
+        new_id = unique_name_to_new_id[un]
+        if new_id not in new_labels:
+            continue
+        part_indices = np.argwhere(new_labels == new_id)[:,0]
+        part_points = partnet_pcd_in_fg_vox_grid[part_indices]
+        part_points = kaolin.ops.pointcloud.center_points(
+            torch.from_numpy(part_points).unsqueeze(0), normalize=True)
+        part_points = part_points[0].to(torch.float32)
+        partnet_pcd_part_points.append(part_points)
+        partnet_pcd_part_labels.append(np.repeat([new_id], len(part_points)))
 
-    random.seed(319)
-    points, values = gather_hdf5.sample_points_values(fg_voxels, pt_sample_res)
+    partnet_pcd_part_points = np.concatenate(partnet_pcd_part_points, axis=0)
+    partnet_pcd_part_labels = np.concatenate(partnet_pcd_part_labels, axis=0)
+    
+    pts_data = Data(pos=partnet_pcd_part_points,
+                    part_label=partnet_pcd_part_labels)
+
+    partnet_pcd_norm = kaolin.ops.pointcloud.center_points(
+            torch.from_numpy(partnet_pcd_in_fg_vox_grid).unsqueeze(0),
+            normalize=True)
+    partnet_pcd_norm = partnet_pcd_norm[0].to(torch.float32)
+
+    pts_data_whole = Data(pos=partnet_pcd_norm,
+                          part_label=torch.from_numpy(new_labels).to(torch.int64))
+
+    sdf_grid = ops.bin2sdf(input=fg_voxels)
+    sdf_grid = np.swapaxes(sdf_grid, 0, 2)
+
+    # random.seed(319)
+    # points, values = gather_hdf5.sample_points_values(fg_voxels, pt_sample_res)
+    points = pt_sample_res * x_nx3 + pt_sample_res / 2
+    sdf_grid = torch.from_numpy(sdf_grid)
+    values = ops.vectorized_trilinear_interpolate(sdf_grid.expand(1, 1, -1, -1, -1),
+                                                  points.expand(1, -1, -1),
+                                                  64)
+    points = points.numpy()
+    values = np.squeeze(values.numpy())[:, None]
+    occ = np.where(values <= 0, 1, 0)
+    # np.save('data_prep/values_occ.npy', occ)
+    # exit(0)
 
     pv_indices = np.arange(len(points))
-    np.random.seed(319)
+    # np.random.seed(319)
     np.random.shuffle(pv_indices)
     points = points[pv_indices]
     values = values[pv_indices]
+    occ = occ[pv_indices]
 
-    fg_occ_points = points[values.astype('bool').flatten()]
-    fg_occ_points_indices = np.where(values >= 0.5)[0]
+    # fg_occ_points = points[values.astype('bool').flatten()]
+    fg_occ_points_indices = np.where(values <= 0)[0]
+    fg_occ_points = points[fg_occ_points_indices]
+    
+    # print(fg_occ_points_indices.shape)
+    # exit(0)
 
     fg_closest_indices = ops.find_nearest_point(
         fg_occ_points,
         partnet_pcd_in_fg_vox_grid)
     fg_occupied_points_labels = new_labels[fg_closest_indices]
+
+    if vis:
+        colors = np.zeros((len(fg_occ_points), 3))
+        colors = np.concatenate((colors, np.ones((len(partnet_pcd_in_fg_vox_grid), 3))))
+        trimesh.points.PointCloud(np.concatenate((fg_occ_points, partnet_pcd_in_fg_vox_grid)), colors).export(
+            'data_prep/tmp/fg_occ_points_and_partnet_pcd.ply')
 
     fg_part_indices = []
     # find indices within occupied points that belong to separate parts
@@ -755,12 +1097,16 @@ def make_data_for_one(anno_id,
     normalized_points = kaolin.ops.pointcloud.center_points(points, normalize=True)
     normalized_points = normalized_points.cpu().numpy()
     values = values[None, :]
+    occ = occ[None, :]
 
     return {
         'part_num_indices': [part_num_indices],     # 1, num_parts
         'all_indices': [all_indices],               # 1, variable length
         'normalized_points': normalized_points,     # 1, num_points, 3
         'values': values,                           # 1, num_points, 1
+        'occ': occ,                           # 1, num_points, 1
+        'pts_data': pts_data,
+        'pts_whole_data': pts_data_whole
     }
 
 
@@ -810,7 +1156,65 @@ def convert_flat_list_to_fg_part_indices(part_num_indices, all_indices):
 
 
 if __name__ == "__main__":
-    # good_indices = np.load('data/indices_shapes_w_three_parts_0_2000.npy')
-    # ids_w_three_parts = [train_ids[x] for x in good_indices]
-    # export_data(ids_w_three_parts, save_data=True, start=0, end=len(good_indices))
-    export_data(train_ids, save_data=True, start=0, end=1554)
+    # pass one to create the preprocess_16 dataset
+    # export_data(train_ids, save_data=False, start=0, end=4489)
+    # export_data(train_ids, save_data=False, start=0, end=1554)
+    # exit(0)
+    np.random.seed(319)
+
+    from flexi.flexicubes import FlexiCubes
+    fc = FlexiCubes('cpu')
+    x_nx3, cube_fx8 = fc.construct_voxel_grid(31)
+    
+    # pass two to create the four_parts dataset
+    good_indices = np.load('data/chair_am_four_parts_16_0_4489.npy')
+    data_pt = 'data/Chair_train_new_ids_to_objs_16_0_4489.json'
+    with open(data_pt, 'r') as f:
+        data: Dict = json.load(f)
+    all_ids = np.array(list(data.keys()))
+    ids_w_four_parts = []
+    for x in train_ids:
+        if x['anno_id'] in all_ids:
+            ids_w_four_parts.append(x)
+    ids_w_four_parts = [ids_w_four_parts[x] for x in good_indices]
+
+    # export_data(ids_w_four_parts, save_data=True,
+    #             start=0, end=len(ids_w_four_parts))
+    export_data(ids_w_four_parts, save_data=True,
+                start=0, end=100)
+    exit(0)
+
+    # merge_partnet_after_merging('39446', info=True)
+    # exit(0)
+
+    unique_name_to_new_id, all_entire_meshes, all_ori_ids_to_new_ids,\
+            all_obbs, all_name_to_obbs =\
+                export_data(ids_w_four_parts, save_data=False, start=0, end=10)
+    # np.savez_compressed("data_prep/tmp/data.npz",
+    #                     all_entire_meshes=all_entire_meshes,
+    #                     all_ori_ids_to_new_ids=all_ori_ids_to_new_ids,
+    #                     all_obbs=all_obbs,
+    #                     all_name_to_obbs=all_name_to_obbs)
+
+    with open('data/Chair_train_new_ids_to_objs_17_0_10.json', 'r') as f:
+        all_obs = json.load(f)
+    keys = list(all_obs.keys())
+
+    # with open(
+    #     f'data/{cat_name}_part_name_to_new_id_8_{0}_{2000}.json',
+    #     'r') as f:
+    #     unique_name_to_new_id = json.load(f)
+
+    # # anno_id = '43941'
+    # # model_idx = 3
+    # anno_id = '38725'
+    # model_idx = 6
+    model_idx = 1
+    anno_id = keys[model_idx]
+    print(anno_id)
+
+    make_data_for_one(anno_id,
+                      unique_name_to_new_id,
+                      all_entire_meshes[model_idx],
+                      all_ori_ids_to_new_ids[model_idx],
+                      vis=True)

@@ -230,3 +230,62 @@ def sample_near_sdf_surface(sdf_grid, voxel_grid,
     # plt.close()
 
     return sampled_points, sampled_values
+
+
+def vectorized_trilinear_interpolate(volume, points,
+                                     vox_res):
+    """
+    Performs vectorized trilinear interpolation of a 3D volume at specified points.
+
+    :param volume: Input volume to interpolate, shape (B, C, D, H, W)
+    :param points: Points at which to interpolate, shape (B, N, 3)
+                    Points are assumed to be in the coordinate frame of the volume
+                    i.e., in the range [0, D-1] x [0, H-1] x [0, W-1].
+    :return: Interpolated values, shape (B, C, N)
+    """
+    B, C, D, H, W = volume.shape
+
+    clamped = points.clamp(0, vox_res-1)
+    points_int = clamped.long()
+    points_frac = clamped - points_int
+
+    # Calculate the indices of the 8 neighboring points
+    x0 = points_int[..., 0]
+    y0 = points_int[..., 1]
+    z0 = points_int[..., 2]
+    x1 = (x0 + 1).clamp(max=W-1)
+    y1 = (y0 + 1).clamp(max=H-1)
+    z1 = (z0 + 1).clamp(max=D-1)
+
+    # Create a grid of indices for batch and channel dimensions
+    batch_indices = torch.arange(
+        B, dtype=torch.long, device=volume.device).view(B, 1).expand(
+            B, points.size(0))
+    channel_indices = torch.arange(
+        C, dtype=torch.long, device=volume.device).view(1, C, 1).expand(
+            B, C, points.size(0))
+
+    # Retrieve values from the volume at the corner points
+    v000 = volume[batch_indices, channel_indices, z0, y0, x0]
+    v100 = volume[batch_indices, channel_indices, z0, y0, x1]
+    v010 = volume[batch_indices, channel_indices, z0, y1, x0]
+    v110 = volume[batch_indices, channel_indices, z0, y1, x1]
+    v001 = volume[batch_indices, channel_indices, z1, y0, x0]
+    v101 = volume[batch_indices, channel_indices, z1, y0, x1]
+    v011 = volume[batch_indices, channel_indices, z1, y1, x0]
+    v111 = volume[batch_indices, channel_indices, z1, y1, x1]
+
+    # Interpolate along the x-axis
+    vx00 = (1 - points_frac[..., 0]) * v000 + points_frac[..., 0] * v100
+    vx10 = (1 - points_frac[..., 0]) * v010 + points_frac[..., 0] * v110
+    vx01 = (1 - points_frac[..., 0]) * v001 + points_frac[..., 0] * v101
+    vx11 = (1 - points_frac[..., 0]) * v011 + points_frac[..., 0] * v111
+
+    # Interpolate along the y-axis
+    vxy0 = (1 - points_frac[..., 1]) * vx00 + points_frac[..., 1] * vx10
+    vxy1 = (1 - points_frac[..., 1]) * vx01 + points_frac[..., 1] * vx11
+
+    # Interpolate along the z-axis
+    interpolated = (1 - points_frac[..., 2]) * vxy0 + points_frac[..., 2] * vxy1
+
+    return interpolated

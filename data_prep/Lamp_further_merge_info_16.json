@@ -1,0 +1,44 @@
+{
+    "lamp_base": [
+        "lamp_holistic_base",
+        "lamp_base_part",
+        "lamp_leg_base",
+        "leg"
+    ],
+    "lamp_body": [
+        "lamp_body_jointed",
+        "lamp_pole",
+        "lamp_body_solid",
+        "lamp_body_vertical_panel"
+    ],
+    "lamp_unit": [
+        "lamp_head",
+        "lamp_cover",
+        "lamp_shade",
+        "lamp",
+        "lantern_lamp_cover",
+        "lamp_cover_frame",
+        "lamp_cover_frame_top",
+        "lamp_cover_frame_bottom",
+        "lamp_cover_frame_bar",
+        "lamp_cover_glass",
+        "light_bulb",
+        "lamp_wireframe_fitter",
+        "lamp_cover_holder",
+        "lamp_finial",
+        "connector",
+        "lamp_arm",
+        "lamp_arm_curved_bar",
+        "lamp_arm_straight_bar"
+    ],
+    "power_cord": [
+        "cord"
+    ],
+    "ceiling_lamp": [
+        "pendant_lamp",
+        "pendant_lamp_unit",
+        "chain",
+        "chandelier",
+        "lamp_unit_group"
+    ]
+}
