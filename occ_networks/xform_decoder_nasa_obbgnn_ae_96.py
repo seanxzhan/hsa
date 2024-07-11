@@ -1,6 +1,7 @@
 import math
 import torch
 from align_networks.gnn_dense_ae_58 import OBBGNN
+from tqdm import tqdm
 
 
 class SDFDecoder(torch.nn.Module):
@@ -36,11 +37,12 @@ class SDFDecoder(torch.nn.Module):
         self.obb_gnn = OBBGNN(num_node_features=3,
                               graph_feature_dim=32)
         
+        refine_out_dims = 4
         self.refine_net = SmallMLPs(input_dims,
-                                    feature_dims,
+                                    num_parts*feature_dims,
                                     internal_dims,
                                     hidden,
-                                    output_dims,
+                                    refine_out_dims,
                                     multires)
         
     def learn_geom_xform(self, node_feat, adj, mask, batch):
@@ -62,10 +64,28 @@ class SDFDecoder(torch.nn.Module):
         out = occs
         return out
     
-    def get_delta_sdf(self, points, features):
+    def get_sdf_deform(self, points, features):
         return self.refine_net.forward(
             points,
             features.unsqueeze(1).expand(-1, points.shape[1], -1))
+    
+    def pre_train_sphere(self, iter):
+        print("Initialize SDF to sphere")
+        loss_fn = torch.nn.MSELoss()
+        optimizer = torch.optim.Adam(list(self.parameters()), lr=1e-4)
+
+        for i in tqdm(range(iter)):
+            p = torch.rand((1, 1024,3), device='cuda') - 0.5
+            ref_value  = torch.sqrt((p**2).sum(-1)) - 0.3
+            output = self.get_sdf_deform(
+                p,
+                torch.zeros((1, self.num_parts*self.feature_dims)).to('cuda'))
+            loss = loss_fn(output[...,0], ref_value)
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+
+        print("Pre-trained MLP", loss.item())
 
 
 class SmallMLPs(torch.nn.Module):
@@ -99,6 +119,7 @@ class SmallMLPs(torch.nn.Module):
         # p = torch.concatenate((p, feature), dim=-1)
         p = torch.concat((p, feature), dim=-1)
         out = self.net(p)
+        # out = torch.tanh(out)
         return out
 
 

@@ -17,6 +17,9 @@ from data_prep import preprocess_data_17
 from typing import Dict, List
 from anytree.exporter import UniqueDotExporter
 from sklearn.decomposition import PCA
+from flexi.flexicubes import FlexiCubes
+# from flexi.util import *
+from flexi import render, loss, util
 
 
 # inherited checkpoint from local_66
@@ -60,7 +63,7 @@ if args.of:
 device = 'cuda'
 lr = 5e-3
 laplacian_weight = 0.1
-iterations = 3001
+iterations = 10001
 save_every = 100
 multires = 2
 pt_sample_res = 64        # point_sampling
@@ -105,6 +108,7 @@ if OVERFIT:
     all_indices = train_data['all_indices'][overfit_idx:overfit_idx+1]
     normalized_points = train_data['normalized_points'][overfit_idx:overfit_idx+1]
     values = train_data['values'][overfit_idx:overfit_idx+1]
+    occ = train_data['occ'][overfit_idx:overfit_idx+1]
     part_nodes = train_data['part_nodes'][overfit_idx:overfit_idx+1]
     xforms = train_data['xforms'][overfit_idx:overfit_idx+1]
     extents = train_data['extents'][overfit_idx:overfit_idx+1]
@@ -190,6 +194,21 @@ if args.train:
         1 / math.sqrt(num_parts*each_part_feat),
     )
 
+fc_voxel_grid_res = 31
+train_res = [256, 256]
+fc = FlexiCubes(device)
+fc_voxel_grid_res = 31
+x_nx3, cube_fx8 = fc.construct_voxel_grid(fc_voxel_grid_res)
+# x_nx3 = 2*x_nx3_orig # scale up the grid so that it's larger than the target object
+# x_nx3_orig = x_nx3_orig.unsqueeze(0).expand(batch_size, -1, -1)
+
+def my_load_mesh(model_idx):
+    anno_id = model_idx_to_anno_id[model_idx]
+    obj_dir = os.path.join(partnet_dir, anno_id, 'vox_models')
+    assert os.path.exists(obj_dir)
+    gt_mesh_path = os.path.join(obj_dir, f'{anno_id}.obj')
+    return util.load_mesh(gt_mesh_path, device)
+
 def load_batch(batch_idx, batch_size):
     start = batch_idx*batch_size
     end = start + batch_size
@@ -226,6 +245,7 @@ np.random.seed(319)
 
 embed_fn, _ = get_embedder(2)
 
+model.pre_train_sphere(1000)
 
 def train_one_itr(it, b,
                   all_fg_part_indices, 
@@ -233,6 +253,8 @@ def train_one_itr(it, b,
                   batch_embed,
                   batch_node_feat, batch_adj, batch_part_nodes,
                   batch_xforms, batch_relations):
+    optimizer.zero_grad()
+
     num_parts_to_mask = np.random.randint(1, num_parts)
     # num_parts_to_mask = 1
     rand_indices = np.random.choice(num_parts, num_parts_to_mask,
@@ -288,16 +310,18 @@ def train_one_itr(it, b,
                   batch_embed.masked_fill(parts_mask==1, torch.tensor(0)))
     occs1 = occs1.masked_fill(occ_mask==1,torch.tensor(float('-inf')))
     pred_values1, _ = torch.max(occs1, dim=-1, keepdim=True)
+    # pred_values1, _ = torch.min(occs1, dim=-1, keepdim=True)
+    # pred_values1_occ = (pred_values1 < 0).int()
     loss1 = loss_f(pred_values1, modified_values)
+    # loss1 = loss_f(pred_values1_occ, modified_values)
 
     occs2 = model(transformed_points,
                   batch_embed)
     pred_values2, _ = torch.max(occs2, dim=-1, keepdim=True)
+    # pred_values2, _ = torch.min(occs2, dim=-1, keepdim=True)
+    # pred_values2_occ = (pred_values2 < 0).int()
     loss2 = loss_f(pred_values2, batch_occ)
-
-    # print(batch_embed.shape)
-    # print(pred_values2.shape)
-    # exit(0)
+    # loss2 = loss_f(pred_values2_occ, batch_occ)
 
     loss = loss1 + loss2
 
@@ -315,16 +339,54 @@ def train_one_itr(it, b,
     
     loss += 10 * loss_xform + 10 * loss_relations
 
-    pred_sdf = -2*pred_values2 + 1 + model.get_delta_sdf()
+    flexi_out = model.get_sdf_deform(batch_points, batch_embed)
 
+    pred_sdf = -2*pred_values2 + 1 + flexi_out[:, :, :1]
+    deform = flexi_out[:, :, 1:]
+    
+    if it >= 2000:
+        mesh_loss = 0
+        for ele in range(batch_size):
+            gt_mesh = my_load_mesh(batch_size*b + ele)
+            mv, mvp = render.get_random_camera_batch(
+                8, iter_res=train_res, device=device, use_kaolin=False)
+            target = render.render_mesh_paper(gt_mesh, mv, mvp, train_res)
+
+            grid_verts = x_nx3 + (2-1e-8) / (fc_voxel_grid_res * 2) * torch.tanh(
+                deform[ele])
+            mod_sdf = torch.squeeze(pred_sdf[ele])
+            vertices, faces, L_dev = fc(
+                grid_verts, mod_sdf,
+                cube_fx8, fc_voxel_grid_res, training=True)
+
+            flexicubes_mesh = util.Mesh(vertices, faces)
+
+            try: 
+                buffers = render.render_mesh_paper(flexicubes_mesh, mv, mvp, train_res)
+            except Exception as e:
+                import logging, traceback
+                logging.error(traceback.format_exc())
+                print(torch.min(pred_sdf[ele]))
+                print(torch.max(pred_sdf[ele]))
+
+            mask_loss = (buffers['mask'] - target['mask']).abs().mean()
+            depth_loss = (((((buffers['depth'] - (target['depth']))* target['mask'])**2).sum(-1)+1e-8)).sqrt().mean() * 10
+
+            mesh_loss += mask_loss + depth_loss
+        mesh_loss /= batch_size
+
+        loss += 0.1 * mesh_loss + loss_f(pred_sdf, batch_values)
+    else:
+        loss += loss_f(pred_sdf, batch_values)
 
     if b == n_batches - 1:
         writer.add_scalar('occ loss', loss1 + loss2, it)
         writer.add_scalar('bbox geom loss', loss_bbox_geom, it)
         writer.add_scalar('xform loss', loss_xform, it)
         writer.add_scalar('relations loss', loss_relations, it)
+        if it >= 2000:
+            writer.add_scalar('mesh loss', mesh_loss, it)
 
-    optimizer.zero_grad()
     loss.backward()
     optimizer.step()
     scheduler.step()
@@ -441,21 +503,32 @@ if args.test:
     mesh_gt_path = os.path.join(results_dir, 'mesh_gt.png')
     learned_obbs_path = os.path.join(results_dir, 'obbs_pred.png')
     obbs_path = os.path.join(results_dir, 'obbs_gt.png')
+    flexi_path = os.path.join(results_dir, 'mesh_flexi.png')
     lst_paths = [
         obbs_path,
         mesh_gt_path,
         learned_obbs_path,
-        mesh_pred_path]
+        mesh_pred_path,
+        flexi_path]
 
-    query_points = reconstruct.make_query_points(pt_sample_res)
-    query_points = torch.from_numpy(query_points).to(device, torch.float32)
-    query_points = query_points.unsqueeze(0)
+    # query_points = reconstruct.make_query_points(pt_sample_res)
+    # query_points = torch.from_numpy(query_points).to(device, torch.float32)
+    # query_points = query_points.unsqueeze(0)
+    query_points = x_nx3.unsqueeze(0) * 1.1
     bs, num_points, _ = query_points.shape
 
     if not OVERFIT:
         batch_node_feat = torch.from_numpy(node_features[model_idx:model_idx+1, :, :3]).to(device, torch.float32)
         batch_adj = torch.from_numpy(adj[model_idx:model_idx+1]).to(device, torch.float32)
         batch_part_nodes = torch.from_numpy(part_nodes[model_idx:model_idx+1]).to(device, torch.float32)
+    else:
+        batch_node_feat = torch.from_numpy(node_features[:, :, :3]).to(device, torch.float32)
+        batch_adj = torch.from_numpy(adj).to(device, torch.float32)
+        batch_part_nodes = torch.from_numpy(part_nodes).to(device, torch.float32)
+
+    # print(batch_node_feat.shape)
+    # print(batch_adj.shape)
+    # print(batch_part_nodes.shape)
 
     with torch.no_grad():
         if args.mask:
@@ -529,10 +602,28 @@ if args.test:
     else:
         mag = 0.8
 
+    flexi_out = model.get_sdf_deform(query_points, batch_embed)
+    pred_sdf = -2*pred_values + 1 + flexi_out[:, :, :1]
+    deform = flexi_out[:, :, 1:]
+    grid_verts = x_nx3 + (2-1e-8) / (fc_voxel_grid_res * 2) * torch.tanh(
+        deform[0])
+    mod_sdf = torch.squeeze(pred_sdf[0])
+    vertices, faces, L_dev = fc(
+        grid_verts, mod_sdf,
+        cube_fx8, fc_voxel_grid_res, training=True)
+    # flexicubes_mesh = util.Mesh(vertices, faces)
+    flexi_mesh = trimesh.Trimesh(vertices = vertices.detach().cpu().numpy(), faces=faces.detach().cpu().numpy(), process=False)
+    flexi_mesh.export(os.path.join(results_dir, 'mesh_flexi.obj'))
+    visualize.save_mesh_vis(flexi_mesh, flexi_path,
+                            mag=mag, white_bg=white_bg)
+
+    pt_sample_res = 32
+
     sdf_grid = torch.reshape(
         pred_values,
         (1, pt_sample_res, pt_sample_res, pt_sample_res))
-    sdf_grid = torch.permute(sdf_grid, (0, 2, 1, 3))
+    # sdf_grid = torch.permute(sdf_grid, (0, 2, 1, 3))
+    sdf_grid = torch.permute(sdf_grid, (0, 3, 1, 2))
     vertices, faces =\
         kaolin.ops.conversions.voxelgrids_to_trianglemeshes(sdf_grid)
     vertices = kaolin.ops.pointcloud.center_points(
@@ -2734,3 +2825,4 @@ if args.post_process_fc:
 
     mesh_np = trimesh.Trimesh(vertices = vertices.detach().cpu().numpy(), faces=faces.detach().cpu().numpy(), process=False)
     mesh_np.export(os.path.join(results_dir, 'flexi_mesh.obj'))
+# 

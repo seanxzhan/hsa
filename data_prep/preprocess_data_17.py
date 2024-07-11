@@ -20,7 +20,7 @@ import numpy as np
 from tqdm import tqdm
 from anytree import RenderTree, AnyNode, findall_by_attr, PreOrderIter
 import trimesh.bounds
-from utils import tree, misc, visualize, ops, transform
+from utils import tree, misc, ops, transform
 from utils.tree import OriNode, AMNode
 from data_prep import gather_hdf5
 from typing import List, Dict
@@ -59,7 +59,7 @@ train_ids = json.load(train_f); val_ids = json.load(val_f); test_ids = json.load
 # exit(0)
 
 # -------- get tableau colors for visualization -------- 
-all_colors = np.array(visualize.get_tab_20_saturated(50))[:20]
+all_colors = np.array(misc.get_tab_20_saturated(50))[:20]
 np.random.seed(12345)
 color_indices = np.arange(len(all_colors))
 np.random.shuffle(color_indices)
