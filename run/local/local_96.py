@@ -61,7 +61,8 @@ if args.of:
     assert args.of_idx != None
 
 device = 'cuda'
-lr = 5e-3
+# lr = 5e-3
+lr = 0.01
 laplacian_weight = 0.1
 iterations = 10001
 save_every = 100
@@ -149,7 +150,8 @@ for i in range(num_shapes):
         part_num_indices[i], all_indices[i])
     all_fg_part_indices.append(np.array(indices, dtype=object))
 
-n_batches = num_shapes // batch_size
+# n_batches = num_shapes // batch_size
+n_batches = 1
 # n_batches = 128
 
 if not OVERFIT:
@@ -199,6 +201,7 @@ train_res = [256, 256]
 fc = FlexiCubes(device)
 fc_voxel_grid_res = 31
 x_nx3, cube_fx8 = fc.construct_voxel_grid(fc_voxel_grid_res)
+x_nx3 = 2*x_nx3
 # x_nx3 = 2*x_nx3_orig # scale up the grid so that it's larger than the target object
 # x_nx3_orig = x_nx3_orig.unsqueeze(0).expand(batch_size, -1, -1)
 
@@ -245,7 +248,7 @@ np.random.seed(319)
 
 embed_fn, _ = get_embedder(2)
 
-model.pre_train_sphere(1000)
+# model.pre_train_sphere(1000)
 
 def train_one_itr(it, b,
                   all_fg_part_indices, 
@@ -342,9 +345,12 @@ def train_one_itr(it, b,
     flexi_out = model.get_sdf_deform(batch_points, batch_embed)
 
     pred_sdf = -2*pred_values2 + 1 + flexi_out[:, :, :1]
+    # pred_sdf = flexi_out[:, :, :1]
     deform = flexi_out[:, :, 1:]
+
+    sdf_loss = loss_f(pred_sdf, batch_values)
     
-    if it >= 2000:
+    if it >= 1000:
         mesh_loss = 0
         for ele in range(batch_size):
             gt_mesh = my_load_mesh(batch_size*b + ele)
@@ -375,16 +381,17 @@ def train_one_itr(it, b,
             mesh_loss += mask_loss + depth_loss
         mesh_loss /= batch_size
 
-        loss += 0.1 * mesh_loss + loss_f(pred_sdf, batch_values)
+        loss += 0.1 * mesh_loss + sdf_loss
     else:
-        loss += loss_f(pred_sdf, batch_values)
+        loss += sdf_loss
 
     if b == n_batches - 1:
         writer.add_scalar('occ loss', loss1 + loss2, it)
         writer.add_scalar('bbox geom loss', loss_bbox_geom, it)
         writer.add_scalar('xform loss', loss_xform, it)
         writer.add_scalar('relations loss', loss_relations, it)
-        if it >= 2000:
+        writer.add_scalar('sdf loss', sdf_loss, it)
+        if it >= 1000:
             writer.add_scalar('mesh loss', mesh_loss, it)
 
     loss.backward()
@@ -514,6 +521,7 @@ if args.test:
     # query_points = reconstruct.make_query_points(pt_sample_res)
     # query_points = torch.from_numpy(query_points).to(device, torch.float32)
     # query_points = query_points.unsqueeze(0)
+    x_nx3, cube_fx8 = fc.construct_voxel_grid(31)
     query_points = x_nx3.unsqueeze(0) * 1.1
     bs, num_points, _ = query_points.shape
 

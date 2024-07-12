@@ -2650,7 +2650,9 @@ if args.post_process_fc:
         # learn weight from code
         # weight = weight_model(batch_embed_weight)
         
-        vertices, faces, L_dev = fc(grid_verts, sdf, cube_fx8, voxel_grid_res, beta_fx12=weight[:,:12], alpha_fx8=weight[:,12:20],
+        vertices, faces, L_dev = fc(
+            grid_verts, sdf, cube_fx8, voxel_grid_res,
+            beta_fx12=weight[:,:12], alpha_fx8=weight[:,12:20],
             gamma_f=weight[:,20], training=True)
         # vertices, faces, L_dev = fc(grid_verts, sdf, cube_fx8, voxel_grid_res, training=True)
         # print(faces)

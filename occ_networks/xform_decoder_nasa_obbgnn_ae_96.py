@@ -45,6 +45,13 @@ class SDFDecoder(torch.nn.Module):
                                     refine_out_dims,
                                     multires)
         
+        # self.weights_net = SmallMLPs(input_dims,
+        #                              num_parts*feature_dims,
+        #                              internal_dims,
+        #                              hidden,
+        #                              refine_out_dims,
+        #                              multires)
+        
     def learn_geom_xform(self, node_feat, adj, mask, batch):
         return self.obb_gnn.forward(node_feat, adj, mask, batch)
 
