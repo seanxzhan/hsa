@@ -10,7 +10,7 @@ import numpy as np
 from tqdm import tqdm
 from torch.utils.tensorboard import SummaryWriter
 # from occ_networks.basic_decoder_nasa import SDFDecoder, get_embedder
-from occ_networks.xform_decoder_nasa_obbgnn_ae_96 import SDFDecoder, get_embedder
+from occ_networks.xform_decoder_nasa_obbgnn_ae_97 import SDFDecoder, get_embedder
 from utils import misc, reconstruct, tree
 # from utils import visualize
 from data_prep import preprocess_data_17
@@ -61,15 +61,15 @@ if args.of:
     assert args.of_idx != None
 
 device = 'cuda'
-# lr = 5e-3
-lr = 0.01
+lr = 5e-3
+# lr = 0.01
 laplacian_weight = 0.1
 iterations = 10001
 save_every = 100
 multires = 2
 pt_sample_res = 64        # point_sampling
 
-expt_id = 96
+expt_id = 97
 
 OVERFIT = args.of
 overfit_idx = args.of_idx
@@ -150,8 +150,8 @@ for i in range(num_shapes):
         part_num_indices[i], all_indices[i])
     all_fg_part_indices.append(np.array(indices, dtype=object))
 
-# n_batches = num_shapes // batch_size
-n_batches = 1
+n_batches = num_shapes // batch_size
+# n_batches = 1
 # n_batches = 128
 
 if not OVERFIT:
@@ -350,7 +350,7 @@ def train_one_itr(it, b,
 
     sdf_loss = loss_f(pred_sdf, batch_values)
     
-    if it >= 1000:
+    if it >= 200:
         mesh_loss = 0
         for ele in range(batch_size):
             gt_mesh = my_load_mesh(batch_size*b + ele)
@@ -391,7 +391,7 @@ def train_one_itr(it, b,
         writer.add_scalar('xform loss', loss_xform, it)
         writer.add_scalar('relations loss', loss_relations, it)
         writer.add_scalar('sdf loss', sdf_loss, it)
-        if it >= 1000:
+        if it >= 200:
             writer.add_scalar('mesh loss', mesh_loss, it)
 
     loss.backward()
@@ -430,7 +430,7 @@ if args.train:
             info = f'-------- Iteration {it} - loss: {avg_batch_loss:.8f} --------'
             print(info)
 
-        save = 1000 if OVERFIT else 100
+        save = 1000 if OVERFIT else 200
         if (it) % save == 0 or it == (iterations - 1):
             torch.save({
                 'epoch': it,

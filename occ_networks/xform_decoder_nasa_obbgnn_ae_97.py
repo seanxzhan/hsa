@@ -1,6 +1,7 @@
 import math
 import torch
 from align_networks.gnn_dense_ae_58 import OBBGNN
+from tqdm import tqdm
 
 
 class SDFDecoder(torch.nn.Module):
@@ -34,8 +35,24 @@ class SDFDecoder(torch.nn.Module):
                                        multires))
         
         self.obb_gnn = OBBGNN(num_node_features=3,
-                              graph_feature_dim=32,
-                              num_parts=num_parts)
+                              graph_feature_dim=32)
+        
+        refine_out_dims = 4
+        self.refine_net = SmallMLPs(input_dims,
+                                    16,
+                                    internal_dims,
+                                    hidden,
+                                    refine_out_dims,
+                                    multires)
+        
+        self.feature_volume = VoxDecoder(feature_size=num_parts*feature_dims)
+
+        # self.weights_net = SmallMLPs(input_dims,
+        #                              num_parts*feature_dims,
+        #                              internal_dims,
+        #                              hidden,
+        #                              refine_out_dims,
+        #                              multires)
         
     def learn_geom_xform(self, node_feat, adj, mask, batch):
         return self.obb_gnn.forward(node_feat, adj, mask, batch)
@@ -55,6 +72,30 @@ class SDFDecoder(torch.nn.Module):
 
         out = occs
         return out
+    
+    def get_sdf_deform(self, points, features):
+        feat_vol = self.feature_volume(features).view(-1, 16, 32**3).transpose(1, 2)
+        return self.refine_net.forward(
+            points,
+            feat_vol)
+    
+    def pre_train_sphere(self, iter):
+        print("Initialize SDF to sphere")
+        loss_fn = torch.nn.MSELoss()
+        optimizer = torch.optim.Adam(list(self.parameters()), lr=1e-4)
+
+        for i in tqdm(range(iter)):
+            p = torch.rand((1, 1024,3), device='cuda') - 0.5
+            ref_value  = torch.sqrt((p**2).sum(-1)) - 0.3
+            output = self.get_sdf_deform(
+                p,
+                torch.zeros((1, self.num_parts*self.feature_dims)).to('cuda'))
+            loss = loss_fn(output[...,0], ref_value)
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+
+        print("Pre-trained MLP", loss.item())
 
 
 class SmallMLPs(torch.nn.Module):
@@ -88,6 +129,7 @@ class SmallMLPs(torch.nn.Module):
         # p = torch.concatenate((p, feature), dim=-1)
         p = torch.concat((p, feature), dim=-1)
         out = self.net(p)
+        # out = torch.tanh(out)
         return out
 
 
@@ -138,3 +180,57 @@ def get_embedder(multires):
     embedder_obj = Embedder(**embed_kwargs)
     embed = lambda x, eo=embedder_obj : eo.embed(x)
     return embed, embedder_obj.out_dim
+
+
+from torch.nn import Linear, ConvTranspose3d, ReLU, Sigmoid, Sequential
+
+class VoxDecoder(torch.nn.Module):
+    def __init__(self,
+                 feature_size = 64) -> None:
+        super().__init__()
+
+        # net = (Linear(feature_size, 256), ReLU())
+        self.fc = Sequential(Linear(feature_size, 64), ReLU())
+        net = (ConvTranspose3d(in_channels=64,
+                                out_channels=64,
+                                kernel_size=4,
+                                stride=3,
+                                padding=0),
+                ReLU())
+        net += (ConvTranspose3d(in_channels=64,
+                                out_channels=32,
+                                kernel_size=4,
+                                stride=2,
+                                padding=1),
+                ReLU())
+        net += (ConvTranspose3d(in_channels=32,
+                                out_channels=16,
+                                kernel_size=4,
+                                stride=2,
+                                padding=1),
+                ReLU())
+        net += (ConvTranspose3d(in_channels=16,
+                                out_channels=16,
+                                kernel_size=4,
+                                stride=2,
+                                padding=1),)
+        # net += (ConvTranspose3d(in_channels=8,
+        #                         out_channels=8,
+        #                         kernel_size=1,
+        #                         stride=1,
+        #                         padding=0),
+        #         )
+        # net += (Sigmoid(),)
+
+        self.net = Sequential(*net)
+
+    def forward(self, feature):
+        mapped = self.fc(feature)
+        x = mapped.view(-1, 64, 1, 1, 1)
+        return self.net(x)
+        # for layer in self.net:
+        #     x = layer(x)
+        #     print(x.shape)
+        # print("done")
+        # return x
+        

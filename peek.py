@@ -50,7 +50,8 @@ def save_four_parts_further_merged():
 def save_four_parts_further_merged_am():
     # this gives more shapes than save_four_parts because hier is further merged
     # data_pt = 'data/Chair_train_new_ids_to_objs_8_0_2000.json'
-    data_pt = 'data/Chair_train_new_ids_to_objs_16_0_4489.json'
+    # data_pt = 'data/Chair_train_new_ids_to_objs_16_0_4489.json'
+    data_pt = 'data/Lamp_train_new_ids_to_objs_17_0_1554.json'
     with open(data_pt, 'r') as f:
         data: Dict = json.load(f)
     all_ids = np.array(list(data.keys()))
@@ -60,7 +61,9 @@ def save_four_parts_further_merged_am():
     for id, parts in data.items():
         parts_lst = list(parts.keys())
         # if '3' in parts_lst and '4' in parts_lst and '12' in parts_lst and '15' in parts_lst:
-        if set(parts_lst) <= set(['0', '1', '4', '8']):
+        # if set(parts_lst) <= set(['0', '1', '4', '8']):
+        # if set(parts_lst) <= set(['8', '1', '2', '4', '5']):
+        if set(parts_lst) <= set(['1', '2', '4', '5']):
             indices.append(counter)
         counter += 1
 
@@ -68,7 +71,8 @@ def save_four_parts_further_merged_am():
     # print(indices)
     print(all_ids[indices])
     # np.save('data/chair_four_parts_8_0_2000.npy', indices)
-    np.save('data/chair_am_four_parts_16_0_4489.npy', indices)
+    # np.save('data/chair_am_four_parts_16_0_4489.npy', indices)
+    np.save('data/lamp_am_five_parts_17_0_1554.npy', indices)
 
 
 def save_four_parts_further_merged_14():

@@ -9,20 +9,13 @@ import argparse
 import numpy as np
 from tqdm import tqdm
 from torch.utils.tensorboard import SummaryWriter
-# from occ_networks.basic_decoder_nasa import SDFDecoder, get_embedder
-from occ_networks.xform_decoder_nasa_obbgnn_ae_96 import SDFDecoder, get_embedder
-from utils import misc, reconstruct, tree
-# from utils import visualize
+from occ_networks.xform_decoder_nasa_obbgnn_ae_58 import SDFDecoder, get_embedder
+from utils import misc, visualize, reconstruct, tree
 from data_prep import preprocess_data_17
-from typing import Dict, List
+from typing import Dict
 from anytree.exporter import UniqueDotExporter
 from sklearn.decomposition import PCA
-from flexi.flexicubes import FlexiCubes
-# from flexi.util import *
-from flexi import render, loss, util
 
-
-# inherited checkpoint from local_66
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--id', type=str)
@@ -43,10 +36,8 @@ parser.add_argument('--inv', action="store_true")
 parser.add_argument('--part_indices', nargs='+')
 parser.add_argument('--samp', action="store_true")
 parser.add_argument('--sample_idx', '--si', type=int)
-parser.add_argument('--shape_complete', '--sc', action="store_true")
+parser.add_argument('--sc', action="store_true")
 parser.add_argument('--fixed_indices', nargs='+')
-parser.add_argument('--post_process', '--pp', action="store_true")  # with dmtet
-parser.add_argument('--post_process_fc', '--ppfc', action="store_true") # with flexicubes
 args = parser.parse_args()
 # assert args.train != args.test, "Must pass in either train or test"
 if args.test:
@@ -61,15 +52,14 @@ if args.of:
     assert args.of_idx != None
 
 device = 'cuda'
-# lr = 5e-3
-lr = 0.01
+lr = 5e-3
 laplacian_weight = 0.1
-iterations = 10001
+iterations = 3001
 save_every = 100
 multires = 2
 pt_sample_res = 64        # point_sampling
 
-expt_id = 96
+expt_id = 98
 
 OVERFIT = args.of
 overfit_idx = args.of_idx
@@ -79,8 +69,7 @@ if OVERFIT:
     batch_size = 1
 
 ds_start = 0
-# ds_end = 3272
-ds_end = 100
+ds_end = 950
 
 shapenet_dir = '/datasets/ShapeNetCore'
 partnet_dir = '/datasets/PartNet'
@@ -90,7 +79,7 @@ name_to_cat = {
     'Chair': '03001627',
     'Lamp': '03636649'
 }
-cat_name = 'Chair'
+cat_name = 'Lamp'
 cat_id = name_to_cat[cat_name]
 
 train_new_ids_to_objs_path = f'data/{cat_name}_train_new_ids_to_objs_17_{ds_start}_{ds_end}.json'
@@ -132,13 +121,14 @@ else:
     relations = train_data['relations']
 
 # {
-#     "chair_arm": 0,
-#     "chair_back": 1,
-#     "chair_seat": 2,
-#     "regular_leg_base": 3
+    # "lamp_base": 0,
+    # "lamp_body": 1,
+    # "lamp_unit": 2,
+    # "power_cord": 3,
 # }
 
-connectivity = [[0, 1], [0, 2], [1, 2], [2, 3]]
+# connectivity = [[0, 1], [0, 2], [1, 2], [2, 3]]
+connectivity = [[0, 1], [0, 2], [0, 3], [1, 2]]
 connectivity = torch.tensor(connectivity, dtype=torch.long).to(device)
 
 num_union_nodes = adj.shape[1]
@@ -150,8 +140,7 @@ for i in range(num_shapes):
         part_num_indices[i], all_indices[i])
     all_fg_part_indices.append(np.array(indices, dtype=object))
 
-# n_batches = num_shapes // batch_size
-n_batches = 1
+n_batches = num_shapes // batch_size
 # n_batches = 128
 
 if not OVERFIT:
@@ -196,22 +185,6 @@ if args.train:
         1 / math.sqrt(num_parts*each_part_feat),
     )
 
-fc_voxel_grid_res = 31
-train_res = [256, 256]
-fc = FlexiCubes(device)
-fc_voxel_grid_res = 31
-x_nx3, cube_fx8 = fc.construct_voxel_grid(fc_voxel_grid_res)
-x_nx3 = 2*x_nx3
-# x_nx3 = 2*x_nx3_orig # scale up the grid so that it's larger than the target object
-# x_nx3_orig = x_nx3_orig.unsqueeze(0).expand(batch_size, -1, -1)
-
-def my_load_mesh(model_idx):
-    anno_id = model_idx_to_anno_id[model_idx]
-    obj_dir = os.path.join(partnet_dir, anno_id, 'vox_models')
-    assert os.path.exists(obj_dir)
-    gt_mesh_path = os.path.join(obj_dir, f'{anno_id}.obj')
-    return util.load_mesh(gt_mesh_path, device)
-
 def load_batch(batch_idx, batch_size):
     start = batch_idx*batch_size
     end = start + batch_size
@@ -240,6 +213,8 @@ def loss_f(pred_values, gt_values):
 
 def loss_f_xform(pred_xforms, gt_xforms):
     xform_loss = mse(pred_xforms, gt_xforms)
+    # xform_loss = (gt_xforms - pred_xforms) ** 2
+    # xform_loss = torch.mean(torch.sum(xform_loss, dim=-1))
     return xform_loss
 
 
@@ -248,7 +223,6 @@ np.random.seed(319)
 
 embed_fn, _ = get_embedder(2)
 
-# model.pre_train_sphere(1000)
 
 def train_one_itr(it, b,
                   all_fg_part_indices, 
@@ -296,8 +270,11 @@ def train_one_itr(it, b,
                                             batch_adj,
                                             batch_mask,
                                             batch_vec)
-    learned_relations = learned_xforms[:, connectivity[:, 0], connectivity[:, 1], :]
+    # learned_relations = learned_xforms[:, connectivity[:, 0], connectivity[:, 1], :]
     learned_xforms = learned_xforms[:, [0, 1, 2, 3], [0, 1, 2, 3], :]
+    # print(learned_xforms.shape)
+    # exit(0)
+    # learned_xforms = learned_xforms[:, [0, 1, 2, 3, 4], [0, 1, 2, 3, 4], :]
 
     batch_geom = torch.einsum('ijk, ikm -> ijm',
                                batch_part_nodes.to(torch.float32),
@@ -313,86 +290,44 @@ def train_one_itr(it, b,
                   batch_embed.masked_fill(parts_mask==1, torch.tensor(0)))
     occs1 = occs1.masked_fill(occ_mask==1,torch.tensor(float('-inf')))
     pred_values1, _ = torch.max(occs1, dim=-1, keepdim=True)
-    # pred_values1, _ = torch.min(occs1, dim=-1, keepdim=True)
-    # pred_values1_occ = (pred_values1 < 0).int()
     loss1 = loss_f(pred_values1, modified_values)
-    # loss1 = loss_f(pred_values1_occ, modified_values)
 
     occs2 = model(transformed_points,
                   batch_embed)
     pred_values2, _ = torch.max(occs2, dim=-1, keepdim=True)
-    # pred_values2, _ = torch.min(occs2, dim=-1, keepdim=True)
-    # pred_values2_occ = (pred_values2 < 0).int()
     loss2 = loss_f(pred_values2, batch_occ)
-    # loss2 = loss_f(pred_values2_occ, batch_occ)
 
     loss = loss1 + loss2
 
     loss_bbox_geom = loss_f(
         embed_fn(learned_geom.view(-1, 3)),
         embed_fn(batch_geom.view(-1, 3)),)
+    # loss_bbox_geom = loss_f(
+    #     learned_geom.view(-1, 3),
+    #     batch_geom.view(-1, 3))
     loss += loss_bbox_geom
 
     loss_xform = loss_f_xform(
         embed_fn(learned_xforms.view(-1, 3)),
         embed_fn(batch_xforms.view(-1, 3)))
+    # loss_xform = loss_f_xform(
+    #     learned_xforms.view(-1, 3),
+    #     batch_xforms.view(-1, 3))
     loss_relations = loss_f_xform(
         embed_fn(learned_relations.view(-1, 3)),
         embed_fn(batch_relations.view(-1, 3)))
+    # loss_relations = loss_f_xform(
+    #     learned_relations.view(-1, 3),
+    #     batch_relations.view(-1, 3))
     
     loss += 10 * loss_xform + 10 * loss_relations
-
-    flexi_out = model.get_sdf_deform(batch_points, batch_embed)
-
-    pred_sdf = -2*pred_values2 + 1 + flexi_out[:, :, :1]
-    # pred_sdf = flexi_out[:, :, :1]
-    deform = flexi_out[:, :, 1:]
-
-    sdf_loss = loss_f(pred_sdf, batch_values)
-    
-    if it >= 1000:
-        mesh_loss = 0
-        for ele in range(batch_size):
-            gt_mesh = my_load_mesh(batch_size*b + ele)
-            mv, mvp = render.get_random_camera_batch(
-                8, iter_res=train_res, device=device, use_kaolin=False)
-            target = render.render_mesh_paper(gt_mesh, mv, mvp, train_res)
-
-            grid_verts = x_nx3 + (2-1e-8) / (fc_voxel_grid_res * 2) * torch.tanh(
-                deform[ele])
-            mod_sdf = torch.squeeze(pred_sdf[ele])
-            vertices, faces, L_dev = fc(
-                grid_verts, mod_sdf,
-                cube_fx8, fc_voxel_grid_res, training=True)
-
-            flexicubes_mesh = util.Mesh(vertices, faces)
-
-            try: 
-                buffers = render.render_mesh_paper(flexicubes_mesh, mv, mvp, train_res)
-            except Exception as e:
-                import logging, traceback
-                logging.error(traceback.format_exc())
-                print(torch.min(pred_sdf[ele]))
-                print(torch.max(pred_sdf[ele]))
-
-            mask_loss = (buffers['mask'] - target['mask']).abs().mean()
-            depth_loss = (((((buffers['depth'] - (target['depth']))* target['mask'])**2).sum(-1)+1e-8)).sqrt().mean() * 10
-
-            mesh_loss += mask_loss + depth_loss
-        mesh_loss /= batch_size
-
-        loss += 0.1 * mesh_loss + sdf_loss
-    else:
-        loss += sdf_loss
+    # loss += loss_xform + loss_relations
 
     if b == n_batches - 1:
         writer.add_scalar('occ loss', loss1 + loss2, it)
         writer.add_scalar('bbox geom loss', loss_bbox_geom, it)
         writer.add_scalar('xform loss', loss_xform, it)
         writer.add_scalar('relations loss', loss_relations, it)
-        writer.add_scalar('sdf loss', sdf_loss, it)
-        if it >= 1000:
-            writer.add_scalar('mesh loss', mesh_loss, it)
 
     loss.backward()
     optimizer.step()
@@ -454,8 +389,6 @@ def compute_iou(voxel_grid1, voxel_grid2):
 
 
 if args.test:
-    from utils import visualize
-
     white_bg = True
     it = args.it
     if not OVERFIT:
@@ -510,33 +443,21 @@ if args.test:
     mesh_gt_path = os.path.join(results_dir, 'mesh_gt.png')
     learned_obbs_path = os.path.join(results_dir, 'obbs_pred.png')
     obbs_path = os.path.join(results_dir, 'obbs_gt.png')
-    flexi_path = os.path.join(results_dir, 'mesh_flexi.png')
     lst_paths = [
         obbs_path,
         mesh_gt_path,
         learned_obbs_path,
-        mesh_pred_path,
-        flexi_path]
+        mesh_pred_path]
 
-    # query_points = reconstruct.make_query_points(pt_sample_res)
-    # query_points = torch.from_numpy(query_points).to(device, torch.float32)
-    # query_points = query_points.unsqueeze(0)
-    x_nx3, cube_fx8 = fc.construct_voxel_grid(31)
-    query_points = x_nx3.unsqueeze(0) * 1.1
+    query_points = reconstruct.make_query_points(pt_sample_res)
+    query_points = torch.from_numpy(query_points).to(device, torch.float32)
+    query_points = query_points.unsqueeze(0)
     bs, num_points, _ = query_points.shape
 
     if not OVERFIT:
         batch_node_feat = torch.from_numpy(node_features[model_idx:model_idx+1, :, :3]).to(device, torch.float32)
         batch_adj = torch.from_numpy(adj[model_idx:model_idx+1]).to(device, torch.float32)
         batch_part_nodes = torch.from_numpy(part_nodes[model_idx:model_idx+1]).to(device, torch.float32)
-    else:
-        batch_node_feat = torch.from_numpy(node_features[:, :, :3]).to(device, torch.float32)
-        batch_adj = torch.from_numpy(adj).to(device, torch.float32)
-        batch_part_nodes = torch.from_numpy(part_nodes).to(device, torch.float32)
-
-    # print(batch_node_feat.shape)
-    # print(batch_adj.shape)
-    # print(batch_part_nodes.shape)
 
     with torch.no_grad():
         if args.mask:
@@ -576,8 +497,9 @@ if args.test:
                                                     batch_adj,
                                                     batch_mask,
                                                     batch_vec)
-        learned_relations = learned_xforms[:, connectivity[:, 0], connectivity[:, 1], :]
+        # learned_relations = learned_xforms[:, connectivity[:, 0], connectivity[:, 1], :]
         learned_xforms = learned_xforms[:, [0, 1, 2, 3], [0, 1, 2, 3], :]
+        # learned_xforms = learned_xforms[:, [0, 1, 2, 3, 4], [0, 1, 2, 3, 4], :]
 
         batch_geom = torch.einsum('ijk, ikm -> ijm',
                                 batch_part_nodes.to(torch.float32),
@@ -610,35 +532,10 @@ if args.test:
     else:
         mag = 0.8
 
-    # np.save(os.path.join(results_dir, f'{anno_id}_occ.npy'),
-    #         torch.squeeze(pred_values).detach().cpu().numpy())
-
-    flexi_out = model.get_sdf_deform(query_points, batch_embed)
-    pred_sdf = -2*pred_values + 1 + flexi_out[:, :, :1]
-
-    # np.save(os.path.join(results_dir, f'{anno_id}_sdf.npy'),
-    #         torch.squeeze(pred_sdf).detach().cpu().numpy())
-    
-    deform = flexi_out[:, :, 1:]
-    grid_verts = x_nx3 + (2-1e-8) / (fc_voxel_grid_res * 2) * torch.tanh(
-        deform[0])
-    mod_sdf = torch.squeeze(pred_sdf[0])
-    vertices, faces, L_dev = fc(
-        grid_verts, mod_sdf,
-        cube_fx8, fc_voxel_grid_res, training=True)
-    # flexicubes_mesh = util.Mesh(vertices, faces)
-    flexi_mesh = trimesh.Trimesh(vertices = vertices.detach().cpu().numpy(), faces=faces.detach().cpu().numpy(), process=False)
-    flexi_mesh.export(os.path.join(results_dir, 'mesh_flexi.obj'))
-    visualize.save_mesh_vis(flexi_mesh, flexi_path,
-                            mag=mag, white_bg=white_bg)
-
-    pt_sample_res = 32
-
     sdf_grid = torch.reshape(
         pred_values,
         (1, pt_sample_res, pt_sample_res, pt_sample_res))
-    # sdf_grid = torch.permute(sdf_grid, (0, 2, 1, 3))
-    sdf_grid = torch.permute(sdf_grid, (0, 3, 1, 2))
+    sdf_grid = torch.permute(sdf_grid, (0, 2, 1, 3))
     vertices, faces =\
         kaolin.ops.conversions.voxelgrids_to_trianglemeshes(sdf_grid)
     vertices = kaolin.ops.pointcloud.center_points(
@@ -691,8 +588,12 @@ if args.test:
 
         if args.recon_one_part:
             # only show stuff in masked_indices
-            concat_mesh = trimesh.util.concatenate(
-                [lst_of_part_meshes[x] for x in parts])
+            try: 
+                concat_mesh = trimesh.util.concatenate(
+                    [lst_of_part_meshes[x] for x in parts])
+            except AttributeError as e:
+                print(f"This shape doesn't have parts {parts} -", e)
+                exit(0)
         if args.recon_the_rest:
             # don't show stuff in masked_indices
             concat_mesh = trimesh.util.concatenate(
@@ -759,8 +660,6 @@ def build_adj_matrix(col, adj_to_build, adj_to_look_up):
 
 
 if args.asb:
-    from utils import visualize
-
     # assembly shape from coarse parts
     it = args.it
 
@@ -1077,8 +976,6 @@ if args.asb:
 
 
 if args.inv and not args.sc and not args.asb_scaling:
-    from utils import visualize
-
     white_bg = True
     it = args.it
     model_idx = args.test_idx
@@ -1388,8 +1285,6 @@ if args.inv and not args.sc and not args.asb_scaling:
 
 
 if args.samp:
-    from utils import visualize
-
     white_bg = True
     it = args.it
     model_idx = args.test_idx
@@ -1595,10 +1490,9 @@ if args.samp:
     exit(0)
 
 
-if args.shape_complete:
+if args.sc:
     from sklearn.mixture import GaussianMixture
     from sklearn.neighbors import NearestNeighbors
-    from utils import visualize
 
     white_bg = True
     it = args.it
@@ -1850,8 +1744,6 @@ if args.shape_complete:
 
 
 if args.asb_scaling:
-    from utils import visualize
-
     # assembly shape from coarse parts
     it = args.it
 
@@ -2152,692 +2044,3 @@ if args.asb_scaling:
             adj=100)
         
     exit(0)
-
-
-if args.post_process:
-    from utils import visualize
-
-    white_bg = True
-    it = args.it
-    if not OVERFIT:
-        model_idx = args.test_idx
-    else:
-        model_idx = overfit_idx
-    if not OVERFIT:
-        anno_id = model_idx_to_anno_id[model_idx]
-    else:
-        anno_id = model_idx_to_anno_id[model_idx]
-    model_id = misc.anno_id_to_model_id(partnet_index_path)[anno_id]
-    print(f"anno id: {anno_id}, model id: {model_id}")
-
-    checkpoint = torch.load(os.path.join(ckpt_dir, f'model_{it}.pt'))
-    model.load_state_dict(checkpoint['model_state_dict'])
-    embeddings = torch.nn.Embedding(num_shapes, num_parts*each_part_feat).to(device)
-    embeddings.load_state_dict(checkpoint['embeddings_state_dict'])
-    optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-
-    results_dir = os.path.join(results_dir, anno_id)
-    misc.check_dir(results_dir)
-
-    if not OVERFIT:
-        # part_nodes = part_nodes[model_idx].unsqueeze(0)
-        batch_embed = embeddings(torch.tensor(model_idx).to(device)).unsqueeze(0).detach()
-    else:
-        batch_embed = embeddings(torch.tensor(0).to(device)).unsqueeze(0).detach()
-
-    unique_part_names, name_to_ori_ids_and_objs,\
-        orig_obbs, entire_mesh, name_to_obbs, _, _, _ =\
-        preprocess_data_17.merge_partnet_after_merging(anno_id)
-
-    with open(f'data/{cat_name}_part_name_to_new_id_17_{ds_start}_{ds_end}.json', 'r') as f:
-        unique_name_to_new_id = json.load(f)
-
-    gt_color = [31, 119, 180, 255]
-    mesh_pred_path = os.path.join(results_dir, 'mesh_pred.png')
-    mesh_gt_path = os.path.join(results_dir, 'mesh_gt.png')
-    learned_obbs_path = os.path.join(results_dir, 'obbs_pred.png')
-    obbs_path = os.path.join(results_dir, 'obbs_gt.png')
-    lst_paths = [
-        obbs_path,
-        mesh_gt_path,
-        learned_obbs_path,
-        mesh_pred_path]
-
-    recon_res = 32
-    query_points = reconstruct.make_query_points(recon_res)
-    query_points = torch.from_numpy(query_points).to(device, torch.float32)
-    query_points = query_points.unsqueeze(0)
-    bs, num_points, _ = query_points.shape
-
-    if not OVERFIT:
-        batch_node_feat = torch.from_numpy(node_features[model_idx:model_idx+1, :, :3]).to(device, torch.float32)
-        batch_adj = torch.from_numpy(adj[model_idx:model_idx+1]).to(device, torch.float32)
-        batch_part_nodes = torch.from_numpy(part_nodes[model_idx:model_idx+1]).to(device, torch.float32)
-
-    with torch.no_grad():
-        if args.mask:
-            # parts = [args.part]
-            parts = args.parts
-            parts = [int(x) for x in parts]
-            if args.recon_one_part:
-                # only reconstruct part specified by parts
-                masked_indices = list(set(range(num_parts)) - set(parts))
-                masked_indices = torch.Tensor(masked_indices).to(device, torch.long)
-            if args.recon_the_rest:
-                # don't reconstruct stuff in masked_indices
-                masked_indices = torch.Tensor(parts).to(device, torch.long)
-        else:
-            masked_indices = torch.Tensor([]).to(device, torch.long)
-
-        if not args.mask:
-            print("reconstructing...")
-        else:
-            print(f"masking parts: {masked_indices.cpu().numpy().tolist()}")
-
-        parts_mask = torch.zeros((batch_embed.shape[0], num_parts)).to(device, torch.float32)
-        parts_mask[:, masked_indices] = 1
-        parts_mask = torch.repeat_interleave(parts_mask, each_part_feat, dim=-1)
-        
-        points_mask = torch.zeros((1, num_parts, 1, 1)).to(device, torch.float32)
-        points_mask[:, masked_indices] = 1
-
-        occ_mask = torch.zeros((1, 1, num_parts)).to(device, torch.float32)
-        occ_mask[:, :, masked_indices] = 1
-
-        # learning xforms
-        batch_vec = torch.arange(start=0, end=1).to(device)
-        batch_vec = torch.repeat_interleave(batch_vec, num_union_nodes)
-        batch_mask = torch.sum(batch_part_nodes, dim=1)
-        learned_geom, learned_xforms = model.learn_geom_xform(batch_node_feat,
-                                                    batch_adj,
-                                                    batch_mask,
-                                                    batch_vec)
-        learned_relations = learned_xforms[:, connectivity[:, 0], connectivity[:, 1], :]
-        learned_xforms = learned_xforms[:, [0, 1, 2, 3], [0, 1, 2, 3], :]
-
-        batch_geom = torch.einsum('ijk, ikm -> ijm',
-                                batch_part_nodes.to(torch.float32),
-                                batch_node_feat)
-
-        pairwise_xforms = learned_xforms[:, connectivity]
-        learned_relations = pairwise_xforms[:, :, 1] - pairwise_xforms[:, :, 0]
-
-        transformed_points = query_points.unsqueeze(1).expand(-1, num_parts, -1, -1) +\
-            learned_xforms.unsqueeze(2)
-
-        occs1 = model(transformed_points.masked_fill(points_mask==1,torch.tensor(0)),
-                      batch_embed.masked_fill(parts_mask==1, torch.tensor(0)))
-        occs1 = occs1.masked_fill(occ_mask==1,torch.tensor(float('-inf')))
-        pred_values, _ = torch.max(occs1, dim=-1, keepdim=True)
-    
-    if args.mask:
-        mag = 1
-    else:
-        mag = 0.8
-
-    sdf_grid = torch.reshape(
-        pred_values,
-        (1, recon_res, recon_res, recon_res))
-    sdf_grid = torch.permute(sdf_grid, (0, 2, 1, 3))
-    vertices, faces =\
-        kaolin.ops.conversions.voxelgrids_to_trianglemeshes(sdf_grid)
-    vertices = kaolin.ops.pointcloud.center_points(
-        vertices[0].unsqueeze(0), normalize=True).squeeze(0)
-    pred_vertices = vertices.cpu().numpy()
-    pred_faces = faces[0].cpu().numpy()
-    pred_mesh = trimesh.Trimesh(pred_vertices, pred_faces)
-    pred_mesh.export(os.path.join(results_dir, 'mesh_pred.obj'))
-    visualize.save_mesh_vis(pred_mesh, mesh_pred_path,
-                            mag=mag, white_bg=white_bg)
-
-    obj_dir = os.path.join(partnet_dir, anno_id, 'vox_models')
-    assert os.path.exists(obj_dir)
-    gt_mesh_path = os.path.join(obj_dir, f'{anno_id}.obj')
-    gt_mesh = trimesh.load(gt_mesh_path, file_type='obj', force='mesh')
-    gt_vertices_aligned = torch.from_numpy(
-        gt_mesh.vertices).to(device).to(torch.float32)
-    gt_vertices_aligned = kaolin.ops.pointcloud.center_points(
-        gt_vertices_aligned.unsqueeze(0), normalize=True).squeeze(0)
-    gt_vertices_aligned = gt_vertices_aligned.cpu().numpy()
-    aligned_gt_mesh = trimesh.Trimesh(gt_vertices_aligned, gt_mesh.faces)
-    aligned_gt_mesh.export(os.path.join(results_dir, 'mesh_gt.obj'))
-    aligned_gt_mesh.visual.vertex_colors = [31, 119, 180]
-    visualize.save_mesh_vis(aligned_gt_mesh, mesh_gt_path,
-                            mag=mag, white_bg=white_bg)
-    
-    timelapse = kaolin.visualize.Timelapse(os.path.join(results_dir, 'timelapse'))
-    timelapse.add_mesh_batch(category='gt_mesh',
-                             vertices_list=[torch.from_numpy(aligned_gt_mesh.vertices)],
-                             faces_list=[torch.from_numpy(aligned_gt_mesh.faces)])
-    
-    timelapse.add_mesh_batch(category='pred_coarse_mesh',
-                             vertices_list=[torch.from_numpy(pred_mesh.vertices)],
-                             faces_list=[torch.from_numpy(pred_mesh.faces)])
-    
-    pcd, _ = trimesh.sample.sample_surface(aligned_gt_mesh, 10000, seed=319)
-    pcd = torch.from_numpy(pcd).to(device, torch.float32)
-    # pcd = kaolin.ops.pointcloud.center_points(pcd.unsqueeze(0), normalize=True).squeeze(0) * 0.9
-    # timelapse.add_pointcloud_batch(category='input',
-    #                                pointcloud_list=[pcd.cpu()], points_type = "usd_geom_points")
-    
-    # load tets
-    grid_res = 128
-    tet_verts = torch.tensor(
-        np.load('samples/{}_verts.npz'.format(grid_res))['data'],
-        dtype=torch.float, device=device)
-    tets = torch.tensor(
-        ([np.load('samples/{}_tets_{}.npz'.format(grid_res, i))['data'] for i in range(4)]),
-        dtype=torch.long, device=device).permute(1,0)
-    
-    from dmtet_networks import dmtet_utils, dmtet_network
-
-    dmtet_model = dmtet_network.Decoder(multires=multires).to(device)
-    # dmtet_model = dmtet_network.Decoder(input_dims=3+each_part_feat*4,
-    #                                     multires=multires).to(device)
-    sdf = - 2 * pred_values + 1
-    # sdf = 1 - pred_values
-    # sdf /= torch.sum(sdf)
-    dmtet_model.pre_train_sphere(10000)
-    # dmtet_model.pre_train_chair(10000,
-    #                             query_points.squeeze(0),
-    #                             sdf.squeeze(0).squeeze(-1))
-    # dmtet_model.pre_train_sphere_feat(10000, batch_embed)
-    # dmtet_model.pre_train_chair_feat(10000,
-    #                                  query_points.squeeze(0),
-    #                                  sdf.squeeze(0).squeeze(-1),
-    #                                  batch_embed)
-
-    vars = [p for _, p in dmtet_model.named_parameters()]
-    lr = 5e-5
-    optimizer = torch.optim.Adam(vars, lr=lr)
-    scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda x: max(0.0, 10**(-x*0.0002))) # LR decay over time
-
-    iterations = 10000
-    for it in range(iterations):
-        pred = dmtet_model(tet_verts) # predict SDF and per-vertex deformation
-        # pred = dmtet_model.forward_feat(tet_verts, batch_embed) # predict SDF and per-vertex deformation
-        sdf, deform = pred[:,0], pred[:,1:]
-        verts_deformed = tet_verts + torch.tanh(deform) / grid_res # constraint deformation to avoid flipping tets
-        mesh_verts, mesh_faces = kaolin.ops.conversions.marching_tetrahedra(
-            verts_deformed.unsqueeze(0), tets, sdf.unsqueeze(0)) # running MT (batched) to extract surface mesh
-        mesh_verts, mesh_faces = mesh_verts[0], mesh_faces[0]
-
-        loss = dmtet_utils.loss_f(iterations, mesh_verts, mesh_faces, pcd, it)
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
-        scheduler.step()
-        if (it) % 100 == 0 or it == (iterations - 1): 
-            print ('Iteration {} - loss: {:.5f}, # of mesh vertices: {}, # of mesh faces: {}'.format(it, loss, mesh_verts.shape[0], mesh_faces.shape[0]))
-            # save reconstructed mesh
-            timelapse.add_mesh_batch(
-                iteration=it+1,
-                category='extracted_mesh',
-                vertices_list=[mesh_verts.cpu()],
-                faces_list=[mesh_faces.cpu()]
-            )
-
-    exit(0)
-
-
-if args.post_process_fc:
-    white_bg = True
-    it = args.it
-    if not OVERFIT:
-        model_idx = args.test_idx
-    else:
-        model_idx = overfit_idx
-    if not OVERFIT:
-        anno_id = model_idx_to_anno_id[model_idx]
-    else:
-        anno_id = model_idx_to_anno_id[model_idx]
-    model_id = misc.anno_id_to_model_id(partnet_index_path)[anno_id]
-    print(f"anno id: {anno_id}, model id: {model_id}")
-
-    checkpoint = torch.load(os.path.join(ckpt_dir, f'model_{it}.pt'))
-    model.load_state_dict(checkpoint['model_state_dict'])
-    embeddings = torch.nn.Embedding(num_shapes, num_parts*each_part_feat).to(device)
-    embeddings.load_state_dict(checkpoint['embeddings_state_dict'])
-    # optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-
-    results_dir = os.path.join(results_dir, anno_id)
-    misc.check_dir(results_dir)
-
-    if not OVERFIT:
-        # part_nodes = part_nodes[model_idx].unsqueeze(0)
-        batch_embed = embeddings(torch.tensor(model_idx).to(device)).unsqueeze(0).detach()
-    else:
-        batch_embed = embeddings(torch.tensor(0).to(device)).unsqueeze(0).detach()
-
-    unique_part_names, name_to_ori_ids_and_objs,\
-        orig_obbs, entire_mesh, name_to_obbs, _, _, _ =\
-        preprocess_data_17.merge_partnet_after_merging(anno_id)
-
-    with open(f'data/{cat_name}_part_name_to_new_id_17_{ds_start}_{ds_end}.json', 'r') as f:
-        unique_name_to_new_id = json.load(f)
-
-    gt_color = [31, 119, 180, 255]
-    mesh_pred_path = os.path.join(results_dir, 'mesh_pred.png')
-    mesh_gt_path = os.path.join(results_dir, 'mesh_gt.png')
-    learned_obbs_path = os.path.join(results_dir, 'obbs_pred.png')
-    obbs_path = os.path.join(results_dir, 'obbs_gt.png')
-    lst_paths = [
-        obbs_path,
-        mesh_gt_path,
-        learned_obbs_path,
-        mesh_pred_path]
-
-    recon_res = 32
-    query_points = reconstruct.make_query_points(recon_res)
-    query_points = torch.from_numpy(query_points).to(device, torch.float32)
-    query_points = query_points.unsqueeze(0)
-    bs, num_points, _ = query_points.shape
-
-    if not OVERFIT:
-        batch_node_feat = torch.from_numpy(node_features[model_idx:model_idx+1, :, :3]).to(device, torch.float32)
-        batch_adj = torch.from_numpy(adj[model_idx:model_idx+1]).to(device, torch.float32)
-        batch_part_nodes = torch.from_numpy(part_nodes[model_idx:model_idx+1]).to(device, torch.float32)
-
-    with torch.no_grad():
-        if args.mask:
-            # parts = [args.part]
-            parts = args.parts
-            parts = [int(x) for x in parts]
-            if args.recon_one_part:
-                # only reconstruct part specified by parts
-                masked_indices = list(set(range(num_parts)) - set(parts))
-                masked_indices = torch.Tensor(masked_indices).to(device, torch.long)
-            if args.recon_the_rest:
-                # don't reconstruct stuff in masked_indices
-                masked_indices = torch.Tensor(parts).to(device, torch.long)
-        else:
-            masked_indices = torch.Tensor([]).to(device, torch.long)
-
-        if not args.mask:
-            print("reconstructing...")
-        else:
-            print(f"masking parts: {masked_indices.cpu().numpy().tolist()}")
-
-        parts_mask = torch.zeros((batch_embed.shape[0], num_parts)).to(device, torch.float32)
-        parts_mask[:, masked_indices] = 1
-        parts_mask = torch.repeat_interleave(parts_mask, each_part_feat, dim=-1)
-        
-        points_mask = torch.zeros((1, num_parts, 1, 1)).to(device, torch.float32)
-        points_mask[:, masked_indices] = 1
-
-        occ_mask = torch.zeros((1, 1, num_parts)).to(device, torch.float32)
-        occ_mask[:, :, masked_indices] = 1
-
-        # learning xforms
-        batch_vec = torch.arange(start=0, end=1).to(device)
-        batch_vec = torch.repeat_interleave(batch_vec, num_union_nodes)
-        batch_mask = torch.sum(batch_part_nodes, dim=1)
-        learned_geom, learned_xforms = model.learn_geom_xform(batch_node_feat,
-                                                    batch_adj,
-                                                    batch_mask,
-                                                    batch_vec)
-        learned_relations = learned_xforms[:, connectivity[:, 0], connectivity[:, 1], :]
-        learned_xforms = learned_xforms[:, [0, 1, 2, 3], [0, 1, 2, 3], :]
-
-        batch_geom = torch.einsum('ijk, ikm -> ijm',
-                                batch_part_nodes.to(torch.float32),
-                                batch_node_feat)
-
-        pairwise_xforms = learned_xforms[:, connectivity]
-        learned_relations = pairwise_xforms[:, :, 1] - pairwise_xforms[:, :, 0]
-
-        transformed_points = query_points.unsqueeze(1).expand(-1, num_parts, -1, -1) +\
-            learned_xforms.unsqueeze(2)
-
-        occs1 = model(transformed_points.masked_fill(points_mask==1,torch.tensor(0)),
-                      batch_embed.masked_fill(parts_mask==1, torch.tensor(0)))
-        occs1 = occs1.masked_fill(occ_mask==1,torch.tensor(float('-inf')))
-        pred_values, _ = torch.max(occs1, dim=-1, keepdim=True)
-    
-    if args.mask:
-        mag = 1
-    else:
-        mag = 0.8
-
-    sdf_grid = torch.reshape(
-        pred_values,
-        (1, recon_res, recon_res, recon_res))
-    sdf_grid = torch.permute(sdf_grid, (0, 2, 1, 3))
-    vertices, faces =\
-        kaolin.ops.conversions.voxelgrids_to_trianglemeshes(sdf_grid)
-    vertices = kaolin.ops.pointcloud.center_points(
-        vertices[0].unsqueeze(0), normalize=True).squeeze(0)
-    pred_vertices = vertices.cpu().numpy()
-    pred_faces = faces[0].cpu().numpy()
-    pred_mesh = trimesh.Trimesh(pred_vertices, pred_faces)
-    pred_mesh.export(os.path.join(results_dir, 'mesh_pred.obj'))
-    # visualize.save_mesh_vis(pred_mesh, mesh_pred_path,
-    #                         mag=mag, white_bg=white_bg)
-
-    obj_dir = os.path.join(partnet_dir, anno_id, 'vox_models')
-    assert os.path.exists(obj_dir)
-    gt_mesh_path = os.path.join(obj_dir, f'{anno_id}.obj')
-    gt_mesh = trimesh.load(gt_mesh_path, file_type='obj', force='mesh')
-    gt_vertices_aligned = torch.from_numpy(
-        gt_mesh.vertices).to(device).to(torch.float32)
-    gt_vertices_aligned = kaolin.ops.pointcloud.center_points(
-        gt_vertices_aligned.unsqueeze(0), normalize=True).squeeze(0)
-    gt_vertices_aligned = gt_vertices_aligned.cpu().numpy()
-    aligned_gt_mesh = trimesh.Trimesh(gt_vertices_aligned, gt_mesh.faces)
-    aligned_gt_mesh_path = os.path.join(results_dir, 'mesh_gt.obj')
-    aligned_gt_mesh.export(aligned_gt_mesh_path)
-    aligned_gt_mesh.visual.vertex_colors = [31, 119, 180]
-    # visualize.save_mesh_vis(aligned_gt_mesh, mesh_gt_path,
-    #                         mag=mag, white_bg=white_bg)
-    
-    timelapse = kaolin.visualize.Timelapse(os.path.join(results_dir, 'timelapse_flexi'))
-    timelapse.add_mesh_batch(category='gt_mesh',
-                             vertices_list=[torch.from_numpy(aligned_gt_mesh.vertices)],
-                             faces_list=[torch.from_numpy(aligned_gt_mesh.faces)])
-    
-    timelapse.add_mesh_batch(category='pred_coarse_mesh',
-                             vertices_list=[torch.from_numpy(pred_mesh.vertices)],
-                             faces_list=[torch.from_numpy(pred_mesh.faces)])
-    
-    # pcd, _ = trimesh.sample.sample_surface(aligned_gt_mesh, 10000, seed=319)
-    # pcd = torch.from_numpy(pcd).to(device, torch.float32)
-
-    from flexi.flexicubes import FlexiCubes
-    from flexi.util import *
-    from flexi import render, loss
-    import imageio
-
-    glctx = dr.RasterizeGLContext()
-    gt_mesh = load_mesh(aligned_gt_mesh_path, device)
-    gt_mesh.auto_normals()
-
-    voxel_grid_res = 31
-
-    fc = FlexiCubes(device)
-    x_nx3_orig, cube_fx8 = fc.construct_voxel_grid(voxel_grid_res)
-    x_nx3 = 2*x_nx3_orig # scale up the grid so that it's larger than the target object
-    # x_nx3 = x_nx3_orig
-
-    with torch.no_grad():
-        if args.mask:
-            # parts = [args.part]
-            parts = args.parts
-            parts = [int(x) for x in parts]
-            if args.recon_one_part:
-                # only reconstruct part specified by parts
-                masked_indices = list(set(range(num_parts)) - set(parts))
-                masked_indices = torch.Tensor(masked_indices).to(device, torch.long)
-            if args.recon_the_rest:
-                # don't reconstruct stuff in masked_indices
-                masked_indices = torch.Tensor(parts).to(device, torch.long)
-        else:
-            masked_indices = torch.Tensor([]).to(device, torch.long)
-
-        if not args.mask:
-            print("reconstructing...")
-        else:
-            print(f"masking parts: {masked_indices.cpu().numpy().tolist()}")
-
-        parts_mask = torch.zeros((batch_embed.shape[0], num_parts)).to(device, torch.float32)
-        parts_mask[:, masked_indices] = 1
-        parts_mask = torch.repeat_interleave(parts_mask, each_part_feat, dim=-1)
-        
-        points_mask = torch.zeros((1, num_parts, 1, 1)).to(device, torch.float32)
-        points_mask[:, masked_indices] = 1
-
-        occ_mask = torch.zeros((1, 1, num_parts)).to(device, torch.float32)
-        occ_mask[:, :, masked_indices] = 1
-
-        # learning xforms
-        batch_vec = torch.arange(start=0, end=1).to(device)
-        batch_vec = torch.repeat_interleave(batch_vec, num_union_nodes)
-        batch_mask = torch.sum(batch_part_nodes, dim=1)
-        learned_geom, learned_xforms = model.learn_geom_xform(batch_node_feat,
-                                                    batch_adj,
-                                                    batch_mask,
-                                                    batch_vec)
-        learned_relations = learned_xforms[:, connectivity[:, 0], connectivity[:, 1], :]
-        learned_xforms = learned_xforms[:, [0, 1, 2, 3], [0, 1, 2, 3], :]
-
-        batch_geom = torch.einsum('ijk, ikm -> ijm',
-                                batch_part_nodes.to(torch.float32),
-                                batch_node_feat)
-
-        pairwise_xforms = learned_xforms[:, connectivity]
-        learned_relations = pairwise_xforms[:, :, 1] - pairwise_xforms[:, :, 0]
-
-        transformed_points = x_nx3_orig.unsqueeze(0).unsqueeze(1).expand(-1, num_parts, -1, -1) +\
-            learned_xforms.unsqueeze(2)
-
-        occs1 = model(transformed_points.masked_fill(points_mask==1,torch.tensor(0)),
-                      batch_embed.masked_fill(parts_mask==1, torch.tensor(0)))
-        occs1 = occs1.masked_fill(occ_mask==1,torch.tensor(float('-inf')))
-        pred_values, _ = torch.max(occs1, dim=-1, keepdim=True)
-    
-    # sdf = torch.rand_like(x_nx3[:,0]) - 0.1 # randomly init SDF
-    
-    sdf = - 2 * pred_values + 1
-    sdf = torch.squeeze(sdf)
-
-    orig_sdf = sdf.clone().detach()
-    # orig_sdf.clone().detach()
-
-    # sdf    = torch.nn.Parameter(sdf.clone().detach(), requires_grad=True)
-    # sdf    = sdf.clone().detach()
-
-    # set per-cube learnable weights to zeros
-    weight = torch.zeros((cube_fx8.shape[0], 21), dtype=torch.float, device='cuda') 
-    weight    = torch.nn.Parameter(weight.clone().detach(), requires_grad=True)
-    deform = torch.nn.Parameter(torch.zeros_like(x_nx3), requires_grad=True)
-    # deform = torch.zeros_like(x_nx3)
-    
-    class PPNet(torch.nn.Module):
-        def __init__(self, feature_dims=32*4, output_dims=3, hidden=0,
-                     internal_dims=64):
-            super().__init__()
-            # internal_dims = 64
-            use_bias = True
-
-            net = (torch.nn.Linear(feature_dims, internal_dims, bias=use_bias),
-                   torch.nn.ReLU())
-            for i in range(hidden-1):
-                net = net + (
-                    torch.nn.Linear(internal_dims, internal_dims, bias=use_bias),
-                    torch.nn.ReLU())
-            net = net + (torch.nn.Linear(internal_dims, output_dims, bias=False),)
-            self.net = torch.nn.Sequential(*net)
-
-        def forward(self, feature, final_layer=False):
-            x = self.net(feature)
-            if final_layer:
-                x = torch.nn.Tanh()(x)
-            return x
-    
-    batch_embed_sdf_deform = batch_embed.expand(x_nx3.shape[0], -1)
-    batch_embed_weight = batch_embed.expand(cube_fx8.shape[0], -1)
-
-    sdf_model = PPNet(3 + num_parts*each_part_feat, output_dims=1, hidden=5,
-                      internal_dims=128).to(device)
-    sdf_params = [p for _, p in sdf_model.named_parameters()]
-
-    sdf_embed = torch.nn.Embedding(1,
-                                   num_parts*each_part_feat).to(device)
-    torch.nn.init.normal_(
-        sdf_embed.weight.data,
-        0.0,
-        1 / math.sqrt(num_parts*each_part_feat),
-    )
-    batch_sdf_embed = sdf_embed.weight.data.expand(x_nx3.shape[0], -1)
-
-    # sdf_in = torch.concat([x_nx3_orig,
-    #                       batch_embed_sdf_deform], dim=-1)
-    sdf_in = torch.concat([x_nx3_orig,
-                           batch_sdf_embed], dim=-1)
-
-    # # pretrain SDF model
-    # # pred_values = torch.squeeze(pred_values)
-    # pre_t_optimizer = torch.optim.Adam(
-    #     list(sdf_model.parameters()) + list(sdf_embed.parameters()), lr=1e-4)
-    # pre_t_loss_fn = torch.nn.MSELoss()
-    # for i in tqdm(range(5000)):
-    #     output = sdf_model(sdf_in
-    #                        , final_layer=True
-    #                        )
-    #     # output = sdf_model(batch_embed_sdf_deform)
-    #     pre_t_loss = pre_t_loss_fn(output[...,0] + orig_sdf, sdf)
-    #     pre_t_optimizer.zero_grad()
-    #     pre_t_loss.backward()
-    #     pre_t_optimizer.step()
-    # print("Pre-trained SDF", pre_t_loss.item())
-
-    # exit(0)
-
-    weight_model = PPNet(num_parts*each_part_feat, output_dims=21, hidden=0).to(device)
-    weight_params = [p for _, p in weight_model.named_parameters()]
-
-    deform_model = PPNet(num_parts*each_part_feat, output_dims=3, hidden=1).to(device)
-    deform_params = [p for _, p in deform_model.named_parameters()]
-
-    # batch_embed.requires_grad_()
-    # print(batch_embed.requires_grad)
-    # exit(0)
-
-    #  Retrieve all the edges of the voxel grid; these edges will be utilized to 
-    #  compute the regularization loss in subsequent steps of the process.    
-    all_edges = cube_fx8[:, fc.cube_edges].reshape(-1, 2)
-    grid_edges = torch.unique(all_edges, dim=0)
-
-    learning_rate = 0.01
-    sdf_regularizer = 0.2
-
-    def lr_schedule(iter):
-        return max(0.0, 10**(-(iter)*0.0002)) # Exponential falloff from [1.0, 0.1] over 5k epochs.    
-
-    # optimizer = torch.optim.Adam([sdf, weight, deform], lr=learning_rate)
-    # optimizer = torch.optim.Adam([sdf, deform], lr=learning_rate)
-    # optimizer = torch.optim.Adam([sdf] + deform_params, lr=learning_rate)
-    # optimizer = torch.optim.Adam(sdf_params + deform_params, lr=learning_rate)
-    # optimizer = torch.optim.Adam(deform_params, lr=learning_rate)
-    # optimizer = torch.optim.Adam([{"sdf": sdf, "weight": weight, "params": params}], lr=learning_rate)
-    # optimizer = torch.optim.Adam([sdf, weight] + deform_params, lr=learning_rate)
-    # optimizer = torch.optim.Adam([sdf] + weight_params + deform_params, lr=learning_rate)
-    # optimizer = torch.optim.Adam([weight] + sdf_params + deform_params, lr=learning_rate)
-    # optimizer = torch.optim.Adam([sdf, weight], lr=learning_rate)
-    # optimizer = torch.optim.Adam([weight], lr=learning_rate)
-    # optimizer = torch.optim.Adam([{"params": weight_params, "lr": learning_rate},
-    #                               {"params": deform_params, "lr": learning_rate}])
-    # optimizer = torch.optim.Adam([{"params": weight_params, "lr": learning_rate},
-    #                               {"params": deform_params, "lr": learning_rate},
-    #                               {"params": sdf_params, "lr": learning_rate}])
-    # optimizer = torch.optim.Adam(weight_params + sdf_params + deform_params, lr=learning_rate)
-    optimizer = torch.optim.Adam([{"params": sdf_params, "lr": lr},
-                                  {"params": sdf_embed.parameters(), "lr": lr},
-                                  {"params": deform_params, "lr": lr}])
-    scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda x: lr_schedule(x)) 
-    
-    iterations = 1000
-
-    train_res = [2048, 2048]
-    display_res = [512, 512]
-    train_img_dir = os.path.join(results_dir, 'flexi_out')
-    misc.check_dir(train_img_dir)
-
-    print("second pass with FlexiCubes...")
-    for it in range(iterations):
-        # print(it)
-        optimizer.zero_grad()
-        # sample random camera poses
-        mv, mvp = render.get_random_camera_batch(8, iter_res=train_res, device=device, use_kaolin=False)
-        # render gt mesh
-        target = render.render_mesh_paper(gt_mesh, mv, mvp, train_res)
-        
-        # learn deform from code
-        deform = deform_model(batch_embed_sdf_deform)
-        
-        # extract and render FlexiCubes mesh
-        grid_verts = x_nx3 + (2-1e-8) / (voxel_grid_res * 2) * torch.tanh(deform)
-        
-        # learn sdf from code
-        # sdf = sdf_model(sdf_in
-        #                 # , final_layer=True
-        #                 )
-        delta_sdf = sdf_model(sdf_in
-                              , final_layer=True
-                             )
-        sdf = orig_sdf.unsqueeze(-1) + delta_sdf
-        # print(torch.min(sdf), torch.max(sdf))
-        # print(torch.min(delta_sdf), torch.max(delta_sdf))
-        
-        # learn weight from code
-        # weight = weight_model(batch_embed_weight)
-        
-        # vertices, faces, L_dev = fc(grid_verts, sdf, cube_fx8, voxel_grid_res, beta_fx12=weight[:,:12], alpha_fx8=weight[:,12:20],
-        #     gamma_f=weight[:,20], training=True)
-        vertices, faces, L_dev = fc(grid_verts, sdf, cube_fx8, voxel_grid_res, training=True)
-        # print(faces)
-        flexicubes_mesh = Mesh(vertices, faces)
-        buffers = render.render_mesh_paper(flexicubes_mesh, mv, mvp, train_res)
-        
-        # evaluate reconstruction loss
-        mask_loss = (buffers['mask'] - target['mask']).abs().mean()
-        depth_loss = (((((buffers['depth'] - (target['depth']))* target['mask'])**2).sum(-1)+1e-8)).sqrt().mean() * 10
-    
-        t_iter = it / iterations
-        sdf_weight = sdf_regularizer - (sdf_regularizer - sdf_regularizer/20)*min(1.0, 4.0 * t_iter)
-        reg_loss = loss.sdf_reg_loss(sdf, grid_edges).mean() * sdf_weight # Loss to eliminate internal floaters that are not visible
-        reg_loss += L_dev.mean() * 0.5
-        reg_loss += (weight[:,:20]).abs().mean() * 0.1
-        total_loss = mask_loss + depth_loss + reg_loss
-
-        # with torch.no_grad():
-        #     pts = sample_random_points(1000, gt_mesh)
-        #     gt_sdf = compute_sdf(pts, gt_mesh.vertices, gt_mesh.faces)
-        # pred_sdf = compute_sdf(pts, flexicubes_mesh.vertices, flexicubes_mesh.faces)
-        # total_loss += torch.nn.functional.mse_loss(pred_sdf, gt_sdf) * 2e3
-        
-        total_loss.backward()
-        optimizer.step()
-        scheduler.step()
-
-        if (it) % 100 == 0 or it == (iterations - 1): 
-            with torch.no_grad():
-                # extract mesh with training=False
-                # vertices, faces, L_dev = fc(
-                #     grid_verts, sdf, cube_fx8, voxel_grid_res,
-                #     beta_fx12=weight[:,:12], alpha_fx8=weight[:,12:20],
-                #     gamma_f=weight[:,20], training=False)
-                vertices, faces, L_dev = fc(
-                    grid_verts, sdf, cube_fx8, voxel_grid_res,
-                    training=False)
-            print ('Iteration {} - loss: {:.5f}, # of mesh vertices: {}, # of mesh faces: {}'.format(
-                it, total_loss, vertices.shape[0], faces.shape[0]))
-            # save reconstructed mesh
-            timelapse.add_mesh_batch(
-                iteration=it+1,
-                category='extracted_mesh',
-                vertices_list=[vertices.cpu()],
-                faces_list=[faces.cpu()]
-            )
-
-        # save_every = 20
-        # if (it % save_every == 0 or it == (iterations-1)): # save normal image for visualization
-        #     with torch.no_grad():
-        #         # extract mesh with training=False
-        #         vertices, faces, L_dev = fc(grid_verts, sdf, cube_fx8, voxel_grid_res, beta_fx12=weight[:,:12], alpha_fx8=weight[:,12:20],
-        #         gamma_f=weight[:,20], training=False)
-        #         flexicubes_mesh = Mesh(vertices, faces)
-                
-        #         flexicubes_mesh.auto_normals() # compute face normals for visualization
-        #         mv, mvp = render.get_rotate_camera(it//save_every, iter_res=display_res, device=device,use_kaolin=False)
-        #         val_buffers = render.render_mesh_paper(flexicubes_mesh, mv.unsqueeze(0), mvp.unsqueeze(0), display_res, return_types=["normal"], white_bg=True)
-        #         val_image = ((val_buffers["normal"][0].detach().cpu().numpy()+1)/2*255).astype(np.uint8)
-                
-        #         gt_buffers = render.render_mesh_paper(gt_mesh, mv.unsqueeze(0), mvp.unsqueeze(0), display_res, return_types=["normal"], white_bg=True)
-        #         gt_image = ((gt_buffers["normal"][0].detach().cpu().numpy()+1)/2*255).astype(np.uint8)
-        #         imageio.imwrite(os.path.join(train_img_dir, '{:04d}.png'.format(it)), np.concatenate([val_image, gt_image], 1))
-        #         print(f"Optimization Step [{it}/{iterations}], Loss: {total_loss.item():.4f}")
-        
-
-    mesh_np = trimesh.Trimesh(vertices = vertices.detach().cpu().numpy(), faces=faces.detach().cpu().numpy(), process=False)
-    mesh_np.export(os.path.join(results_dir, 'flexi_mesh.obj'))
-# 

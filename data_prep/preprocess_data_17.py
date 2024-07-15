@@ -35,9 +35,10 @@ from data_prep.partnet_pts_dataset import PartPtsDataset
 
 name_to_cat = {
     'Chair': '03001627',
-    'Lamp': '03636649'
+    'Lamp': '03636649',
+    'Table': '04379243'
 }
-cat_name = 'Chair'
+cat_name = 'Lamp'
 cat_id = name_to_cat[cat_name]
 
 pt_sample_res = 64
@@ -294,7 +295,10 @@ def build_dense_graph(union_root: AnyNode, name_to_obbs: Dict, obbs,
     # connectivity[2, 3] = 1
     # connected_xforms = connectivity @ xforms[:, :3, 3]
 
-    connectivity = [(0, 1), (0, 2), (1, 2), (2, 3)]
+    if cat_name == 'Chair':
+        connectivity = [(0, 1), (0, 2), (1, 2), (2, 3)]
+    if cat_name == 'Lamp':
+        connectivity = [(0, 1), (0, 2), (0, 3), (1, 2)]
     relations = np.zeros((len(connectivity), 4, 4), dtype=np.float32)
     
     for i, conn in enumerate(connectivity):
@@ -442,8 +446,8 @@ def merge_partnet_after_merging(anno_id, info=False):
         with open(f'data_prep/tmp/{anno_id}_parts_info.json', 'w') as f:
             json.dump(parts_info, f)
 
-    with open('data_prep/further_merge_info_8.json', 'r') as f:
-    # with open(f'data_prep/{cat_name}_further_merge_info_16.json', 'r') as f:
+    # with open('data_prep/further_merge_info_8.json', 'r') as f:
+    with open(f'data_prep/{cat_name}_further_merge_info_16.json', 'r') as f:
         further_merge_info = json.load(f)
     further_merge_parents = list(further_merge_info.keys())
     further_merge_children = []
@@ -541,8 +545,8 @@ def merge_partnet_after_merging(anno_id, info=False):
         for child in node_to_add.children:
             complete_hier_to_part_class_hier(new_root_node, child)
 
-    new_root_node = AnyNode(name="chair", obb=None)
-    # new_root_node = AnyNode(name="lamp", obb=None)
+    # new_root_node = AnyNode(name="chair", obb=None)
+    new_root_node = AnyNode(name="lamp", obb=None)
     complete_hier_to_part_class_hier(new_root_node, merged_root_node)
 
     if info:
@@ -722,8 +726,8 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
         json.dump(all_new_ids_to_objs, f)
 
     # # union of trees, based on part classes
-    union_root_part = AnyNode(name='chair')
-    # union_root_part = AnyNode(name='lamp')
+    # union_root_part = AnyNode(name='chair')
+    union_root_part = AnyNode(name='lamp')
     for root in all_root_nodes:
         tree.traverse_and_add_class(union_root_part, root)
     UniqueDotExporter(union_root_part,
@@ -1156,19 +1160,23 @@ def convert_flat_list_to_fg_part_indices(part_num_indices, all_indices):
 
 
 if __name__ == "__main__":
-    # pass one to create the preprocess_16 dataset
-    # export_data(train_ids, save_data=False, start=0, end=4489)
-    # export_data(train_ids, save_data=False, start=0, end=1554)
-    # exit(0)
     np.random.seed(319)
 
     from flexi.flexicubes import FlexiCubes
     fc = FlexiCubes('cpu')
     x_nx3, cube_fx8 = fc.construct_voxel_grid(31)
+
+    # pass one to create the preprocess_16 dataset
+    # export_data(train_ids, save_data=False, start=0, end=4489)
+    export_data(train_ids, save_data=True, start=0, end=1554)
+    # export_data(train_ids, save_data=True, start=0, end=1554)
+    exit(0)
     
     # pass two to create the four_parts dataset
-    good_indices = np.load('data/chair_am_four_parts_16_0_4489.npy')
-    data_pt = 'data/Chair_train_new_ids_to_objs_16_0_4489.json'
+    # good_indices = np.load('data/chair_am_four_parts_16_0_4489.npy')
+    # data_pt = 'data/Chair_train_new_ids_to_objs_16_0_4489.json'
+    good_indices = np.load('data/lamp_am_five_parts_17_0_1554.npy')
+    data_pt = 'data/Lamp_train_new_ids_to_objs_17_0_1554.json'
     with open(data_pt, 'r') as f:
         data: Dict = json.load(f)
     all_ids = np.array(list(data.keys()))
@@ -1178,10 +1186,10 @@ if __name__ == "__main__":
             ids_w_four_parts.append(x)
     ids_w_four_parts = [ids_w_four_parts[x] for x in good_indices]
 
-    # export_data(ids_w_four_parts, save_data=True,
-    #             start=0, end=len(ids_w_four_parts))
     export_data(ids_w_four_parts, save_data=True,
-                start=0, end=100)
+                start=0, end=len(ids_w_four_parts))
+    # export_data(ids_w_four_parts, save_data=True,
+    #             start=0, end=100)
     exit(0)
 
     # merge_partnet_after_merging('39446', info=True)
@@ -1189,14 +1197,15 @@ if __name__ == "__main__":
 
     unique_name_to_new_id, all_entire_meshes, all_ori_ids_to_new_ids,\
             all_obbs, all_name_to_obbs =\
-                export_data(ids_w_four_parts, save_data=False, start=0, end=10)
+                export_data(train_ids, save_data=False, start=0, end=30)
     # np.savez_compressed("data_prep/tmp/data.npz",
     #                     all_entire_meshes=all_entire_meshes,
     #                     all_ori_ids_to_new_ids=all_ori_ids_to_new_ids,
     #                     all_obbs=all_obbs,
     #                     all_name_to_obbs=all_name_to_obbs)
 
-    with open('data/Chair_train_new_ids_to_objs_17_0_10.json', 'r') as f:
+    # with open('data/Chair_train_new_ids_to_objs_17_0_10.json', 'r') as f:
+    with open('data/Lamp_train_new_ids_to_objs_17_0_30.json', 'r') as f:
         all_obs = json.load(f)
     keys = list(all_obs.keys())
 
@@ -1209,7 +1218,7 @@ if __name__ == "__main__":
     # # model_idx = 3
     # anno_id = '38725'
     # model_idx = 6
-    model_idx = 1
+    model_idx = 25
     anno_id = keys[model_idx]
     print(anno_id)
 

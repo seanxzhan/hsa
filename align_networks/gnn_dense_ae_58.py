@@ -6,12 +6,13 @@ from torch_geometric.nn import global_mean_pool
 class OBBGNN(torch.nn.Module):
     def __init__(self,
                  num_node_features,
-                 graph_feature_dim):
+                 graph_feature_dim,
+                 num_parts=4):
         super().__init__()
 
         self.gcn = GCN(num_node_features, output_dims=graph_feature_dim)
         # self.attention = Attention(graph_feature_dim)
-        self.decoder = GraphDecoder(input_dims=graph_feature_dim, num_nodes=4)
+        self.decoder = GraphDecoder(input_dims=graph_feature_dim, num_nodes=num_parts)
                 
 
     def forward(self, node_feat, adj, mask, batch):
