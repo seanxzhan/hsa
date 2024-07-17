@@ -36,9 +36,10 @@ from data_prep.partnet_pts_dataset import PartPtsDataset
 name_to_cat = {
     'Chair': '03001627',
     'Lamp': '03636649',
-    'Table': '04379243'
+    'Table': '04379243',
+    'Earphone': '03261776'
 }
-cat_name = 'Lamp'
+cat_name = 'Earphone'
 cat_id = name_to_cat[cat_name]
 
 pt_sample_res = 64
@@ -193,7 +194,14 @@ def build_obbs(anno_id, part_info: Dict):
             up_to_now += curr_num_meshes
             count += 1
         mesh = trimesh.util.concatenate(meshes)
-        obb: trimesh.primitives.Box = mesh.bounding_box
+        try:
+            obb: trimesh.primitives.Box = mesh.bounding_box_oriented
+        except Exception as e:
+            import logging, traceback
+            # logging.error(traceback.format_exc())
+            # mesh.export('data_prep/mesh.obj')
+            print(f"{anno_id} has bad parts")
+            continue
         ext = np.array(obb.primitive.extents)
         xform = np.array(obb.primitive.transform)
         ext_xform = align_xform(ext, xform)
@@ -299,6 +307,10 @@ def build_dense_graph(union_root: AnyNode, name_to_obbs: Dict, obbs,
         connectivity = [(0, 1), (0, 2), (1, 2), (2, 3)]
     if cat_name == 'Lamp':
         connectivity = [(0, 1), (0, 2), (0, 3), (1, 2)]
+    if cat_name == 'Table':
+        connectivity = [(0, 1), (0, 2), (1, 2)]
+    if cat_name == 'Earphone':
+        connectivity = [(0, 1), (0, 2), (1, 2)]
     relations = np.zeros((len(connectivity), 4, 4), dtype=np.float32)
     
     for i, conn in enumerate(connectivity):
@@ -447,7 +459,8 @@ def merge_partnet_after_merging(anno_id, info=False):
             json.dump(parts_info, f)
 
     # with open('data_prep/further_merge_info_8.json', 'r') as f:
-    with open(f'data_prep/{cat_name}_further_merge_info_16.json', 'r') as f:
+    # with open(f'data_prep/{cat_name}_further_merge_info_16.json', 'r') as f:
+    with open(f'data_prep/{cat_name}_further_merge_info_17.json', 'r') as f:
         further_merge_info = json.load(f)
     further_merge_parents = list(further_merge_info.keys())
     further_merge_children = []
@@ -545,8 +558,14 @@ def merge_partnet_after_merging(anno_id, info=False):
         for child in node_to_add.children:
             complete_hier_to_part_class_hier(new_root_node, child)
 
-    # new_root_node = AnyNode(name="chair", obb=None)
-    new_root_node = AnyNode(name="lamp", obb=None)
+    if cat_name == 'Chair':
+        new_root_node = AnyNode(name="chair", obb=None)
+    if cat_name == 'Lamp':
+        new_root_node = AnyNode(name="lamp", obb=None)
+    if cat_name == 'Table':
+        new_root_node = AnyNode(name="table", obb=None)
+    if cat_name == 'Earphone':
+        new_root_node = AnyNode(name="earphone", obb=None)
     complete_hier_to_part_class_hier(new_root_node, merged_root_node)
 
     if info:
@@ -726,8 +745,14 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
         json.dump(all_new_ids_to_objs, f)
 
     # # union of trees, based on part classes
-    # union_root_part = AnyNode(name='chair')
-    union_root_part = AnyNode(name='lamp')
+    if cat_name == 'Chair':
+        union_root_part = AnyNode(name="chair")
+    if cat_name == 'Lamp':
+        union_root_part = AnyNode(name="lamp")
+    if cat_name == 'Table':
+        union_root_part = AnyNode(name="table")
+    if cat_name == 'Earphone':
+        union_root_part = AnyNode(name="earphone")
     for root in all_root_nodes:
         tree.traverse_and_add_class(union_root_part, root)
     UniqueDotExporter(union_root_part,
@@ -835,7 +860,8 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
         'empty_parts', [num_shapes, (pt_sample_res/2)**3, num_parts],
         dtype=np.uint8)
     hdf5_file.create_dataset(
-        'relations', [num_shapes, 4, 4, 4],
+        # 'relations', [num_shapes, 4, 4, 4],
+        'relations', [num_shapes, 3, 4, 4],
         dtype=np.float32)
 
     # all_pts_data = [None] * num_shapes
@@ -1166,17 +1192,22 @@ if __name__ == "__main__":
     fc = FlexiCubes('cpu')
     x_nx3, cube_fx8 = fc.construct_voxel_grid(31)
 
-    # pass one to create the preprocess_16 dataset
-    # export_data(train_ids, save_data=False, start=0, end=4489)
-    export_data(train_ids, save_data=True, start=0, end=1554)
-    # export_data(train_ids, save_data=True, start=0, end=1554)
-    exit(0)
+    # # pass one to create the preprocess_16 dataset
+    # # export_data(train_ids, save_data=False, start=0, end=4489)
+    # # export_data(train_ids, save_data=True, start=0, end=1554)
+    # # export_data(train_ids, save_data=False, start=0, end=5707)
+    # export_data(train_ids, save_data=False, start=0, end=147)
+    # exit(0)
     
     # pass two to create the four_parts dataset
     # good_indices = np.load('data/chair_am_four_parts_16_0_4489.npy')
     # data_pt = 'data/Chair_train_new_ids_to_objs_16_0_4489.json'
-    good_indices = np.load('data/lamp_am_five_parts_17_0_1554.npy')
-    data_pt = 'data/Lamp_train_new_ids_to_objs_17_0_1554.json'
+    # good_indices = np.load('data/lamp_am_five_parts_17_0_1554.npy')
+    # data_pt = 'data/Lamp_train_new_ids_to_objs_17_0_1554.json'
+    # good_indices = np.load('data/table_am_three_parts_17_0_5707.npy')
+    # data_pt = 'data/Table_train_new_ids_to_objs_17_0_5707.json'
+    good_indices = np.load('data/earphone_am_three_parts_17_0_147.npy')
+    data_pt = 'data/Earphone_train_new_ids_to_objs_17_0_147.json'
     with open(data_pt, 'r') as f:
         data: Dict = json.load(f)
     all_ids = np.array(list(data.keys()))

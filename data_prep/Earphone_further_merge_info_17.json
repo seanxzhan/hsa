@@ -1,0 +1,16 @@
+{
+    "earbud_unit": [
+        "earbud_frame",
+        "earbud_pad",
+        "earbud_connector"
+    ],
+    "head_band": [
+        "top_band",
+        "drawer_box"
+    ],
+    "earcup_unit": [
+        "earcup_frame",
+        "earcup_pad",
+        "earcup_connector"
+    ]
+}

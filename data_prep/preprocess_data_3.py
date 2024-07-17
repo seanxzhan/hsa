@@ -23,9 +23,12 @@ from collections import defaultdict
 
 name_to_cat = {
     'Chair': '03001627',
-    'Lamp': '03636649'
+    'Lamp': '03636649',
+    'Table': '04379243',
+    'Earphone': '03261776',
+    'Mug': '03797390'
 }
-cat_name = 'Lamp'
+cat_name = 'Earphone'
 cat_id = name_to_cat[cat_name]
 
 pt_sample_res = 64
@@ -42,6 +45,9 @@ OBB_REP_SIZE = 15
 
 train_f = open(train_models_path); val_f = open(val_models_path); test_f = open(test_models_path)
 train_ids = json.load(train_f); val_ids = json.load(val_f); test_ids = json.load(test_f)
+
+# print(len(train_ids))
+# exit(0)
 
 # -------- get tableau colors for visualization -------- 
 all_colors = np.array(visualize.get_tab_20_saturated(50))[:20]
@@ -178,7 +184,14 @@ def build_obbs(anno_id, part_info: Dict):
             up_to_now += curr_num_meshes
             count += 1
         mesh = trimesh.util.concatenate(meshes)
-        obb: trimesh.primitives.Box = mesh.bounding_box_oriented
+        try:
+            obb: trimesh.primitives.Box = mesh.bounding_box_oriented
+        except Exception as e:
+            import logging, traceback
+            # logging.error(traceback.format_exc())
+            # mesh.export('data_prep/mesh.obj')
+            print(f"{anno_id} has bad parts")
+            continue
         ext = np.array(obb.primitive.extents)
         xform = np.array(obb.primitive.transform)
         ext_xform = align_xform(ext, xform)
@@ -431,7 +444,10 @@ def merge_partnet_after_merging(anno_id):
         for child in node_to_add.children:
             complete_hier_to_part_class_hier(new_root_node, child)
 
-    new_root_node = AnyNode(name="lamp", obb=None)
+    # new_root_node = AnyNode(name="chair", obb=None)
+    # new_root_node = AnyNode(name="lamp", obb=None)
+    # new_root_node = AnyNode(name="table", obb=None)
+    new_root_node = AnyNode(name="earphone", obb=None)
     complete_hier_to_part_class_hier(new_root_node, root_node)
 
     # map from name to list of ori_ids and list of objs
@@ -556,7 +572,10 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
             max_num_bbox_per_part, all_obbs, all_name_to_obbs, all_obb_indices_to_ori_ids
 
     # # union of trees, based on part classes
-    union_root_part = AnyNode(name='lamp')
+    # union_root_part = AnyNode(name='chair')
+    # union_root_part = AnyNode(name='lamp')
+    # union_root_part = AnyNode(name='table')
+    union_root_part = AnyNode(name='earphone')
     for root in all_root_nodes:
         tree.traverse_and_add_class(union_root_part, root)
     UniqueDotExporter(union_root_part,
@@ -813,4 +832,4 @@ if __name__ == "__main__":
     # good_indices = np.load('data/indices_shapes_w_three_parts_0_2000.npy')
     # ids_w_three_parts = [train_ids[x] for x in good_indices]
     # export_data(ids_w_three_parts, save_data=True, start=0, end=len(good_indices))
-    export_data(train_ids, save_data=True, start=0, end=1554)
+    export_data(train_ids, save_data=True, start=0, end=147)

@@ -1,0 +1,47 @@
+{
+    "tabletop": [
+        "tabletop_surface",
+        "board",
+        "glass",
+        "tabletop_frame",
+        "bar",
+        "tabletop_dropleaf"
+    ],
+    "drawer_base": [
+        "drawer",
+        "drawer_box",
+        "drawer_front",
+        "drawer_side",
+        "drawer_back",
+        "drawer_bottom",
+        "handle",
+        "back_panel",
+        "vertical_side_panel",
+        "bottom_panel",
+        "shelf",
+        "vertical_divider_panel",
+        "vertical_front_panel",
+        "keyboard_tray",
+        "keyboard_tray_surface",
+        "cabinet_door",
+        "cabinet_door_surface",
+        "caster",
+        "wheel",
+        "caster_stem"
+    ],
+    "regular_leg_base": [
+        "leg",
+        "bar_stretcher",
+        "tabletop_connector",
+        "circular_stretcher",
+        "runner",
+        "foot"
+    ],
+    "star_leg_base": [
+        "star_leg_set"
+    ],
+    "pedestal_base": [
+        "central_support",
+        "pedestal"
+    ]
+}
