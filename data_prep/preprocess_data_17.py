@@ -39,7 +39,7 @@ name_to_cat = {
     'Table': '04379243',
     'Earphone': '03261776'
 }
-cat_name = 'Earphone'
+cat_name = 'Chair'
 cat_id = name_to_cat[cat_name]
 
 pt_sample_res = 64
@@ -195,7 +195,7 @@ def build_obbs(anno_id, part_info: Dict):
             count += 1
         mesh = trimesh.util.concatenate(meshes)
         try:
-            obb: trimesh.primitives.Box = mesh.bounding_box_oriented
+            obb: trimesh.primitives.Box = mesh.bounding_box
         except Exception as e:
             import logging, traceback
             # logging.error(traceback.format_exc())
@@ -458,10 +458,15 @@ def merge_partnet_after_merging(anno_id, info=False):
         with open(f'data_prep/tmp/{anno_id}_parts_info.json', 'w') as f:
             json.dump(parts_info, f)
 
-    # with open('data_prep/further_merge_info_8.json', 'r') as f:
-    # with open(f'data_prep/{cat_name}_further_merge_info_16.json', 'r') as f:
-    with open(f'data_prep/{cat_name}_further_merge_info_17.json', 'r') as f:
-        further_merge_info = json.load(f)
+    if cat_name == 'Chair':
+        with open('data_prep/further_merge_info_8.json', 'r') as f:
+            further_merge_info = json.load(f)
+    elif cat_name == 'Lamp':
+        with open(f'data_prep/{cat_name}_further_merge_info_16.json', 'r') as f:
+            further_merge_info = json.load(f)
+    else:
+        with open(f'data_prep/{cat_name}_further_merge_info_17.json', 'r') as f:
+            further_merge_info = json.load(f)
     further_merge_parents = list(further_merge_info.keys())
     further_merge_children = []
     for p, kids in further_merge_info.items():
