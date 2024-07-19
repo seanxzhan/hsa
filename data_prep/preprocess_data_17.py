@@ -826,48 +826,48 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
     
     # exit(0)
 
-    fn = f'data/{cat_name}_train_{pt_sample_res}_17_{start}_{end}.hdf5'
-    hdf5_file = h5py.File(fn, 'w')
-    hdf5_file.create_dataset(
-        'part_num_indices', [num_shapes, num_parts],
-        dtype=np.int64)
-    hdf5_file.create_dataset(
-        'all_indices', [num_shapes, ],
-        dtype=h5py.vlen_dtype(np.int64))
-    hdf5_file.create_dataset(
-        'normalized_points', [num_shapes, (pt_sample_res/2)**3, 3],
-        dtype=np.float32)
-    hdf5_file.create_dataset(
-        'values', [num_shapes, (pt_sample_res/2)**3, 1],
-        dtype=np.float32)
-    hdf5_file.create_dataset(
-        'occ', [num_shapes, (pt_sample_res/2)**3, 1],
-        dtype=np.float32)
-    hdf5_file.create_dataset(
-        'node_features', [num_shapes, num_union_nodes_class, OBB_REP_SIZE],
-        dtype=np.float32)
-    hdf5_file.create_dataset(
-        'adj', [num_shapes, num_union_nodes_class, num_union_nodes_class],
-        dtype=np.float32)
-    hdf5_file.create_dataset(
-        'part_nodes', [num_shapes, num_parts, num_union_nodes_class],
-        dtype=np.int64)
-    hdf5_file.create_dataset(
-        'xforms', [num_shapes, num_parts, 4, 4],
-        dtype=np.float32)
-    hdf5_file.create_dataset(
-        'extents', [num_shapes, num_parts, 3],
-        dtype=np.float32)
-    hdf5_file.create_dataset(
-        'transformed_points', [num_shapes, num_parts, (pt_sample_res/2)**3, 3],
-        dtype=np.float32)
-    hdf5_file.create_dataset(
-        'empty_parts', [num_shapes, (pt_sample_res/2)**3, num_parts],
-        dtype=np.uint8)
-    hdf5_file.create_dataset(
-        # 'relations', [num_shapes, 4, 4, 4],
-        'relations', [num_shapes, 3, 4, 4],
-        dtype=np.float32)
+    # fn = f'data/{cat_name}_train_{pt_sample_res}_17_{start}_{end}.hdf5'
+    # hdf5_file = h5py.File(fn, 'w')
+    # hdf5_file.create_dataset(
+    #     'part_num_indices', [num_shapes, num_parts],
+    #     dtype=np.int64)
+    # hdf5_file.create_dataset(
+    #     'all_indices', [num_shapes, ],
+    #     dtype=h5py.vlen_dtype(np.int64))
+    # hdf5_file.create_dataset(
+    #     'normalized_points', [num_shapes, (pt_sample_res/2)**3, 3],
+    #     dtype=np.float32)
+    # hdf5_file.create_dataset(
+    #     'values', [num_shapes, (pt_sample_res/2)**3, 1],
+    #     dtype=np.float32)
+    # hdf5_file.create_dataset(
+    #     'occ', [num_shapes, (pt_sample_res/2)**3, 1],
+    #     dtype=np.float32)
+    # hdf5_file.create_dataset(
+    #     'node_features', [num_shapes, num_union_nodes_class, OBB_REP_SIZE],
+    #     dtype=np.float32)
+    # hdf5_file.create_dataset(
+    #     'adj', [num_shapes, num_union_nodes_class, num_union_nodes_class],
+    #     dtype=np.float32)
+    # hdf5_file.create_dataset(
+    #     'part_nodes', [num_shapes, num_parts, num_union_nodes_class],
+    #     dtype=np.int64)
+    # hdf5_file.create_dataset(
+    #     'xforms', [num_shapes, num_parts, 4, 4],
+    #     dtype=np.float32)
+    # hdf5_file.create_dataset(
+    #     'extents', [num_shapes, num_parts, 3],
+    #     dtype=np.float32)
+    # hdf5_file.create_dataset(
+    #     'transformed_points', [num_shapes, num_parts, (pt_sample_res/2)**3, 3],
+    #     dtype=np.float32)
+    # hdf5_file.create_dataset(
+    #     'empty_parts', [num_shapes, (pt_sample_res/2)**3, num_parts],
+    #     dtype=np.uint8)
+    # hdf5_file.create_dataset(
+    #     'relations', [num_shapes, 4, 4, 4],
+    #     # 'relations', [num_shapes, 3, 4, 4],
+    #     dtype=np.float32)
 
     # all_pts_data = [None] * num_shapes
     # all_pts_whole_data = [None] * num_shapes
@@ -960,38 +960,38 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
         out = make_data_for_one(anno_id, unique_name_to_new_id,
                                 all_entire_meshes[i],
                                 all_ori_ids_to_new_ids[i])
-        hdf5_file['part_num_indices'][i] = out['part_num_indices']
-        hdf5_file['all_indices'][i] = out['all_indices']
-        hdf5_file['normalized_points'][i] = out['normalized_points']
-        hdf5_file['values'][i] = out['values']
-        hdf5_file['occ'][i] = out['occ']
-        hdf5_file['node_features'][i] = all_node_features[i]
-        hdf5_file['adj'][i] = all_adj[i]
-        hdf5_file['part_nodes'][i] = all_part_nodes[i]
-        hdf5_file['xforms'][i] = all_xforms[i]
-        hdf5_file['extents'][i] = all_extents[i]
-        hdf5_file['relations'][i] = all_relations[i]
-        all_pts_data.append(out['pts_data'])
-        all_pts_whole_data.append(out['pts_whole_data'])
+    #     hdf5_file['part_num_indices'][i] = out['part_num_indices']
+    #     hdf5_file['all_indices'][i] = out['all_indices']
+    #     hdf5_file['normalized_points'][i] = out['normalized_points']
+    #     hdf5_file['values'][i] = out['values']
+    #     hdf5_file['occ'][i] = out['occ']
+    #     hdf5_file['node_features'][i] = all_node_features[i]
+    #     hdf5_file['adj'][i] = all_adj[i]
+    #     hdf5_file['part_nodes'][i] = all_part_nodes[i]
+    #     hdf5_file['xforms'][i] = all_xforms[i]
+    #     hdf5_file['extents'][i] = all_extents[i]
+    #     hdf5_file['relations'][i] = all_relations[i]
+    #     all_pts_data.append(out['pts_data'])
+    #     all_pts_whole_data.append(out['pts_whole_data'])
 
-        for p in range(num_parts):
-            xform = all_xforms[i][p]
-            pts = out['normalized_points'][0]
-            hdf5_file['transformed_points'][i, p] =\
-                transform.transform_points(pts, xform)
-        hdf5_file['empty_parts'][i] = 1-torch.from_numpy(
-            all_part_nodes[i][0]).sum(1).unsqueeze(1).expand(
-                -1, len(pts)).transpose(0, 1).numpy()
+    #     for p in range(num_parts):
+    #         xform = all_xforms[i][p]
+    #         pts = out['normalized_points'][0]
+    #         hdf5_file['transformed_points'][i, p] =\
+    #             transform.transform_points(pts, xform)
+    #     hdf5_file['empty_parts'][i] = 1-torch.from_numpy(
+    #         all_part_nodes[i][0]).sum(1).unsqueeze(1).expand(
+    #             -1, len(pts)).transpose(0, 1).numpy()
 
-    hdf5_file.close()
+    # hdf5_file.close()
 
-    pyg = PartPtsDataset(f'data/{cat_name}_train_{pt_sample_res}_17_{start}_{end}',
-                         all_pts_data)
-    pyg.process()
+    # pyg = PartPtsDataset(f'data/{cat_name}_train_{pt_sample_res}_17_{start}_{end}',
+    #                      all_pts_data)
+    # pyg.process()
 
-    pyg = PartPtsDataset(f'data/{cat_name}_train_{pt_sample_res}_17_{start}_{end}_whole',
-                         all_pts_whole_data)
-    pyg.process()
+    # pyg = PartPtsDataset(f'data/{cat_name}_train_{pt_sample_res}_17_{start}_{end}_whole',
+    #                      all_pts_whole_data)
+    # pyg.process()
 
 
 
@@ -1062,6 +1062,8 @@ def make_data_for_one(anno_id,
 
     sdf_grid = ops.bin2sdf(input=fg_voxels)
     sdf_grid = np.swapaxes(sdf_grid, 0, 2)
+    # np.save(f'data_prep/{anno_id}_sdf_grid.npy', sdf_grid)
+    # exit(0)
 
     # random.seed(319)
     # points, values = gather_hdf5.sample_points_values(fg_voxels, pt_sample_res)
@@ -1074,14 +1076,13 @@ def make_data_for_one(anno_id,
     values = np.squeeze(values.numpy())[:, None]
     occ = np.where(values <= 0, 1, 0)
     # np.save('data_prep/values_occ.npy', occ)
-    # exit(0)
 
-    pv_indices = np.arange(len(points))
-    # np.random.seed(319)
-    np.random.shuffle(pv_indices)
-    points = points[pv_indices]
-    values = values[pv_indices]
-    occ = occ[pv_indices]
+    # pv_indices = np.arange(len(points))
+    # # np.random.seed(319)
+    # np.random.shuffle(pv_indices)
+    # points = points[pv_indices]
+    # values = values[pv_indices]
+    # occ = occ[pv_indices]
 
     # fg_occ_points = points[values.astype('bool').flatten()]
     fg_occ_points_indices = np.where(values <= 0)[0]
@@ -1205,14 +1206,14 @@ if __name__ == "__main__":
     # exit(0)
     
     # pass two to create the four_parts dataset
-    # good_indices = np.load('data/chair_am_four_parts_16_0_4489.npy')
-    # data_pt = 'data/Chair_train_new_ids_to_objs_16_0_4489.json'
+    good_indices = np.load('data/chair_am_four_parts_16_0_4489.npy')
+    data_pt = 'data/Chair_train_new_ids_to_objs_16_0_4489.json'
     # good_indices = np.load('data/lamp_am_five_parts_17_0_1554.npy')
     # data_pt = 'data/Lamp_train_new_ids_to_objs_17_0_1554.json'
     # good_indices = np.load('data/table_am_three_parts_17_0_5707.npy')
     # data_pt = 'data/Table_train_new_ids_to_objs_17_0_5707.json'
-    good_indices = np.load('data/earphone_am_three_parts_17_0_147.npy')
-    data_pt = 'data/Earphone_train_new_ids_to_objs_17_0_147.json'
+    # good_indices = np.load('data/earphone_am_three_parts_17_0_147.npy')
+    # data_pt = 'data/Earphone_train_new_ids_to_objs_17_0_147.json'
     with open(data_pt, 'r') as f:
         data: Dict = json.load(f)
     all_ids = np.array(list(data.keys()))
@@ -1222,10 +1223,10 @@ if __name__ == "__main__":
             ids_w_four_parts.append(x)
     ids_w_four_parts = [ids_w_four_parts[x] for x in good_indices]
 
-    export_data(ids_w_four_parts, save_data=True,
-                start=0, end=len(ids_w_four_parts))
     # export_data(ids_w_four_parts, save_data=True,
-    #             start=0, end=100)
+    #             start=0, end=len(ids_w_four_parts))
+    export_data(ids_w_four_parts, save_data=True,
+                start=0, end=100)
     exit(0)
 
     # merge_partnet_after_merging('39446', info=True)
