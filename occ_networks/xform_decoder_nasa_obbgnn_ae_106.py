@@ -34,14 +34,12 @@ class SDFDecoder(torch.nn.Module):
                                        output_dims,
                                        multires))
         
-        self.obb_gnn = OBBGNN(num_node_features=3,
-                              graph_feature_dim=32)
+        # self.obb_gnn = OBBGNN(num_node_features=3,
+        #                       graph_feature_dim=32)
         
         refine_out_dims = 4
         self.refine_net = SmallMLPs(input_dims,
-                                    # 16,
-                                    # 128,
-                                    0,
+                                    16,
                                     internal_dims,
                                     hidden,
                                     refine_out_dims,
@@ -56,8 +54,8 @@ class SDFDecoder(torch.nn.Module):
         #                              refine_out_dims,
         #                              multires)
         
-    def learn_geom_xform(self, node_feat, adj, mask, batch):
-        return self.obb_gnn.forward(node_feat, adj, mask, batch)
+    # def learn_geom_xform(self, node_feat, adj, mask, batch):
+    #     return self.obb_gnn.forward(node_feat, adj, mask, batch)
 
     def forward(self, points, features, mask=None):
         # xforms: batch size x 4 x 3
@@ -76,15 +74,10 @@ class SDFDecoder(torch.nn.Module):
         return out
     
     def get_sdf_deform(self, points, features):
-        # feat_vol = self.feature_volume(features).view(-1, 16, 32**3).transpose(1, 2)
-        # return self.refine_net.forward(
-        #     points,
-        #     feat_vol)
-        # print(features.shape)
-        # return self.refine_net.forward(
-        #     points,
-        #     features.unsqueeze(1).expand(-1, points.shape[1], -1))
-        return self.refine_net.forward(points)
+        feat_vol = self.feature_volume(features).view(-1, 16, 32**3).transpose(1, 2)
+        return self.refine_net.forward(
+            points,
+            feat_vol)
     
     def pre_train_sphere(self, iter):
         print("Initialize SDF to sphere")
@@ -130,31 +123,14 @@ class SmallMLPs(torch.nn.Module):
         net = net + (torch.nn.Linear(internal_dims, output_dims, bias=False),)
         self.net = torch.nn.Sequential(*net)
 
-    def forward(self, p, feature=None):
+    def forward(self, p, feature):
         if self.embed_fn is not None:
             p = self.embed_fn(p)
         # p = torch.concatenate((p, feature), dim=-1)
-        if feature:
-            p = torch.concat((p, feature), dim=-1)
+        p = torch.concat((p, feature), dim=-1)
         out = self.net(p)
         # out = torch.tanh(out)
         return out
-    
-    def pre_train_sphere(self, iter):
-        print ("Initialize SDF to sphere")
-        loss_fn = torch.nn.MSELoss()
-        optimizer = torch.optim.Adam(list(self.parameters()), lr=1e-4)
-
-        for i in tqdm(range(iter)):
-            p = torch.rand((1024,3), device='cuda') - 0.5
-            ref_value  = torch.sqrt((p**2).sum(-1)) - 0.3
-            output = self(p)
-            loss = loss_fn(output[...,0], ref_value)
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-
-        print("Pre-trained MLP", loss.item())
 
 
 # Positional Encoding from https://github.com/yenchenlin/nerf-pytorch/blob/1f064835d2cca26e4df2d7d130daa39a8cee1795/run_nerf_helpers.py
