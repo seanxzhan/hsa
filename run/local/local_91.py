@@ -2407,11 +2407,6 @@ if args.post_process_fc:
     # visualize.save_mesh_vis(aligned_gt_mesh, mesh_gt_path,
     #                         mag=mag, white_bg=white_bg)
 
-    print(np.min(aligned_gt_mesh.vertices))
-    print(np.max(aligned_gt_mesh.vertices))
-    print(np.min(gt_mesh.vertices))
-    print(np.max(gt_mesh.vertices))
-    
     timelapse = kaolin.visualize.Timelapse(os.path.join(results_dir, 'timelapse_flexi'))
     timelapse.add_mesh_batch(category='gt_mesh',
                              vertices_list=[torch.from_numpy(aligned_gt_mesh.vertices)],
@@ -2597,8 +2592,8 @@ if args.post_process_fc:
     def lr_schedule(iter):
         return max(0.0, 10**(-(iter)*0.0002)) # Exponential falloff from [1.0, 0.1] over 5k epochs.    
 
-    optimizer = torch.optim.Adam([sdf, weight, deform], lr=learning_rate)
-    # optimizer = torch.optim.Adam([sdf, deform], lr=learning_rate)
+    # optimizer = torch.optim.Adam([sdf, weight, deform], lr=learning_rate)
+    optimizer = torch.optim.Adam([sdf, deform], lr=learning_rate)
     # optimizer = torch.optim.Adam([sdf] + deform_params, lr=learning_rate)
     # optimizer = torch.optim.Adam(sdf_params + deform_params, lr=learning_rate)
     # optimizer = torch.optim.Adam(deform_params, lr=learning_rate)
@@ -2656,11 +2651,11 @@ if args.post_process_fc:
         # learn weight from code
         # weight = weight_model(batch_embed_weight)
         
-        vertices, faces, L_dev = fc(
-            grid_verts, sdf, cube_fx8, voxel_grid_res,
-            beta_fx12=weight[:,:12], alpha_fx8=weight[:,12:20],
-            gamma_f=weight[:,20], training=True)
-        # vertices, faces, L_dev = fc(grid_verts, sdf, cube_fx8, voxel_grid_res, training=True)
+        # vertices, faces, L_dev = fc(
+        #     grid_verts, sdf, cube_fx8, voxel_grid_res,
+        #     beta_fx12=weight[:,:12], alpha_fx8=weight[:,12:20],
+        #     gamma_f=weight[:,20], training=True)
+        vertices, faces, L_dev = fc(grid_verts, sdf, cube_fx8, voxel_grid_res, training=True)
         # print(faces)
         flexicubes_mesh = Mesh(vertices, faces)
         buffers = render.render_mesh_paper(flexicubes_mesh, mv, mvp, train_res)
@@ -2690,13 +2685,13 @@ if args.post_process_fc:
         if (it) % 100 == 0 or it == (iterations - 1): 
             with torch.no_grad():
                 # extract mesh with training=False
-                vertices, faces, L_dev = fc(
-                    grid_verts, sdf, cube_fx8, voxel_grid_res,
-                    beta_fx12=weight[:,:12], alpha_fx8=weight[:,12:20],
-                    gamma_f=weight[:,20], training=False)
                 # vertices, faces, L_dev = fc(
                 #     grid_verts, sdf, cube_fx8, voxel_grid_res,
-                #     training=False)
+                #     beta_fx12=weight[:,:12], alpha_fx8=weight[:,12:20],
+                #     gamma_f=weight[:,20], training=False)
+                vertices, faces, L_dev = fc(
+                    grid_verts, sdf, cube_fx8, voxel_grid_res,
+                    training=False)
             print ('Iteration {} - loss: {:.5f}, # of mesh vertices: {}, # of mesh faces: {}'.format(
                 it, total_loss, vertices.shape[0], faces.shape[0]))
             # save reconstructed mesh

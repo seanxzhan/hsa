@@ -86,6 +86,19 @@ def load_mesh(path, device):
     vertices = vertices * scale # Rescale to [-0.9, 0.9]
     return Mesh(vertices, faces)
 
+
+def load_mesh_vf(vertices, faces, device):
+    vertices = torch.tensor(vertices, device=device, dtype=torch.float)
+    faces = torch.tensor(faces, device=device, dtype=torch.long)
+    
+    # Normalize
+    vmin, vmax = vertices.min(dim=0)[0], vertices.max(dim=0)[0]
+    scale = 1.8 / torch.max(vmax - vmin).item()
+    vertices = vertices - (vmax + vmin) / 2 # Center mesh on origin
+    vertices = vertices * scale # Rescale to [-0.9, 0.9]
+    return Mesh(vertices, faces)
+
+
 def compute_sdf(points, vertices, faces):
     face_vertices = kaolin.ops.mesh.index_vertices_by_faces(vertices.clone().unsqueeze(0), faces)
     distance = kaolin.metrics.trianglemesh.point_to_mesh_distance(points.unsqueeze(0), face_vertices)[0]

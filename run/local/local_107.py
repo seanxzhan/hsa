@@ -19,7 +19,7 @@ from anytree.exporter import UniqueDotExporter
 from sklearn.decomposition import PCA
 from flexi.flexicubes import FlexiCubes
 # from flexi.util import *
-from flexi import render, loss, util
+from flexi import render, util
 
 
 # inherited checkpoint from local_66
@@ -199,7 +199,8 @@ if args.train:
     )
 
 fc_voxel_grid_res = 31
-train_res = [256, 256]
+# train_res = [256, 256]
+train_res = [512, 512]
 fc = FlexiCubes(device)
 fc_voxel_grid_res = 31
 x_nx3, cube_fx8 = fc.construct_voxel_grid(fc_voxel_grid_res)
@@ -213,8 +214,15 @@ def my_load_mesh(model_idx, tri=False):
     obj_dir = os.path.join(partnet_dir, anno_id, 'vox_models')
     assert os.path.exists(obj_dir)
     gt_mesh_path = os.path.join(obj_dir, f'{anno_id}.obj')
+    gt_mesh = trimesh.load_mesh(gt_mesh_path)
+    gt_vertices_aligned = torch.from_numpy(
+        gt_mesh.vertices).to(device).to(torch.float32)
+    gt_vertices_aligned = kaolin.ops.pointcloud.center_points(
+        gt_vertices_aligned.unsqueeze(0), normalize=True).squeeze(0)
+    gt_vertices_aligned = gt_vertices_aligned.cpu().numpy()
     if not tri:
-        return util.load_mesh(gt_mesh_path, device)
+        # return util.load_mesh(gt_mesh_path, device)
+        return util.load_mesh_vf(gt_vertices_aligned, gt_mesh.faces, device)
     else:
         return trimesh.load_mesh(gt_mesh_path)
 
@@ -234,14 +242,14 @@ def load_batch(batch_idx, batch_size):
 
 sdf = torch.rand_like(x_nx3[:,0]) - 0.1 # randomly init SDF
 sdf    = torch.nn.Parameter(sdf.clone().detach(), requires_grad=True)
-weight = torch.zeros((cube_fx8.shape[0], 21), dtype=torch.float, device='cuda') 
-weight    = torch.nn.Parameter(weight.clone().detach(), requires_grad=True)
+# weight = torch.zeros((cube_fx8.shape[0], 21), dtype=torch.float, device='cuda') 
+# weight    = torch.nn.Parameter(weight.clone().detach(), requires_grad=True)
 deform = torch.nn.Parameter(torch.zeros_like(x_nx3), requires_grad=True)
 
 # optimizer = torch.optim.Adam([{"params": params, "lr": lr},
 #                             #   {"params": embeddings.parameters(), "lr": lr}
 #                               ])
-optimizer = torch.optim.Adam([sdf, weight, deform])
+optimizer = torch.optim.Adam([sdf, deform])
 scheduler = torch.optim.lr_scheduler.LambdaLR(
     optimizer,
     lr_lambda=lambda x: max(0.0, 10**(-x*0.0002)))
@@ -280,6 +288,8 @@ embed_fn, _ = get_embedder(2)
 # pcd, _ = trimesh.sample.sample_surface(my_load_mesh(0), 10000, seed=319)
 # pcd = torch.from_numpy(pcd).to(device, torch.float32)
 
+gt_mesh = my_load_mesh(2)
+
 def train_one_itr(it, b,
                   all_fg_part_indices, 
                   batch_points, batch_values, batch_occ,
@@ -308,51 +318,51 @@ def train_one_itr(it, b,
 
     # sdf_loss = loss_f(pred_sdf, batch_values)
 
-    if it >= 0:
-        mesh_loss = 0
-        for ele in range(batch_size):
-            gt_mesh = my_load_mesh(batch_size*b + ele)
-            mv, mvp = render.get_random_camera_batch(
-                8, iter_res=train_res, device=device, use_kaolin=False)
-            target = render.render_mesh_paper(gt_mesh, mv, mvp, train_res)
+    # if it >= 0:
+    #     mesh_loss = 0
+    #     for ele in range(batch_size):
+    # gt_mesh = my_load_mesh(batch_size*b + ele)
+    mv, mvp = render.get_random_camera_batch(
+        8, iter_res=train_res, device=device, use_kaolin=False)
+    target = render.render_mesh_paper(gt_mesh, mv, mvp, train_res)
 
-            grid_verts = x_nx3 + (2-1e-8) / (fc_voxel_grid_res * 2) * torch.tanh(
-                # deform[ele])
-                deform)
-            # mod_sdf = torch.squeeze(pred_sdf[ele])
-            mod_sdf = torch.squeeze(sdf)
-            vertices, faces, L_dev = fc(
-                grid_verts, mod_sdf,
-                cube_fx8, fc_voxel_grid_res, training=True)
+    grid_verts = x_nx3 + (2-1e-8) / (fc_voxel_grid_res * 2) * torch.tanh(
+        # deform[ele])
+        deform)
+    # mod_sdf = torch.squeeze(pred_sdf[ele])
+    # mod_sdf = torch.squeeze(sdf)
+    vertices, faces, L_dev = fc(
+        grid_verts, sdf,
+        cube_fx8, fc_voxel_grid_res, training=True)
 
-            flexicubes_mesh = util.Mesh(vertices, faces)
+    flexicubes_mesh = util.Mesh(vertices, faces)
 
-            try: 
-                buffers = render.render_mesh_paper(flexicubes_mesh, mv, mvp, train_res)
-            except Exception as e:
-                import logging, traceback
-                logging.error(traceback.format_exc())
-                # print(torch.min(pred_sdf[ele]))
-                # print(torch.max(pred_sdf[ele]))
-                print(torch.min(sdf))
-                print(torch.max(sdf))
+    try: 
+        buffers = render.render_mesh_paper(flexicubes_mesh, mv, mvp, train_res)
+    except Exception as e:
+        import logging, traceback
+        logging.error(traceback.format_exc())
+        # print(torch.min(pred_sdf[ele]))
+        # print(torch.max(pred_sdf[ele]))
+        print(torch.min(sdf))
+        print(torch.max(sdf))
 
-            mask_loss = (buffers['mask'] - target['mask']).abs().mean()
-            depth_loss = (((((buffers['depth'] - (target['depth']))* target['mask'])**2).sum(-1)+1e-8)).sqrt().mean() * 10
+    mask_loss = (buffers['mask'] - target['mask']).abs().mean()
+    depth_loss = (((((buffers['depth'] - (target['depth']))* target['mask'])**2).sum(-1)+1e-8)).sqrt().mean() * 10
 
-            mesh_loss += mask_loss + depth_loss
+    mesh_loss = mask_loss + depth_loss
         # mesh_loss /= batch_size
 
         # loss = mesh_loss + sdf_loss
-        loss = mesh_loss
+        # loss = mesh_loss
     # else:
     #     loss = sdf_loss
 
-    if b == n_batches - 1:
-        # writer.add_scalar('occ loss', loss2, it)
-        # writer.add_scalar('sdf loss', sdf_loss, it)
-        if it >= 0:
-            writer.add_scalar('mesh loss', mesh_loss, it)
+    # if b == n_batches - 1:
+    #     # writer.add_scalar('occ loss', loss2, it)
+    #     # writer.add_scalar('sdf loss', sdf_loss, it)
+    #     if it >= 0:
+    #         writer.add_scalar('mesh loss', mesh_loss, it)
 
     if it != 0 and (it) % 100 == 0 or it == (iterations - 1): 
         print ('Iteration {} - loss: {:.5f}, # of mesh vertices: {}, # of mesh faces: {}'.format(it, loss, vertices.shape[0], faces.shape[0]))
@@ -365,15 +375,15 @@ def train_one_itr(it, b,
         timelapse.add_mesh_batch(
             iteration=it,
             category='gt_mesh',
-            vertices_list=[torch.from_numpy(np.array(my_load_mesh(0, True).vertices))],
-            faces_list=[torch.from_numpy(np.array(my_load_mesh(0, True).faces))]
+            vertices_list=[torch.from_numpy(np.array(my_load_mesh(2, True).vertices))],
+            faces_list=[torch.from_numpy(np.array(my_load_mesh(2, True).faces))]
         )
 
-    loss.backward()
+    mesh_loss.backward()
     optimizer.step()
     scheduler.step()
 
-    return loss
+    return mesh_loss
 
 
 if args.train:
