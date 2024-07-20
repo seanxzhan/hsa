@@ -47,7 +47,7 @@ class SDFDecoder(torch.nn.Module):
         optimizer = torch.optim.Adam(list(self.parameters()), lr=1e-4)
 
         for i in tqdm(range(iter)):
-            p = torch.rand((1, 1024,3), device='cuda') - 0.5
+            p = torch.rand((1024,3), device='cuda') - 0.5
             ref_value  = torch.sqrt((p**2).sum(-1)) - 0.3
             # output = self.get_sdf_deform(
             #     p,

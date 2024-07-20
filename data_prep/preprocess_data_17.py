@@ -956,7 +956,8 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
 
     # print(f"creating dataset: {fn}")
     for i, anno_id in enumerate(tqdm(all_valid_anno_ids)):
-        # print(anno_id)
+        print(anno_id)
+        exit(0)
         out = make_data_for_one(anno_id, unique_name_to_new_id,
                                 all_entire_meshes[i],
                                 all_ori_ids_to_new_ids[i])
@@ -1225,8 +1226,9 @@ if __name__ == "__main__":
 
     # export_data(ids_w_four_parts, save_data=True,
     #             start=0, end=len(ids_w_four_parts))
-    export_data(ids_w_four_parts, save_data=True,
-                start=0, end=100)
+    # export_data(ids_w_four_parts, save_data=True,
+    #             start=0, end=100)
+    print(ids_w_four_parts[:5])
     exit(0)
 
     # merge_partnet_after_merging('39446', info=True)
