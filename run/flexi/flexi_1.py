@@ -10,7 +10,7 @@ import numpy as np
 from typing import Dict
 from flexi.flexicubes import FlexiCubes
 from flexi import render, util
-from occ_networks.flexitest_decoder import SDFDecoder, get_embedder
+from occ_networks.flexi_decoder import SDFDecoder, get_embedder
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--id', type=str)
@@ -113,6 +113,7 @@ fc = FlexiCubes(device)
 x_nx3, cube_fx8 = fc.construct_voxel_grid(fc_voxel_grid_res)
 # NOTE: 2* is necessary! Dunno why
 x_nx3 = 2*x_nx3
+# x_nx3 = x_nx3.unsqueeze(0)
 # x_nx3 = x_nx3.clone().detach().requires_grad_(True)
 
 embed_dim = 128
@@ -145,7 +146,7 @@ for it in range(iterations):
     model_out = model.get_sdf_deform(x_nx3, embed_feat)
     # NOTE: using tanh gives better results, training might be worse with smaller lr
     # sdf, deform = torch.tanh(model_out[:, :1]), model_out[:, 1:]
-    sdf, deform = model_out[:, :1], model_out[:, 1:]
+    sdf, deform = model_out[0, :, :1], model_out[0, :, 1:]
 
     mv, mvp = render.get_random_camera_batch(
         8, iter_res=train_res, device=device, use_kaolin=False)

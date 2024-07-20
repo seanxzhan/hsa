@@ -28,18 +28,20 @@ class SDFDecoder(torch.nn.Module):
 
         refine_out_dims = 4
         self.refine_net = SmallMLPs(input_dims,
-                                    feature_dims,
+                                    16,
                                     internal_dims,
                                     hidden,
                                     refine_out_dims,
                                     multires)
         
-        # self.feature_volume = VoxDecoder(feature_size=num_parts*feature_dims)
+        self.feature_volume = VoxDecoder(feature_size=feature_dims)
 
     def get_sdf_deform(self, points, features=None):
-        # feat_vol = self.feature_volume(features).view(-1, 16, 32**3).transpose(1, 2)
-        # return self.refine_net.forward(points, feat_vol)
-        return self.refine_net.forward(points)
+        if features is not None:
+            feat_vol = self.feature_volume(features).view(1, 16, points.shape[0]).transpose(1, 2)
+            return self.refine_net.forward(points.unsqueeze(0), feat_vol)
+        else:
+            return self.refine_net.forward(points, torch.zeros((points.shape[0], 16)).to('cuda'))
         # print(features.shape)
         # return self.refine_net.forward(points, features.expand(points.shape[0], -1))
     
@@ -53,8 +55,8 @@ class SDFDecoder(torch.nn.Module):
             ref_value  = torch.sqrt((p**2).sum(-1)) - 0.3
             # output = self.get_sdf_deform(p, torch.zeros((1, 128)).to('cuda'))
             output = self.get_sdf_deform(p)
-            loss = loss_fn(torch.tanh(output[...,0]), ref_value)
-            # loss = loss_fn(output[...,0], ref_value)
+            # loss = loss_fn(torch.tanh(output[...,0]), ref_value)
+            loss = loss_fn(output[...,0], ref_value)
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
@@ -190,7 +192,9 @@ class VoxDecoder(torch.nn.Module):
     def forward(self, feature):
         mapped = self.fc(feature)
         x = mapped.view(-1, 64, 1, 1, 1)
-        return self.net(x)
+        x = self.net(x)
+        # print(x.shape)
+        return x
         # for layer in self.net:
         #     x = layer(x)
         #     print(x.shape)
