@@ -30,7 +30,7 @@ ds_start, ds_end = 0, 100
 OVERFIT = args.of
 overfit_idx = args.of_idx
 device = 'cuda'
-lr = 0.001
+lr = 0.002
 iterations = 15000
 train_res = [512, 512]
 fc_voxel_grid_res = 31
@@ -113,14 +113,16 @@ x_nx3, cube_fx8 = fc.construct_voxel_grid(fc_voxel_grid_res)
 # NOTE: 2* is necessary! Dunno why
 x_nx3 = 2*x_nx3
 
+x_nx3 = x_nx3.clone().detach().requires_grad_(True)
+
 model = SDFDecoder(input_dims=3,
                    num_parts=1,
                    feature_dims=0,
                    internal_dims=128,
-                   hidden=8,
+                   hidden=5,
                    multires=2).to(device)
 params = [p for _, p in model.named_parameters()]
-model.pre_train_sphere(1000)
+model.pre_train_sphere(2000)
 
 # sdf = torch.rand_like(x_nx3[:,0]) - 0.1 # randomly init SDF
 # sdf    = torch.nn.Parameter(sdf.clone().detach(), requires_grad=True)
@@ -143,9 +145,11 @@ for it in range(iterations):
     optimizer.zero_grad()
 
     model_out = model.get_sdf_deform(x_nx3)
-    # sdf, deform = torch.tanh(model_out[:, :1]), model_out[:, 1:]
-    sdf, deform = model_out[:, :1], model_out[:, 1:]
+    # NOTE: using tanh gives better results, training might be worse with smaller lr
+    sdf, deform = torch.tanh(model_out[:, :1]), model_out[:, 1:]
+    # sdf, deform = model_out[:, :1], model_out[:, 1:]
 
+    # NOTE: don't use ground truth SDF supervision
     # total_loss = loss_f(sdf, gt_sdf)
     # if it <= 500:
     #     total_loss = loss_f(sdf[::100], gt_sdf[::100])
@@ -156,6 +160,13 @@ for it in range(iterations):
     #     optimizer.step()
     #     scheduler.step()
     #     continue
+
+    # NOTE: eikonal loss does make SDF smoother, but final result isn't as great
+    # gradient = torch.autograd.grad(outputs=sdf, inputs=x_nx3,
+    #                                grad_outputs=torch.ones_like(sdf),
+    #                                create_graph=True, retain_graph=True)[0]
+    # grad_norm = torch.norm(gradient, dim=-1)
+    # eikonal_loss = ((grad_norm - 1.0) ** 2).mean()
 
     mv, mvp = render.get_random_camera_batch(
         8, iter_res=train_res, device=device, use_kaolin=False)
@@ -180,6 +191,7 @@ for it in range(iterations):
     depth_loss = (((((buffers['depth'] - (target['depth']))* target['mask'])**2).sum(-1)+1e-8)).sqrt().mean() * 10
 
     total_loss = mask_loss + depth_loss
+    # total_loss = mask_loss + depth_loss + eikonal_loss
 
     total_loss.backward()
     optimizer.step()
