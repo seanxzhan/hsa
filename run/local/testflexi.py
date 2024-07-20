@@ -31,7 +31,7 @@ OVERFIT = args.of
 overfit_idx = args.of_idx
 device = 'cuda'
 lr = 0.001
-iterations = 10000
+iterations = 15000
 train_res = [512, 512]
 fc_voxel_grid_res = 31
 model_idx = 2
@@ -143,7 +143,8 @@ for it in range(iterations):
     optimizer.zero_grad()
 
     model_out = model.get_sdf_deform(x_nx3)
-    sdf, deform = torch.tanh(model_out[:, :1]), model_out[:, 1:]
+    # sdf, deform = torch.tanh(model_out[:, :1]), model_out[:, 1:]
+    sdf, deform = model_out[:, :1], model_out[:, 1:]
 
     # total_loss = loss_f(sdf, gt_sdf)
     # if it <= 500:
