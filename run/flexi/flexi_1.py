@@ -31,7 +31,7 @@ ds_start, ds_end = 0, 100
 OVERFIT = args.of
 overfit_idx = args.of_idx
 device = 'cuda'
-lr = 0.0015
+lr = 0.001
 iterations = 15000
 train_res = [512, 512]
 fc_voxel_grid_res = 31
@@ -113,21 +113,25 @@ fc = FlexiCubes(device)
 x_nx3, cube_fx8 = fc.construct_voxel_grid(fc_voxel_grid_res)
 # NOTE: 2* is necessary! Dunno why
 x_nx3 = 2*x_nx3
+# x_nx3 = x_nx3.clone().detach().requires_grad_(True)
 
-x_nx3 = x_nx3.clone().detach().requires_grad_(True)
+embed_dim = 128
+embeddings = torch.nn.Embedding(1, embed_dim).to(device)
+torch.nn.init.normal_(embeddings.weight.data, 0.0, 1 / math.sqrt(embed_dim))
 
 model = SDFDecoder(input_dims=3,
                    num_parts=1,
-                   feature_dims=0,
+                   feature_dims=embed_dim,
                    internal_dims=128,
                    hidden=5,
                    multires=2).to(device)
 params = [p for _, p in model.named_parameters()]
 model.pre_train_sphere(1000)
 
-optimizer = torch.optim.Adam(params=params, lr=lr)
+optimizer = torch.optim.Adam([{"params": params, "lr": lr},
+                              {"params": embeddings.parameters(), "lr": lr}])
 scheduler = torch.optim.lr_scheduler.LambdaLR(
-    optimizer, lr_lambda=lambda x: lr_schedule(x)) 
+    optimizer, lr_lambda=lambda x: lr_schedule(x))
 
 mse = torch.nn.MSELoss()
 def loss_f(pred_values, gt_values):
@@ -137,10 +141,11 @@ def loss_f(pred_values, gt_values):
 for it in range(iterations):
     optimizer.zero_grad()
 
-    model_out = model.get_sdf_deform(x_nx3)
+    embed_feat = embeddings(torch.arange(0, 1).to(device))
+    model_out = model.get_sdf_deform(x_nx3, embed_feat)
     # NOTE: using tanh gives better results, training might be worse with smaller lr
-    sdf, deform = torch.tanh(model_out[:, :1]), model_out[:, 1:]
-    # sdf, deform = model_out[:, :1], model_out[:, 1:]
+    # sdf, deform = torch.tanh(model_out[:, :1]), model_out[:, 1:]
+    sdf, deform = model_out[:, :1], model_out[:, 1:]
 
     mv, mvp = render.get_random_camera_batch(
         8, iter_res=train_res, device=device, use_kaolin=False)
@@ -161,7 +166,6 @@ for it in range(iterations):
     depth_loss = (((((buffers['depth'] - (target['depth']))* target['mask'])**2).sum(-1)+1e-8)).sqrt().mean() * 10
 
     total_loss = mask_loss + depth_loss
-    # total_loss = mask_loss + depth_loss + eikonal_loss
 
     total_loss.backward()
     optimizer.step()

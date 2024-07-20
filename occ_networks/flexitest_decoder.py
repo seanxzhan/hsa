@@ -28,7 +28,7 @@ class SDFDecoder(torch.nn.Module):
 
         refine_out_dims = 4
         self.refine_net = SmallMLPs(input_dims,
-                                    0,
+                                    feature_dims,
                                     internal_dims,
                                     hidden,
                                     refine_out_dims,
@@ -39,7 +39,9 @@ class SDFDecoder(torch.nn.Module):
     def get_sdf_deform(self, points, features=None):
         # feat_vol = self.feature_volume(features).view(-1, 16, 32**3).transpose(1, 2)
         # return self.refine_net.forward(points, feat_vol)
-        return self.refine_net.forward(points)
+        # return self.refine_net.forward(points)
+        # print(features.shape)
+        return self.refine_net.forward(points, features.expand(points.shape[0], -1))
     
     def pre_train_sphere(self, iter):
         print("Initialize SDF to sphere")
@@ -49,11 +51,10 @@ class SDFDecoder(torch.nn.Module):
         for i in tqdm(range(iter)):
             p = torch.rand((1024,3), device='cuda') - 0.5
             ref_value  = torch.sqrt((p**2).sum(-1)) - 0.3
-            # output = self.get_sdf_deform(
-            #     p,
-            #     torch.zeros((1, self.num_parts*self.feature_dims)).to('cuda'))
-            output = self.get_sdf_deform(p)
-            loss = loss_fn(torch.tanh(output[...,0]), ref_value)
+            output = self.get_sdf_deform(p, torch.zeros((1, 128)).to('cuda'))
+            # output = self.get_sdf_deform(p)
+            # loss = loss_fn(torch.tanh(output[...,0]), ref_value)
+            loss = loss_fn(output[...,0], ref_value)
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
@@ -89,7 +90,7 @@ class SmallMLPs(torch.nn.Module):
     def forward(self, p, feature=None):
         if self.embed_fn is not None:
             p = self.embed_fn(p)
-        if feature:
+        if feature is not None:
             p = torch.concat((p, feature), dim=-1)
         out = self.net(p)
         return out
