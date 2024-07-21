@@ -38,8 +38,10 @@ class SDFDecoder(torch.nn.Module):
 
     def get_sdf_deform(self, points, features=None):
         if features is not None:
-            feat_vol = self.feature_volume(features).view(1, 16, points.shape[0]).transpose(1, 2)
-            return self.refine_net.forward(points.unsqueeze(0), feat_vol)
+            feat_vol = self.feature_volume(features).view(-1, 16, points.shape[0]).transpose(1, 2)
+            return self.refine_net.forward(
+                points.unsqueeze(0).expand(feat_vol.shape[0], -1, -1),
+                feat_vol)
         else:
             return self.refine_net.forward(points, torch.zeros((points.shape[0], 16)).to('cuda'))
         # print(features.shape)
