@@ -11,7 +11,7 @@ from typing import Dict
 from torch.utils.tensorboard import SummaryWriter
 from flexi.flexicubes import FlexiCubes
 from flexi import render, util
-from occ_networks.flexi_decoder import SDFDecoder, get_embedder
+from occ_networks.flexi_decoder_3 import SDFDecoder, get_embedder
 from utils import misc
 
 parser = argparse.ArgumentParser()
@@ -35,7 +35,7 @@ ds_start, ds_end = 0, 100
 OVERFIT = args.of
 overfit_idx = args.of_idx
 device = 'cuda'
-lr = 0.002
+lr = 0.00125
 iterations = 15000
 train_res = [512, 512]
 fc_voxel_grid_res = 31
