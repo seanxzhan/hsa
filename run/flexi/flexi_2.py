@@ -36,7 +36,7 @@ iterations = 15000
 train_res = [512, 512]
 fc_voxel_grid_res = 31
 model_idx = 2
-expt_id = 1
+expt_id = 2
 
 partnet_dir = '/datasets/PartNet'
 partnet_index_path = '/sota/partnet_dataset/stats/all_valid_anno_info.txt'
@@ -114,7 +114,7 @@ x_nx3, cube_fx8 = fc.construct_voxel_grid(fc_voxel_grid_res)
 # NOTE: 2* is necessary! Dunno why
 x_nx3 = 2*x_nx3
 # x_nx3 = x_nx3.unsqueeze(0)
-# x_nx3 = x_nx3.clone().detach().requires_grad_(True)
+x_nx3 = x_nx3.clone().detach().requires_grad_(True)
 
 embed_dim = 128
 embeddings = torch.nn.Embedding(1, embed_dim).to(device)
@@ -149,6 +149,13 @@ for it in range(iterations):
     sdf, deform = torch.tanh(model_out[0, :, :1]), model_out[0, :, 1:]
     # sdf, deform = model_out[0, :, :1], model_out[0, :, 1:]
 
+    # NOTE: eikonal loss does make SDF smoother, but final result isn't as great
+    gradient = torch.autograd.grad(outputs=sdf, inputs=x_nx3,
+                                   grad_outputs=torch.ones_like(sdf),
+                                   create_graph=True, retain_graph=True)[0]
+    grad_norm = torch.norm(gradient, dim=-1)
+    eikonal_loss = ((grad_norm - 1.0) ** 2).mean()
+
     mv, mvp = render.get_random_camera_batch(
         8, iter_res=train_res, device=device, use_kaolin=False)
     target = render.render_mesh_paper(gt_mesh, mv, mvp, train_res)
@@ -167,7 +174,7 @@ for it in range(iterations):
     mask_loss = (buffers['mask'] - target['mask']).abs().mean()
     depth_loss = (((((buffers['depth'] - (target['depth']))* target['mask'])**2).sum(-1)+1e-8)).sqrt().mean() * 10
 
-    total_loss = mask_loss + depth_loss
+    total_loss = mask_loss + depth_loss + eikonal_loss
 
     total_loss.backward()
     optimizer.step()
@@ -188,6 +195,6 @@ for it in range(iterations):
             faces_list=[faces.cpu()]
         )
     
-np.save(os.path.join(results_dir, f'{anno_id}_flexi_sdf.npy'), sdf.detach().cpu().numpy())
+np.save(os.path.join(results_dir, f'{anno_id}_flexi_sdf_{expt_id}.npy'), sdf.detach().cpu().numpy())
 mesh_np = trimesh.Trimesh(vertices = vertices.detach().cpu().numpy(), faces=faces.detach().cpu().numpy(), process=False)
-mesh_np.export(os.path.join(results_dir, 'flexi_mesh.obj'))
+mesh_np.export(os.path.join(results_dir, f'{anno_id}_flexi_mesh_{expt_id}.obj'))

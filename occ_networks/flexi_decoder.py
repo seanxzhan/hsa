@@ -55,8 +55,8 @@ class SDFDecoder(torch.nn.Module):
             ref_value  = torch.sqrt((p**2).sum(-1)) - 0.3
             # output = self.get_sdf_deform(p, torch.zeros((1, 128)).to('cuda'))
             output = self.get_sdf_deform(p)
-            # loss = loss_fn(torch.tanh(output[...,0]), ref_value)
-            loss = loss_fn(output[...,0], ref_value)
+            loss = loss_fn(torch.tanh(output[...,0]), ref_value)
+            # loss = loss_fn(output[...,0], ref_value)
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
