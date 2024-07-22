@@ -223,6 +223,10 @@ if args.test:
     model_idx = args.test_idx
     anno_id = model_idx_to_anno_id[model_idx]
 
+    results_dir = os.path.join(results_dir, anno_id)
+    misc.check_dir(results_dir)
+    print("results dir: ", results_dir)
+
     checkpoint = torch.load(os.path.join(ckpt_dir, f'model_{it}.pt'))
     model.load_state_dict(checkpoint['model_state_dict'])
     embeddings = torch.nn.Embedding(num_shapes, embed_dim).to(device)
@@ -247,6 +251,50 @@ if args.test:
     #                  faces.cpu().numpy(),
     #                  mesh_out_path)
 
-    np.save(os.path.join(results_dir, f'{anno_id}_flexi_sdf_{expt_id}.npy'), sdf.detach().cpu().numpy())
-    mesh_np = trimesh.Trimesh(vertices = vertices.detach().cpu().numpy(), faces=faces.detach().cpu().numpy(), process=False)
-    mesh_np.export(os.path.join(results_dir, f'{anno_id}_flexi_mesh_{expt_id}.obj'))
+    from utils import visualize    
+    gt_color = [31, 119, 180, 255]
+    mesh_pred_path = os.path.join(results_dir, 'mesh_pred.png')
+    mesh_gt_path = os.path.join(results_dir, 'mesh_gt.png')
+    lst_paths = [
+        mesh_gt_path,
+        mesh_pred_path]
+
+    mag = 0.8; white_bg = False
+
+    # ------------ gt ------------
+    print("visualizing gt mesh")
+    obj_dir = os.path.join(partnet_dir, anno_id, 'vox_models')
+    assert os.path.exists(obj_dir)
+    gt_mesh_path = os.path.join(obj_dir, f'{anno_id}.obj')
+    gt_mesh = trimesh.load(gt_mesh_path, file_type='obj', force='mesh')
+    gt_vertices_aligned = torch.from_numpy(
+        gt_mesh.vertices).to(device).to(torch.float32)
+    gt_vertices_aligned = kaolin.ops.pointcloud.center_points(
+        gt_vertices_aligned.unsqueeze(0), normalize=True).squeeze(0)
+    gt_vertices_aligned = gt_vertices_aligned.cpu().numpy()
+    aligned_gt_mesh = trimesh.Trimesh(gt_vertices_aligned, gt_mesh.faces)
+    aligned_gt_mesh.export(os.path.join(results_dir, 
+                                        f'{anno_id}_mesh_gt_{expt_id}.obj'))
+    aligned_gt_mesh.visual.vertex_colors = gt_color
+    gt_mesh_vis = visualize.save_mesh_vis(aligned_gt_mesh, mesh_gt_path,
+                                          mag=mag, white_bg=white_bg,
+                                          save_img=False)
+    
+    # ------------ pred ------------
+    print("visualizing pred mesh")
+    pred_faces = faces.detach().cpu().numpy()
+    pred_vertices_aligned = kaolin.ops.pointcloud.center_points(
+        vertices.detach().unsqueeze(0), normalize=True).squeeze(0)
+    pred_vertices_aligned = pred_vertices_aligned.cpu().numpy()
+    pred_mesh = trimesh.Trimesh(pred_vertices_aligned, pred_faces)
+    pred_mesh.export(os.path.join(results_dir,
+                                  f'{anno_id}_flexi_mesh_{expt_id}.obj'))
+    pred_mesh_vis = visualize.save_mesh_vis(pred_mesh, mesh_pred_path,
+                                            mag=mag, white_bg=white_bg,
+                                            save_img=False)
+    
+    print("saving images")
+    visualize.stitch_imges(
+        os.path.join(results_dir,f'{anno_id}_results_{expt_id}.png'),
+        images=[gt_mesh_vis, pred_mesh_vis],
+        adj=100)

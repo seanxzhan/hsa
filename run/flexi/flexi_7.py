@@ -18,6 +18,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--id', type=str)
 parser.add_argument('--train', action="store_true")
 parser.add_argument('--test', action="store_true")
+parser.add_argument('--it', type=int)
 parser.add_argument('--test_idx', '--ti', type=int)
 parser.add_argument('--of', action="store_true", default=False)
 parser.add_argument('--of_idx', '--oi', type=int)
@@ -34,7 +35,7 @@ OVERFIT = args.of
 overfit_idx = args.of_idx
 device = 'cuda'
 lr = 0.00125
-iterations = 10000
+iterations = 10000; iterations += 1
 train_res = [512, 512]
 fc_voxel_grid_res = 31
 # model_idx = 2
@@ -108,34 +109,26 @@ def my_load_mesh(model_idx, tri=False):
     else:
         return trimesh.Trimesh(gt_vertices_aligned, gt_mesh.faces)
 
-# gt_mesh = my_load_mesh(model_idx)
-# # gt_mesh = my_load_mesh(model_idx, tri=True)
-# # gt_mesh.export(os.path.join(results_dir, 'gt_mesh.obj'))
-# anno_id = model_idx_to_anno_id[model_idx]
-# timelapse.add_mesh_batch(category='gt_mesh',
-#                          vertices_list=[gt_mesh.vertices.cpu()],
-#                          faces_list=[gt_mesh.faces.cpu()])
-# np.save(os.path.join(results_dir, f'{anno_id}_gt_sdf.npy'), values[model_idx])
-
 num_shapes = 10
 
+# ------------ init flexicubes ------------
 fc = FlexiCubes(device)
 x_nx3, cube_fx8 = fc.construct_voxel_grid(fc_voxel_grid_res)
 # NOTE: 2* is necessary! Dunno why
 x_nx3 = 2*x_nx3
-
 batch_points = x_nx3.clone().to(device)
 x_nx3 = x_nx3.clone().detach().requires_grad_(True)
 
-# batch_points = torch.from_numpy(normalized_points[model_idx]).to(device)
-# batch_points = x_nx3.clone().to(device)
+# ------------ init gt meshes ------------
 gt_occ = torch.from_numpy(occ[0:num_shapes]).to(device)
 gt_meshes = [my_load_mesh(s) for s in range(0, num_shapes)]
 
+# ------------ embeddings ------------
 embed_dim = 128
 embeddings = torch.nn.Embedding(num_shapes, embed_dim).to(device)
 torch.nn.init.normal_(embeddings.weight.data, 0.0, 1 / math.sqrt(embed_dim))
 
+# ------------ network ------------
 num_parts = 1
 model = SDFDecoder(input_dims=3,
                    num_parts=num_parts,
@@ -146,11 +139,13 @@ model = SDFDecoder(input_dims=3,
 params = [p for _, p in model.named_parameters()]
 model.pre_train_sphere(1000)
 
+# ------------ optimizer ------------
 optimizer = torch.optim.Adam([{"params": params, "lr": lr},
                               {"params": embeddings.parameters(), "lr": lr}])
 scheduler = torch.optim.lr_scheduler.LambdaLR(
     optimizer, lr_lambda=lambda x: lr_schedule(x))
 
+# ------------ loss ------------
 mse = torch.nn.MSELoss()
 def loss_f(pred_values, gt_values):
     recon_loss = mse(pred_values, gt_values)
@@ -204,7 +199,11 @@ if args.train:
 
             all_loss += mask_loss + depth_loss + eikonal_loss    
 
-        total_loss = loss_occ + all_loss / num_shapes
+        mesh_loss = all_loss / num_shapes
+        total_loss = loss_occ + mesh_loss
+        writer.add_scalar('iteration loss', total_loss, it)
+        writer.add_scalar('occ loss', loss_occ, it)
+        writer.add_scalar('mesh loss', mesh_loss, it)
 
         total_loss.backward()
         optimizer.step()
@@ -224,3 +223,83 @@ if args.train:
                 vertices_list=[vertices.cpu()],
                 faces_list=[faces.cpu()]
             )
+            torch.save({
+                'epoch': it,
+                'model_state_dict': model.state_dict(),
+                'embeddings_state_dict': embeddings.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(),
+                'total_loss': total_loss,
+                }, os.path.join(ckpt_dir, f'model_{it}.pt'))
+    writer.close()
+
+
+if args.test:
+    it = args.it
+    model_idx = args.test_idx
+    anno_id = model_idx_to_anno_id[model_idx]
+
+    results_dir = os.path.join(results_dir, anno_id)
+    misc.check_dir(results_dir)
+    print("results dir: ", results_dir)
+
+    checkpoint = torch.load(os.path.join(ckpt_dir, f'model_{it}.pt'))
+    model.load_state_dict(checkpoint['model_state_dict'])
+    embeddings = torch.nn.Embedding(num_shapes, embed_dim).to(device)
+    embeddings.load_state_dict(checkpoint['embeddings_state_dict'])
+
+    embed_feat = embeddings(torch.arange(model_idx, model_idx+1).to(device))
+
+    with torch.no_grad():
+        model_out = model.get_sdf_deform(x_nx3, embed_feat)
+        sdf, deform = torch.tanh(model_out[0, :, :1]), model_out[0, :, 1:]
+        grid_verts = x_nx3 + (2-1e-8) / (fc_voxel_grid_res * 2) * torch.tanh(deform)
+        vertices, faces, L_dev = fc(
+            grid_verts, sdf, cube_fx8, fc_voxel_grid_res, training=True)
+
+    from utils import visualize    
+    gt_color = [31, 119, 180, 255]
+    mesh_pred_path = os.path.join(results_dir, 'mesh_pred.png')
+    mesh_gt_path = os.path.join(results_dir, 'mesh_gt.png')
+    lst_paths = [
+        mesh_gt_path,
+        mesh_pred_path]
+
+    mag = 0.8; white_bg = False
+
+    # ------------ gt ------------
+    print("visualizing gt mesh")
+    obj_dir = os.path.join(partnet_dir, anno_id, 'vox_models')
+    assert os.path.exists(obj_dir)
+    gt_mesh_path = os.path.join(obj_dir, f'{anno_id}.obj')
+    gt_mesh = trimesh.load(gt_mesh_path, file_type='obj', force='mesh')
+    gt_vertices_aligned = torch.from_numpy(
+        gt_mesh.vertices).to(device).to(torch.float32)
+    gt_vertices_aligned = kaolin.ops.pointcloud.center_points(
+        gt_vertices_aligned.unsqueeze(0), normalize=True).squeeze(0)
+    gt_vertices_aligned = gt_vertices_aligned.cpu().numpy()
+    aligned_gt_mesh = trimesh.Trimesh(gt_vertices_aligned, gt_mesh.faces)
+    aligned_gt_mesh.export(os.path.join(results_dir, 
+                                        f'{anno_id}_mesh_gt_{expt_id}.obj'))
+    aligned_gt_mesh.visual.vertex_colors = gt_color
+    gt_mesh_vis = visualize.save_mesh_vis(aligned_gt_mesh, mesh_gt_path,
+                                          mag=mag, white_bg=white_bg,
+                                          save_img=False)
+    
+    # ------------ pred ------------
+    print("visualizing pred mesh")
+    pred_faces = faces.detach().cpu().numpy()
+    pred_vertices_aligned = kaolin.ops.pointcloud.center_points(
+        vertices.detach().unsqueeze(0), normalize=True).squeeze(0)
+    pred_vertices_aligned = pred_vertices_aligned.cpu().numpy()
+    pred_mesh = trimesh.Trimesh(pred_vertices_aligned, pred_faces)
+    pred_mesh.export(os.path.join(results_dir,
+                                  f'{anno_id}_flexi_mesh_{expt_id}.obj'))
+    pred_mesh_vis = visualize.save_mesh_vis(pred_mesh, mesh_pred_path,
+                                            mag=mag, white_bg=white_bg,
+                                            save_img=False)
+    
+    print("saving images")
+    visualize.stitch_imges(
+        os.path.join(results_dir,f'{anno_id}_results_{expt_id}.png'),
+        images=[gt_mesh_vis, pred_mesh_vis],
+        adj=100)
