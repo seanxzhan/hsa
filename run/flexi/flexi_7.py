@@ -137,7 +137,7 @@ model = SDFDecoder(input_dims=3,
                    hidden=5,
                    multires=2).to(device)
 params = [p for _, p in model.named_parameters()]
-model.pre_train_sphere(1000)
+model.pre_train_sphere(1000) if args.train else None
 
 # ------------ optimizer ------------
 optimizer = torch.optim.Adam([{"params": params, "lr": lr},

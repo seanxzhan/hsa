@@ -30,7 +30,7 @@ ds_start, ds_end = 0, 100
 OVERFIT = args.of
 overfit_idx = args.of_idx
 device = 'cuda'
-lr = 0.002
+lr = 0.001
 iterations = 15000
 train_res = [512, 512]
 fc_voxel_grid_res = 31
@@ -119,7 +119,7 @@ model = SDFDecoder(input_dims=3,
                    num_parts=1,
                    feature_dims=0,
                    internal_dims=128,
-                   hidden=5,
+                   hidden=8,
                    multires=2).to(device)
 params = [p for _, p in model.named_parameters()]
 model.pre_train_sphere(2000)
@@ -146,8 +146,8 @@ for it in range(iterations):
 
     model_out = model.get_sdf_deform(x_nx3)
     # NOTE: using tanh gives better results, training might be worse with smaller lr
-    sdf, deform = torch.tanh(model_out[:, :1]), model_out[:, 1:]
-    # sdf, deform = model_out[:, :1], model_out[:, 1:]
+    # sdf, deform = torch.tanh(model_out[:, :1]), model_out[:, 1:]
+    sdf, deform = model_out[:, :1], model_out[:, 1:]
 
     # NOTE: don't use ground truth SDF supervision
     # total_loss = loss_f(sdf, gt_sdf)
@@ -218,4 +218,4 @@ for it in range(iterations):
     
 np.save(os.path.join(results_dir, f'{anno_id}_flexi_sdf.npy'), sdf.detach().cpu().numpy())
 mesh_np = trimesh.Trimesh(vertices = vertices.detach().cpu().numpy(), faces=faces.detach().cpu().numpy(), process=False)
-mesh_np.export(os.path.join(results_dir, 'flexi_mesh.obj'))
+mesh_np.export(os.path.join(results_dir, f'{anno_id}_flexi_mesh.obj'))
