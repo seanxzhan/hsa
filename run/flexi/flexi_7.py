@@ -33,12 +33,12 @@ ds_start, ds_end = 0, 100
 OVERFIT = args.of
 overfit_idx = args.of_idx
 device = 'cuda'
-lr = 0.0015
+lr = 0.00125
 iterations = 10000
 train_res = [512, 512]
 fc_voxel_grid_res = 31
-model_idx = 2
-expt_id = 6
+# model_idx = 2
+expt_id = 7
 
 # ------------ data dirs ------------
 partnet_dir = '/datasets/PartNet'
@@ -59,6 +59,7 @@ logs_path = os.path.join('logs', 'flexi', f'flexi_{expt_id}')
 ckpt_dir = os.path.join(logs_path, 'ckpt'); misc.check_dir(ckpt_dir)
 writer = SummaryWriter(os.path.join(logs_path, 'summary'))
 
+# ------------ data loading ------------
 train_data_path = f'data/{cat_name}_train_{pt_sample_res}_17_{ds_start}_{ds_end}.hdf5'
 train_data = h5py.File(train_data_path, 'r')
 if OVERFIT:
@@ -107,14 +108,16 @@ def my_load_mesh(model_idx, tri=False):
     else:
         return trimesh.Trimesh(gt_vertices_aligned, gt_mesh.faces)
 
-gt_mesh = my_load_mesh(model_idx)
-# gt_mesh = my_load_mesh(model_idx, tri=True)
-# gt_mesh.export(os.path.join(results_dir, 'gt_mesh.obj'))
-anno_id = model_idx_to_anno_id[model_idx]
-timelapse.add_mesh_batch(category='gt_mesh',
-                         vertices_list=[gt_mesh.vertices.cpu()],
-                         faces_list=[gt_mesh.faces.cpu()])
-np.save(os.path.join(results_dir, f'{anno_id}_gt_sdf.npy'), values[model_idx])
+# gt_mesh = my_load_mesh(model_idx)
+# # gt_mesh = my_load_mesh(model_idx, tri=True)
+# # gt_mesh.export(os.path.join(results_dir, 'gt_mesh.obj'))
+# anno_id = model_idx_to_anno_id[model_idx]
+# timelapse.add_mesh_batch(category='gt_mesh',
+#                          vertices_list=[gt_mesh.vertices.cpu()],
+#                          faces_list=[gt_mesh.faces.cpu()])
+# np.save(os.path.join(results_dir, f'{anno_id}_gt_sdf.npy'), values[model_idx])
+
+num_shapes = 10
 
 fc = FlexiCubes(device)
 x_nx3, cube_fx8 = fc.construct_voxel_grid(fc_voxel_grid_res)
@@ -126,10 +129,11 @@ x_nx3 = x_nx3.clone().detach().requires_grad_(True)
 
 # batch_points = torch.from_numpy(normalized_points[model_idx]).to(device)
 # batch_points = x_nx3.clone().to(device)
-gt_occ = torch.from_numpy(occ[model_idx:model_idx+1]).to(device)
+gt_occ = torch.from_numpy(occ[0:num_shapes]).to(device)
+gt_meshes = [my_load_mesh(s) for s in range(0, num_shapes)]
 
 embed_dim = 128
-embeddings = torch.nn.Embedding(1, embed_dim).to(device)
+embeddings = torch.nn.Embedding(num_shapes, embed_dim).to(device)
 torch.nn.init.normal_(embeddings.weight.data, 0.0, 1 / math.sqrt(embed_dim))
 
 num_parts = 1
@@ -152,72 +156,71 @@ def loss_f(pred_values, gt_values):
     recon_loss = mse(pred_values, gt_values)
     return recon_loss
 
-for it in range(iterations):
-    optimizer.zero_grad()
+if args.train:
+    for it in range(iterations):
+        optimizer.zero_grad()
 
-    embed_feat = embeddings(torch.arange(0, 1).to(device))
+        embed_feat = embeddings(torch.arange(0, num_shapes).to(device))
 
-    transformed_points = batch_points.unsqueeze(0).unsqueeze(0).expand(
-        -1, num_parts, -1, -1)
-    pred_occ = model.get_occ(transformed_points, embed_feat)
-    loss_occ = loss_f(pred_occ, gt_occ)
+        transformed_points = batch_points.unsqueeze(0).unsqueeze(0).expand(
+            num_shapes, num_parts, -1, -1)
+        pred_occ = model.get_occ(transformed_points, embed_feat)
+        loss_occ = loss_f(pred_occ, gt_occ)
 
-    # print(torch.min(pred_occ).detach().cpu().numpy(),
-    #       torch.max(pred_occ).detach().cpu().numpy())
+        model_out = model.get_sdf_deform(x_nx3, embed_feat)
+        
+        all_loss = 0
+        for s in range(num_shapes):
+            # NOTE: using tanh gives slightly better SDF results, still scattered, but -1~1
+            # NOTE: not using tanh gives better final results, range very large
+            delta_sdf, deform = torch.tanh(model_out[s, :, :1]), model_out[s, :, 1:]
+            # sdf, deform = model_out[0, :, :1], model_out[0, :, 1:]
 
-    model_out = model.get_sdf_deform(x_nx3, embed_feat)
-    # NOTE: using tanh gives slightly better SDF results, still scattered, but -1~1
-    # NOTE: not using tanh gives better final results, range very large
-    delta_sdf, deform = torch.tanh(model_out[0, :, :1]), model_out[0, :, 1:]
-    # sdf, deform = model_out[0, :, :1], model_out[0, :, 1:]
+            sdf = -loss_occ + delta_sdf
 
-    sdf = -loss_occ + delta_sdf
+            gradient = torch.autograd.grad(outputs=sdf, inputs=x_nx3,
+                                           grad_outputs=torch.ones_like(sdf),
+                                           create_graph=True, retain_graph=True)[0]
+            grad_norm = torch.norm(gradient, dim=-1)
+            eikonal_loss = ((grad_norm - 1.0) ** 2).mean()
 
-    gradient = torch.autograd.grad(outputs=sdf, inputs=x_nx3,
-                                   grad_outputs=torch.ones_like(sdf),
-                                   create_graph=True, retain_graph=True)[0]
-    grad_norm = torch.norm(gradient, dim=-1)
-    eikonal_loss = ((grad_norm - 1.0) ** 2).mean()
-
-    mv, mvp = render.get_random_camera_batch(
-        8, iter_res=train_res, device=device, use_kaolin=False)
-    target = render.render_mesh_paper(gt_mesh, mv, mvp, train_res)
-    grid_verts = x_nx3 + (2-1e-8) / (fc_voxel_grid_res * 2) * torch.tanh(deform)
-    vertices, faces, L_dev = fc(
-        grid_verts, sdf, cube_fx8, fc_voxel_grid_res, training=True)
-    flexicubes_mesh = util.Mesh(vertices, faces)
-    try: 
-        buffers = render.render_mesh_paper(flexicubes_mesh, mv, mvp, train_res)
-    except Exception as e:
-        import logging, traceback
-        logging.error(traceback.format_exc())
-        print(torch.min(sdf))
-        print(torch.max(sdf))
-        exit(0)
-    mask_loss = (buffers['mask'] - target['mask']).abs().mean()
-    depth_loss = (((((buffers['depth'] - (target['depth']))* target['mask'])**2).sum(-1)+1e-8)).sqrt().mean() * 10
-
-    total_loss = mask_loss + depth_loss + loss_occ + eikonal_loss
-
-    total_loss.backward()
-    optimizer.step()
-    scheduler.step()
-
-    if (it) % 100 == 0 or it == (iterations - 1): 
-        with torch.no_grad():
+            mv, mvp = render.get_random_camera_batch(
+                8, iter_res=train_res, device=device, use_kaolin=False)
+            target = render.render_mesh_paper(gt_meshes[s], mv, mvp, train_res)
+            grid_verts = x_nx3 + (2-1e-8) / (fc_voxel_grid_res * 2) * torch.tanh(deform)
             vertices, faces, L_dev = fc(
-                grid_verts, sdf, cube_fx8, fc_voxel_grid_res,
-                training=False)
-        print ('Iteration {} - loss: {:.5f}, # of mesh vertices: {}, # of mesh faces: {}'.format(
-            it, total_loss, vertices.shape[0], faces.shape[0]))
-        # save reconstructed mesh
-        timelapse.add_mesh_batch(
-            iteration=it+1,
-            category='extracted_mesh',
-            vertices_list=[vertices.cpu()],
-            faces_list=[faces.cpu()]
-        )
-    
-np.save(os.path.join(results_dir, f'{anno_id}_flexi_sdf_{expt_id}.npy'), sdf.detach().cpu().numpy())
-mesh_np = trimesh.Trimesh(vertices = vertices.detach().cpu().numpy(), faces=faces.detach().cpu().numpy(), process=False)
-mesh_np.export(os.path.join(results_dir, f'{anno_id}_flexi_mesh_{expt_id}.obj'))
+                grid_verts, sdf, cube_fx8, fc_voxel_grid_res, training=True)
+            flexicubes_mesh = util.Mesh(vertices, faces)
+            try: 
+                buffers = render.render_mesh_paper(flexicubes_mesh, mv, mvp, train_res)
+            except Exception as e:
+                import logging, traceback
+                logging.error(traceback.format_exc())
+                print(torch.min(sdf))
+                print(torch.max(sdf))
+                exit(0)
+            mask_loss = (buffers['mask'] - target['mask']).abs().mean()
+            depth_loss = (((((buffers['depth'] - (target['depth']))* target['mask'])**2).sum(-1)+1e-8)).sqrt().mean() * 10
+
+            all_loss += mask_loss + depth_loss + eikonal_loss    
+
+        total_loss = loss_occ + all_loss / num_shapes
+
+        total_loss.backward()
+        optimizer.step()
+        scheduler.step()
+
+        if (it) % 100 == 0 or it == (iterations - 1): 
+            with torch.no_grad():
+                vertices, faces, L_dev = fc(
+                    grid_verts, sdf, cube_fx8, fc_voxel_grid_res,
+                    training=False)
+            print ('Iteration {} - loss: {:.5f}, # of mesh vertices: {}, # of mesh faces: {}'.format(
+                it, total_loss, vertices.shape[0], faces.shape[0]))
+            # save reconstructed mesh
+            timelapse.add_mesh_batch(
+                iteration=it+1,
+                category='extracted_mesh',
+                vertices_list=[vertices.cpu()],
+                faces_list=[faces.cpu()]
+            )

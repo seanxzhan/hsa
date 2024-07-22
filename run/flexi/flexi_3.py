@@ -120,7 +120,7 @@ def my_load_mesh(model_idx, tri=False):
 #                          faces_list=[gt_mesh.faces.cpu()])
 # np.save(os.path.join(results_dir, f'{anno_id}_gt_sdf.npy'), values[model_idx])
 
-num_shapes = 25
+num_shapes = 10
 
 fc = FlexiCubes(device)
 x_nx3, cube_fx8 = fc.construct_voxel_grid(fc_voxel_grid_res)
