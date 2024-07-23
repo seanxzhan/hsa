@@ -35,12 +35,12 @@ OVERFIT = args.of
 overfit_idx = args.of_idx
 device = 'cuda'
 # lr = 0.002
-lr = 0.004
+lr = 0.005
 iterations = 10000; iterations += 1
 train_res = [512, 512]
 fc_voxel_grid_res = 31
 # model_idx = 2
-expt_id = 10
+expt_id = 11
 
 # ------------ data dirs ------------
 partnet_dir = '/datasets/PartNet'
