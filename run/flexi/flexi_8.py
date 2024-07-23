@@ -12,7 +12,7 @@ from torch.utils.tensorboard import SummaryWriter
 from flexi.flexicubes import FlexiCubes
 from flexi import render, util
 from occ_networks.flexi_decoder_4 import SDFDecoder, get_embedder
-from utils import misc
+from utils import misc, reconstruct
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--id', type=str)
@@ -34,7 +34,7 @@ ds_start, ds_end = 0, 100
 OVERFIT = args.of
 overfit_idx = args.of_idx
 device = 'cuda'
-lr = 0.00125
+lr = 0.004
 iterations = 10000; iterations += 1
 train_res = [512, 512]
 fc_voxel_grid_res = 31
@@ -223,6 +223,7 @@ if args.train:
                 vertices_list=[vertices.cpu()],
                 faces_list=[faces.cpu()]
             )
+        if (it) % 1000 == 0 or it == (iterations - 1): 
             torch.save({
                 'epoch': it,
                 'model_state_dict': model.state_dict(),
@@ -249,7 +250,16 @@ if args.test:
 
     embed_feat = embeddings(torch.arange(model_idx, model_idx+1).to(device))
 
+    query_points = reconstruct.make_query_points(pt_sample_res,
+                                                 limits=[(-1, 1)]*3)
+    query_points = torch.from_numpy(query_points).to(device, torch.float32)
+
+    print("running inference")
     with torch.no_grad():
+        transformed_points = query_points.unsqueeze(0).unsqueeze(0).expand(
+            1, num_parts, -1, -1)
+        pred_occ = model.get_occ(transformed_points, embed_feat)
+
         model_out = model.get_sdf_deform(x_nx3, embed_feat)
         sdf, deform = torch.tanh(model_out[0, :, :1]), model_out[0, :, 1:]
         grid_verts = x_nx3 + (2-1e-8) / (fc_voxel_grid_res * 2) * torch.tanh(deform)
@@ -259,10 +269,12 @@ if args.test:
     from utils import visualize    
     gt_color = [31, 119, 180, 255]
     mesh_pred_path = os.path.join(results_dir, 'mesh_pred.png')
+    mesh_flexi_path = os.path.join(results_dir, 'mesh_flexi.png')
     mesh_gt_path = os.path.join(results_dir, 'mesh_gt.png')
     lst_paths = [
         mesh_gt_path,
-        mesh_pred_path]
+        mesh_pred_path,
+        mesh_flexi_path]
 
     mag = 0.8; white_bg = False
 
@@ -285,21 +297,44 @@ if args.test:
                                           mag=mag, white_bg=white_bg,
                                           save_img=False)
     
-    # ------------ pred ------------
+    # ------------ occ ------------
     print("visualizing pred mesh")
-    pred_faces = faces.detach().cpu().numpy()
-    pred_vertices_aligned = kaolin.ops.pointcloud.center_points(
-        vertices.detach().unsqueeze(0), normalize=True).squeeze(0)
-    pred_vertices_aligned = pred_vertices_aligned.cpu().numpy()
-    pred_mesh = trimesh.Trimesh(pred_vertices_aligned, pred_faces)
-    pred_mesh.export(os.path.join(results_dir,
-                                  f'{anno_id}_flexi_mesh_{expt_id}.obj'))
+    occ_grid = torch.reshape(
+        pred_occ,
+        (1, pt_sample_res, pt_sample_res, pt_sample_res))
+    occ_grid = torch.permute(occ_grid, (0, 2, 1, 3))
+    pred_vertices, pred_faces =\
+        kaolin.ops.conversions.voxelgrids_to_trianglemeshes(occ_grid)
+    pred_vertices = kaolin.ops.pointcloud.center_points(
+        pred_vertices[0].unsqueeze(0), normalize=True).squeeze(0)
+    pred_vertices = pred_vertices.cpu().numpy()
+    pred_faces = pred_faces[0].cpu().numpy()
+    pred_mesh = trimesh.Trimesh(pred_vertices, pred_faces)
+    pred_mesh.export(os.path.join(results_dir, 
+                                  f'{anno_id}_mesh_pred_{expt_id}.obj'))
     pred_mesh_vis = visualize.save_mesh_vis(pred_mesh, mesh_pred_path,
                                             mag=mag, white_bg=white_bg,
                                             save_img=False)
+
+    # ------------ flexi ------------
+    print("visualizing flexi mesh")
+    flexi_faces = faces.detach().cpu().numpy()
+    flexi_vertices_aligned = kaolin.ops.pointcloud.center_points(
+        vertices.detach().unsqueeze(0), normalize=True).squeeze(0)
+    flexi_vertices_aligned = flexi_vertices_aligned.cpu().numpy()
+    flexi_mesh = trimesh.Trimesh(flexi_vertices_aligned, flexi_faces)
+    flexi_mesh.export(os.path.join(results_dir,
+                                   f'{anno_id}_flexi_mesh_{expt_id}.obj'))
+    flexi_mesh_vis = visualize.save_mesh_vis(flexi_mesh, mesh_flexi_path,
+                                             mag=mag, white_bg=white_bg,
+                                             save_img=False)
+    print("saving flexi sdf")
+    np.save(os.path.join(results_dir, 
+                         f'{anno_id}_flexi_sdf_{expt_id}.npy'),
+            sdf.detach().cpu().numpy())
     
     print("saving images")
     visualize.stitch_imges(
         os.path.join(results_dir,f'{anno_id}_results_{expt_id}.png'),
-        images=[gt_mesh_vis, pred_mesh_vis],
+        images=[gt_mesh_vis, pred_mesh_vis, flexi_mesh_vis],
         adj=100)

@@ -11,7 +11,7 @@ from typing import Dict
 from torch.utils.tensorboard import SummaryWriter
 from flexi.flexicubes import FlexiCubes
 from flexi import render, util
-from occ_networks.flexi_decoder_4 import SDFDecoder, get_embedder
+from occ_networks.flexi_decoder_10 import SDFDecoder, get_embedder
 from utils import misc, reconstruct
 
 parser = argparse.ArgumentParser()
@@ -34,12 +34,13 @@ ds_start, ds_end = 0, 100
 OVERFIT = args.of
 overfit_idx = args.of_idx
 device = 'cuda'
-lr = 0.00125
+# lr = 0.002
+lr = 0.004
 iterations = 10000; iterations += 1
 train_res = [512, 512]
 fc_voxel_grid_res = 31
 # model_idx = 2
-expt_id = 7
+expt_id = 10
 
 # ------------ data dirs ------------
 partnet_dir = '/datasets/PartNet'
@@ -156,22 +157,24 @@ if args.train:
         optimizer.zero_grad()
 
         embed_feat = embeddings(torch.arange(0, num_shapes).to(device))
-
+        shared_feat = model.get_shared_feat(embed_feat)
+        
         transformed_points = batch_points.unsqueeze(0).unsqueeze(0).expand(
             num_shapes, num_parts, -1, -1)
-        pred_occ = model.get_occ(transformed_points, embed_feat)
+
+        pred_occ = model.get_occ(transformed_points, shared_feat)
         loss_occ = loss_f(pred_occ, gt_occ)
 
-        model_out = model.get_sdf_deform(x_nx3, embed_feat)
+        model_out = model.get_sdf_deform(x_nx3, shared_feat)
         
         all_loss = 0
         for s in range(num_shapes):
             # NOTE: using tanh gives slightly better SDF results, still scattered, but -1~1
             # NOTE: not using tanh gives better final results, range very large
-            delta_sdf, deform = torch.tanh(model_out[s, :, :1]), model_out[s, :, 1:]
-            # sdf, deform = model_out[0, :, :1], model_out[0, :, 1:]
+            # delta_sdf, deform = torch.tanh(model_out[s, :, :1]), model_out[s, :, 1:]
+            delta_sdf, deform = model_out[s, :, :1], model_out[s, :, 1:]
 
-            sdf = -loss_occ + delta_sdf
+            sdf = (-2 * loss_occ + 1) * delta_sdf
 
             gradient = torch.autograd.grad(outputs=sdf, inputs=x_nx3,
                                            grad_outputs=torch.ones_like(sdf),
@@ -223,6 +226,7 @@ if args.train:
                 vertices_list=[vertices.cpu()],
                 faces_list=[faces.cpu()]
             )
+        if (it) % 1000 == 0 or it == (iterations - 1): 
             torch.save({
                 'epoch': it,
                 'model_state_dict': model.state_dict(),
@@ -257,9 +261,11 @@ if args.test:
     with torch.no_grad():
         transformed_points = query_points.unsqueeze(0).unsqueeze(0).expand(
             1, num_parts, -1, -1)
-        pred_occ = model.get_occ(transformed_points, embed_feat)
+        
+        shared_feat = model.get_shared_feat(embed_feat)
+        pred_occ = model.get_occ(transformed_points, shared_feat)
 
-        model_out = model.get_sdf_deform(x_nx3, embed_feat)
+        model_out = model.get_sdf_deform(x_nx3, shared_feat)
         sdf, deform = torch.tanh(model_out[0, :, :1]), model_out[0, :, 1:]
         grid_verts = x_nx3 + (2-1e-8) / (fc_voxel_grid_res * 2) * torch.tanh(deform)
         vertices, faces, L_dev = fc(
