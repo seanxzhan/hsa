@@ -11,7 +11,7 @@ from typing import Dict
 from torch.utils.tensorboard import SummaryWriter
 from flexi.flexicubes import FlexiCubes
 from flexi import render, util
-from occ_networks.flexi_decoder_4 import SDFDecoder, get_embedder
+from occ_networks.flexi_decoder_18 import SDFDecoder, get_embedder
 from utils import misc, reconstruct
 
 parser = argparse.ArgumentParser()
@@ -34,7 +34,7 @@ ds_start, ds_end = 0, 100
 OVERFIT = args.of
 overfit_idx = args.of_idx
 device = 'cuda'
-lr = 0.0025
+lr = 0.00025
 iterations = 10000; iterations += 1
 train_res = [512, 512]
 fc_voxel_grid_res = 31
@@ -151,7 +151,6 @@ def loss_f(pred_values, gt_values):
     recon_loss = mse(pred_values, gt_values)
     return recon_loss
 
-epsilon = 1e-6
 if args.train:
     for it in range(iterations):
         optimizer.zero_grad()
@@ -163,6 +162,8 @@ if args.train:
         pred_occ = model.get_occ(transformed_points, embed_feat)
         loss_occ = loss_f(pred_occ, gt_occ)
 
+        # print(torch.min(pred_occ).detach().cpu(), torch.max(pred_occ).detach().cpu())
+
         model_out = model.get_sdf_deform(x_nx3, embed_feat)
         
         all_loss = 0
@@ -172,14 +173,15 @@ if args.train:
             # delta_sdf, deform = torch.tanh(model_out[s, :, :1]), model_out[s, :, 1:]
             delta_sdf, deform = model_out[s, :, :1], model_out[s, :, 1:]
 
-            sdf = torch.tanh(-2*pred_occ[s] + 1) * delta_sdf
-            # sdf = -torch.log((pred_occ[s]+epsilon)/(1-pred_occ[s]+epsilon)) * delta_sdf
+            # print(torch.min(delta_sdf).detach().cpu(), torch.max(delta_sdf).detach().cpu())
 
-            gradient = torch.autograd.grad(outputs=sdf, inputs=x_nx3,
-                                           grad_outputs=torch.ones_like(sdf),
-                                           create_graph=True, retain_graph=True)[0]
-            grad_norm = torch.norm(gradient, dim=-1)
-            eikonal_loss = ((grad_norm - 1.0) ** 2).mean()
+            sdf = torch.tanh(-pred_occ[s] + delta_sdf)
+
+            # gradient = torch.autograd.grad(outputs=sdf, inputs=x_nx3,
+            #                                grad_outputs=torch.ones_like(sdf),
+            #                                create_graph=True, retain_graph=True)[0]
+            # grad_norm = torch.norm(gradient, dim=-1)
+            # eikonal_loss = ((grad_norm - 1.0) ** 2).mean()
 
             mv, mvp = render.get_random_camera_batch(
                 8, iter_res=train_res, device=device, use_kaolin=False)
@@ -199,7 +201,7 @@ if args.train:
             mask_loss = (buffers['mask'] - target['mask']).abs().mean()
             depth_loss = (((((buffers['depth'] - (target['depth']))* target['mask'])**2).sum(-1)+1e-8)).sqrt().mean() * 10
 
-            all_loss += mask_loss + depth_loss + eikonal_loss    
+            all_loss += mask_loss + depth_loss    
 
         mesh_loss = all_loss / num_shapes
         total_loss = loss_occ + mesh_loss
@@ -265,8 +267,8 @@ if args.test:
         # predict occ for flexi
         pred_occ = model.get_occ(transformed_points, embed_feat)
         model_out = model.get_sdf_deform(x_nx3, embed_feat)
-        delta_sdf, deform = torch.tanh(model_out[0, :, :1]), model_out[0, :, 1:]
-        sdf = -2*pred_occ[0] + 1 + delta_sdf
+        delta_sdf, deform = model_out[0, :, :1], model_out[0, :, 1:]
+        sdf = torch.tanh(-pred_occ[0] + delta_sdf)
         grid_verts = x_nx3 + (2-1e-8) / (fc_voxel_grid_res * 2) * torch.tanh(deform)
         vertices, faces, L_dev = fc(
             grid_verts, sdf, cube_fx8, fc_voxel_grid_res, training=True)

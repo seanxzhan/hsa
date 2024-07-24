@@ -1228,7 +1228,7 @@ if __name__ == "__main__":
     #             start=0, end=len(ids_w_four_parts))
     # export_data(ids_w_four_parts, save_data=True,
     #             start=0, end=100)
-    print(ids_w_four_parts[:5])
+    print(ids_w_four_parts[:50])
     exit(0)
 
     # merge_partnet_after_merging('39446', info=True)

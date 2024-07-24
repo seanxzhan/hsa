@@ -263,7 +263,7 @@ if args.test:
         # predict occ for flexi
         pred_occ = model.get_occ(transformed_points, embed_feat)
         model_out = model.get_sdf_deform(x_nx3, embed_feat)
-        delta_sdf, deform = torch.tanh(model_out[0, :, :1]), model_out[0, :, 1:]
+        delta_sdf, deform = model_out[0, :, :1], model_out[0, :, 1:]
         sdf = -pred_occ[0] + delta_sdf
         grid_verts = x_nx3 + (2-1e-8) / (fc_voxel_grid_res * 2) * torch.tanh(deform)
         vertices, faces, L_dev = fc(

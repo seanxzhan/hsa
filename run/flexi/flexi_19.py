@@ -11,7 +11,7 @@ from typing import Dict
 from torch.utils.tensorboard import SummaryWriter
 from flexi.flexicubes import FlexiCubes
 from flexi import render, util
-from occ_networks.flexi_decoder_4 import SDFDecoder, get_embedder
+from occ_networks.flexi_decoder_18 import SDFDecoder, get_embedder
 from utils import misc, reconstruct
 
 parser = argparse.ArgumentParser()
@@ -34,12 +34,12 @@ ds_start, ds_end = 0, 100
 OVERFIT = args.of
 overfit_idx = args.of_idx
 device = 'cuda'
-lr = 0.002
+lr = 0.0025
 iterations = 10000; iterations += 1
 train_res = [512, 512]
 fc_voxel_grid_res = 31
 # model_idx = 2
-expt_id = 8
+expt_id = 19
 
 # ------------ data dirs ------------
 partnet_dir = '/datasets/PartNet'
@@ -109,7 +109,8 @@ def my_load_mesh(model_idx, tri=False):
     else:
         return trimesh.Trimesh(gt_vertices_aligned, gt_mesh.faces)
 
-num_shapes = 10
+num_parts = 1
+num_shapes = 1
 
 # ------------ init flexicubes ------------
 fc = FlexiCubes(device)
@@ -117,7 +118,11 @@ x_nx3, cube_fx8 = fc.construct_voxel_grid(fc_voxel_grid_res)
 # NOTE: 2* is necessary! Dunno why
 x_nx3 = 2*x_nx3
 batch_points = x_nx3.clone().to(device)
-x_nx3 = x_nx3.clone().detach().requires_grad_(True)
+# x_nx3 = x_nx3.clone().detach().requires_grad_(True)
+transformed_points = batch_points[None, None].expand(num_shapes, num_parts, -1, -1)
+transformed_points = transformed_points.clone().requires_grad_(True)
+
+# batch_points = batch_points.clone().detach().requires_grad_(True)
 
 # ------------ init gt meshes ------------
 gt_occ = torch.from_numpy(occ[0:num_shapes]).to(device)
@@ -129,7 +134,6 @@ embeddings = torch.nn.Embedding(num_shapes, embed_dim).to(device)
 torch.nn.init.normal_(embeddings.weight.data, 0.0, 1 / math.sqrt(embed_dim))
 
 # ------------ network ------------
-num_parts = 1
 model = SDFDecoder(input_dims=3,
                    num_parts=num_parts,
                    feature_dims=embed_dim,
@@ -157,10 +161,31 @@ if args.train:
 
         embed_feat = embeddings(torch.arange(0, num_shapes).to(device))
 
-        transformed_points = batch_points.unsqueeze(0).unsqueeze(0).expand(
-            num_shapes, num_parts, -1, -1)
         pred_occ = model.get_occ(transformed_points, embed_feat)
         loss_occ = loss_f(pred_occ, gt_occ)
+
+        # print(pred_occ.shape)
+
+        # occ_grad = torch.autograd.grad(outputs=pred_occ, inputs=transformed_points,
+        #                                grad_outputs=torch.ones_like(pred_occ),
+        #                                create_graph=True, retain_graph=True)[0]
+        # # print(occ_grad.shape)
+        # occ_grad_norm = torch.norm(occ_grad, dim=-1).squeeze(1)
+
+       # Calculate the difference from the threshold
+        diffs = torch.abs(pred_occ - 0.5)
+        
+        # Apply a softmin to get weights (inverse relationship with diffs)
+        weights = torch.softmax(-10 * diffs, dim=0)
+        
+        # Compute a weighted average of sampled points based on the weights
+        weighted_sampled_points = (sampled_points * weights.unsqueeze(1)).sum(dim=0)
+        
+        # Compute the distance to the weighted average point
+        sdf = torch.norm(point - weighted_sampled_points)
+
+        # print(occ_grad_norm.shape)
+        # exit(0)
 
         model_out = model.get_sdf_deform(x_nx3, embed_feat)
         
@@ -171,13 +196,14 @@ if args.train:
             # delta_sdf, deform = torch.tanh(model_out[s, :, :1]), model_out[s, :, 1:]
             delta_sdf, deform = model_out[s, :, :1], model_out[s, :, 1:]
 
-            sdf = -pred_occ[s] + delta_sdf
+            sdf = occ_grad_norm[s] + delta_sdf
+            # sdf = sdf / torch.max(torch.abs(sdf))
 
-            gradient = torch.autograd.grad(outputs=sdf, inputs=x_nx3,
-                                           grad_outputs=torch.ones_like(sdf),
-                                           create_graph=True, retain_graph=True)[0]
-            grad_norm = torch.norm(gradient, dim=-1)
-            eikonal_loss = ((grad_norm - 1.0) ** 2).mean()
+            # gradient = torch.autograd.grad(outputs=sdf, inputs=x_nx3,
+            #                                grad_outputs=torch.ones_like(sdf),
+            #                                create_graph=True, retain_graph=True)[0]
+            # grad_norm = torch.norm(gradient, dim=-1)
+            # eikonal_loss = ((grad_norm - 1.0) ** 2).mean()
 
             mv, mvp = render.get_random_camera_batch(
                 8, iter_res=train_res, device=device, use_kaolin=False)
@@ -197,7 +223,8 @@ if args.train:
             mask_loss = (buffers['mask'] - target['mask']).abs().mean()
             depth_loss = (((((buffers['depth'] - (target['depth']))* target['mask'])**2).sum(-1)+1e-8)).sqrt().mean() * 10
 
-            all_loss += mask_loss + depth_loss + eikonal_loss    
+            # all_loss += mask_loss + depth_loss + eikonal_loss
+            all_loss += mask_loss + depth_loss    
 
         mesh_loss = all_loss / num_shapes
         total_loss = loss_occ + mesh_loss
