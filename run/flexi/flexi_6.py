@@ -171,7 +171,7 @@ for it in range(iterations):
     delta_sdf, deform = torch.tanh(model_out[0, :, :1]), model_out[0, :, 1:]
     # sdf, deform = model_out[0, :, :1], model_out[0, :, 1:]
 
-    sdf = -loss_occ + delta_sdf
+    sdf = -pred_occ[0] + delta_sdf
 
     gradient = torch.autograd.grad(outputs=sdf, inputs=x_nx3,
                                    grad_outputs=torch.ones_like(sdf),

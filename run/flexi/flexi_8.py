@@ -171,7 +171,7 @@ if args.train:
             # delta_sdf, deform = torch.tanh(model_out[s, :, :1]), model_out[s, :, 1:]
             delta_sdf, deform = model_out[s, :, :1], model_out[s, :, 1:]
 
-            sdf = -loss_occ + delta_sdf
+            sdf = -pred_occ[s] + delta_sdf
 
             gradient = torch.autograd.grad(outputs=sdf, inputs=x_nx3,
                                            grad_outputs=torch.ones_like(sdf),
@@ -261,7 +261,8 @@ if args.test:
         pred_occ = model.get_occ(transformed_points, embed_feat)
 
         model_out = model.get_sdf_deform(x_nx3, embed_feat)
-        sdf, deform = torch.tanh(model_out[0, :, :1]), model_out[0, :, 1:]
+        delta_sdf, deform = model_out[0, :, :1], model_out[0, :, 1:]
+        sdf = -pred_occ + delta_sdf
         grid_verts = x_nx3 + (2-1e-8) / (fc_voxel_grid_res * 2) * torch.tanh(deform)
         vertices, faces, L_dev = fc(
             grid_verts, sdf, cube_fx8, fc_voxel_grid_res, training=True)

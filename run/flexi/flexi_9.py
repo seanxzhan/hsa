@@ -111,6 +111,7 @@ def my_load_mesh(model_idx, tri=False):
         return trimesh.Trimesh(gt_vertices_aligned, gt_mesh.faces)
 
 num_shapes = 10
+num_parts = 1
 
 # ------------ init flexicubes ------------
 fc = FlexiCubes(device)
@@ -119,6 +120,7 @@ x_nx3, cube_fx8 = fc.construct_voxel_grid(fc_voxel_grid_res)
 x_nx3 = 2*x_nx3
 batch_points = x_nx3.clone().to(device)
 x_nx3 = x_nx3.clone().detach().requires_grad_(True)
+transformed_points = batch_points[None, None].expand(num_shapes, num_parts, -1, -1)
 
 # ------------ init gt meshes ------------
 gt_occ = torch.from_numpy(occ[0:num_shapes]).to(device)
@@ -130,7 +132,6 @@ embeddings = torch.nn.Embedding(num_shapes, embed_dim).to(device)
 torch.nn.init.normal_(embeddings.weight.data, 0.0, 1 / math.sqrt(embed_dim))
 
 # ------------ network ------------
-num_parts = 1
 model = SDFDecoder(input_dims=3,
                    num_parts=num_parts,
                    feature_dims=embed_dim,
@@ -158,8 +159,6 @@ if args.train:
 
         embed_feat = embeddings(torch.arange(0, num_shapes).to(device))
 
-        transformed_points = batch_points.unsqueeze(0).unsqueeze(0).expand(
-            num_shapes, num_parts, -1, -1)
         pred_occ = model.get_occ(transformed_points, embed_feat)
         loss_occ = loss_f(pred_occ, gt_occ)
 
@@ -172,7 +171,7 @@ if args.train:
             # delta_sdf, deform = torch.tanh(model_out[s, :, :1]), model_out[s, :, 1:]
             delta_sdf, deform = model_out[s, :, :1], model_out[s, :, 1:]
 
-            sdf = (-2 * loss_occ + 1) * delta_sdf
+            sdf = (-2 * pred_occ[s] + 1) * delta_sdf
 
             gradient = torch.autograd.grad(outputs=sdf, inputs=x_nx3,
                                            grad_outputs=torch.ones_like(sdf),
@@ -254,15 +253,19 @@ if args.test:
     query_points = reconstruct.make_query_points(pt_sample_res,
                                                  limits=[(-1, 1)]*3)
     query_points = torch.from_numpy(query_points).to(device, torch.float32)
+    query_points = query_points[None, None].expand(1, num_parts, -1, -1)
+
+    transformed_points = batch_points[None, None].expand(1, num_parts, -1, -1)
 
     print("running inference")
     with torch.no_grad():
-        transformed_points = query_points.unsqueeze(0).unsqueeze(0).expand(
-            1, num_parts, -1, -1)
+        # predict occ to be turned into grid
+        pred_occ_grid = model.get_occ(query_points, embed_feat)
+        # predict occ for flexi
         pred_occ = model.get_occ(transformed_points, embed_feat)
-
         model_out = model.get_sdf_deform(x_nx3, embed_feat)
-        sdf, deform = torch.tanh(model_out[0, :, :1]), model_out[0, :, 1:]
+        delta_sdf, deform = model_out[0, :, :1], model_out[0, :, 1:]
+        sdf = (-2 * pred_occ[0] + 1) * delta_sdf
         grid_verts = x_nx3 + (2-1e-8) / (fc_voxel_grid_res * 2) * torch.tanh(deform)
         vertices, faces, L_dev = fc(
             grid_verts, sdf, cube_fx8, fc_voxel_grid_res, training=True)
@@ -301,7 +304,7 @@ if args.test:
     # ------------ occ ------------
     print("visualizing pred mesh")
     occ_grid = torch.reshape(
-        pred_occ,
+        pred_occ_grid,
         (1, pt_sample_res, pt_sample_res, pt_sample_res))
     occ_grid = torch.permute(occ_grid, (0, 2, 1, 3))
     pred_vertices, pred_faces =\
