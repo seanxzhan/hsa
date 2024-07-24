@@ -1,6 +1,6 @@
 #!/bin/bash
 
-ARGS=(10 9 8 7 6)
+ARGS=(15 16)
 echo "Running flexi experiments: ${ARGS[@]}"
 
 for arg in "${ARGS[@]}"

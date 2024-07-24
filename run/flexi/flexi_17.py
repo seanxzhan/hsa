@@ -34,13 +34,12 @@ ds_start, ds_end = 0, 100
 OVERFIT = args.of
 overfit_idx = args.of_idx
 device = 'cuda'
-# lr = 0.002
-lr = 0.001
+lr = 0.0025
 iterations = 10000; iterations += 1
 train_res = [512, 512]
 fc_voxel_grid_res = 31
 # model_idx = 2
-expt_id = 11
+expt_id = 17
 
 # ------------ data dirs ------------
 partnet_dir = '/datasets/PartNet'
@@ -111,7 +110,6 @@ def my_load_mesh(model_idx, tri=False):
         return trimesh.Trimesh(gt_vertices_aligned, gt_mesh.faces)
 
 num_shapes = 10
-num_parts = 1
 
 # ------------ init flexicubes ------------
 fc = FlexiCubes(device)
@@ -120,7 +118,6 @@ x_nx3, cube_fx8 = fc.construct_voxel_grid(fc_voxel_grid_res)
 x_nx3 = 2*x_nx3
 batch_points = x_nx3.clone().to(device)
 x_nx3 = x_nx3.clone().detach().requires_grad_(True)
-transformed_points = batch_points[None, None].expand(num_shapes, num_parts, -1, -1)
 
 # ------------ init gt meshes ------------
 gt_occ = torch.from_numpy(occ[0:num_shapes]).to(device)
@@ -132,6 +129,7 @@ embeddings = torch.nn.Embedding(num_shapes, embed_dim).to(device)
 torch.nn.init.normal_(embeddings.weight.data, 0.0, 1 / math.sqrt(embed_dim))
 
 # ------------ network ------------
+num_parts = 1
 model = SDFDecoder(input_dims=3,
                    num_parts=num_parts,
                    feature_dims=embed_dim,
@@ -159,7 +157,9 @@ if args.train:
 
         embed_feat = embeddings(torch.arange(0, num_shapes).to(device))
 
-        pred_occ = torch.sigmoid(model.get_occ(transformed_points, embed_feat))
+        transformed_points = batch_points.unsqueeze(0).unsqueeze(0).expand(
+            num_shapes, num_parts, -1, -1)
+        pred_occ = model.get_occ(transformed_points, embed_feat)
         loss_occ = loss_f(pred_occ, gt_occ)
 
         model_out = model.get_sdf_deform(x_nx3, embed_feat)
@@ -171,7 +171,7 @@ if args.train:
             # delta_sdf, deform = torch.tanh(model_out[s, :, :1]), model_out[s, :, 1:]
             delta_sdf, deform = model_out[s, :, :1], model_out[s, :, 1:]
 
-            sdf = (-2 * pred_occ[s] + 1) * delta_sdf
+            sdf = -pred_occ[s] + delta_sdf
 
             gradient = torch.autograd.grad(outputs=sdf, inputs=x_nx3,
                                            grad_outputs=torch.ones_like(sdf),
@@ -254,7 +254,6 @@ if args.test:
                                                  limits=[(-1, 1)]*3)
     query_points = torch.from_numpy(query_points).to(device, torch.float32)
     query_points = query_points[None, None].expand(1, num_parts, -1, -1)
-
     transformed_points = batch_points[None, None].expand(1, num_parts, -1, -1)
 
     print("running inference")
@@ -264,8 +263,8 @@ if args.test:
         # predict occ for flexi
         pred_occ = model.get_occ(transformed_points, embed_feat)
         model_out = model.get_sdf_deform(x_nx3, embed_feat)
-        delta_sdf, deform = model_out[0, :, :1], model_out[0, :, 1:]
-        sdf = (-2 * pred_occ[0] + 1) * delta_sdf
+        delta_sdf, deform = torch.tanh(model_out[0, :, :1]), model_out[0, :, 1:]
+        sdf = -pred_occ[0] + delta_sdf
         grid_verts = x_nx3 + (2-1e-8) / (fc_voxel_grid_res * 2) * torch.tanh(deform)
         vertices, faces, L_dev = fc(
             grid_verts, sdf, cube_fx8, fc_voxel_grid_res, training=True)
@@ -301,24 +300,24 @@ if args.test:
                                           mag=mag, white_bg=white_bg,
                                           save_img=False)
     
-    # # ------------ occ ------------
-    # print("visualizing pred mesh")
-    # occ_grid = torch.reshape(
-    #     pred_occ_grid,
-    #     (1, pt_sample_res, pt_sample_res, pt_sample_res))
-    # occ_grid = torch.permute(occ_grid, (0, 2, 1, 3))
-    # pred_vertices, pred_faces =\
-    #     kaolin.ops.conversions.voxelgrids_to_trianglemeshes(occ_grid, 0.3)
-    # pred_vertices = kaolin.ops.pointcloud.center_points(
-    #     pred_vertices[0].unsqueeze(0), normalize=True).squeeze(0)
-    # pred_vertices = pred_vertices.cpu().numpy()
-    # pred_faces = pred_faces[0].cpu().numpy()
-    # pred_mesh = trimesh.Trimesh(pred_vertices, pred_faces)
-    # pred_mesh.export(os.path.join(results_dir, 
-    #                               f'{anno_id}_mesh_pred_{expt_id}.obj'))
-    # pred_mesh_vis = visualize.save_mesh_vis(pred_mesh, mesh_pred_path,
-    #                                         mag=mag, white_bg=white_bg,
-    #                                         save_img=False)
+    # ------------ occ ------------
+    print("visualizing pred mesh")
+    occ_grid = torch.reshape(
+        pred_occ_grid,
+        (1, pt_sample_res, pt_sample_res, pt_sample_res))
+    occ_grid = torch.permute(occ_grid, (0, 2, 1, 3))
+    pred_vertices, pred_faces =\
+        kaolin.ops.conversions.voxelgrids_to_trianglemeshes(occ_grid)
+    pred_vertices = kaolin.ops.pointcloud.center_points(
+        pred_vertices[0].unsqueeze(0), normalize=True).squeeze(0)
+    pred_vertices = pred_vertices.cpu().numpy()
+    pred_faces = pred_faces[0].cpu().numpy()
+    pred_mesh = trimesh.Trimesh(pred_vertices, pred_faces)
+    pred_mesh.export(os.path.join(results_dir, 
+                                  f'{anno_id}_mesh_pred_{expt_id}.obj'))
+    pred_mesh_vis = visualize.save_mesh_vis(pred_mesh, mesh_pred_path,
+                                            mag=mag, white_bg=white_bg,
+                                            save_img=False)
 
     # ------------ flexi ------------
     print("visualizing flexi mesh")
@@ -340,5 +339,5 @@ if args.test:
     print("saving images")
     visualize.stitch_imges(
         os.path.join(results_dir,f'{anno_id}_results_{expt_id}.png'),
-        images=[gt_mesh_vis, flexi_mesh_vis],
+        images=[gt_mesh_vis, pred_mesh_vis, flexi_mesh_vis],
         adj=100)

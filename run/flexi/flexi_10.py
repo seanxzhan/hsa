@@ -360,7 +360,7 @@ if args.test:
         adj=100)
 
 # ------------ training ------------
-if args.inv:
+if args.inversion:
     it = args.it
     model_idx = args.test_idx
     anno_id = model_idx_to_anno_id[model_idx]
@@ -394,4 +394,5 @@ if args.inv:
                                                   lr_lambda=lambda x: lr_schedule(x))
     iterations = 10000
 
-    print()
+    # if os.path.exists(embedding_fp):
+        

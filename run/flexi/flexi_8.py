@@ -34,7 +34,7 @@ ds_start, ds_end = 0, 100
 OVERFIT = args.of
 overfit_idx = args.of_idx
 device = 'cuda'
-lr = 0.004
+lr = 0.002
 iterations = 10000; iterations += 1
 train_res = [512, 512]
 fc_voxel_grid_res = 31
@@ -253,16 +253,18 @@ if args.test:
     query_points = reconstruct.make_query_points(pt_sample_res,
                                                  limits=[(-1, 1)]*3)
     query_points = torch.from_numpy(query_points).to(device, torch.float32)
+    query_points = query_points[None, None].expand(1, num_parts, -1, -1)
+    transformed_points = batch_points[None, None].expand(1, num_parts, -1, -1)
 
     print("running inference")
     with torch.no_grad():
-        transformed_points = query_points.unsqueeze(0).unsqueeze(0).expand(
-            1, num_parts, -1, -1)
+        # predict occ to be turned into grid
+        pred_occ_grid = model.get_occ(query_points, embed_feat)
+        # predict occ for flexi
         pred_occ = model.get_occ(transformed_points, embed_feat)
-
         model_out = model.get_sdf_deform(x_nx3, embed_feat)
-        delta_sdf, deform = model_out[0, :, :1], model_out[0, :, 1:]
-        sdf = -pred_occ + delta_sdf
+        delta_sdf, deform = torch.tanh(model_out[0, :, :1]), model_out[0, :, 1:]
+        sdf = -pred_occ[0] + delta_sdf
         grid_verts = x_nx3 + (2-1e-8) / (fc_voxel_grid_res * 2) * torch.tanh(deform)
         vertices, faces, L_dev = fc(
             grid_verts, sdf, cube_fx8, fc_voxel_grid_res, training=True)
@@ -301,7 +303,7 @@ if args.test:
     # ------------ occ ------------
     print("visualizing pred mesh")
     occ_grid = torch.reshape(
-        pred_occ,
+        pred_occ_grid,
         (1, pt_sample_res, pt_sample_res, pt_sample_res))
     occ_grid = torch.permute(occ_grid, (0, 2, 1, 3))
     pred_vertices, pred_faces =\

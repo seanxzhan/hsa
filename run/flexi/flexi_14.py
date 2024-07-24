@@ -22,6 +22,7 @@ parser.add_argument('--it', type=int)
 parser.add_argument('--test_idx', '--ti', type=int)
 parser.add_argument('--of', action="store_true", default=False)
 parser.add_argument('--of_idx', '--oi', type=int)
+parser.add_argument('--inversion', '--inv', action="store_true")
 args = parser.parse_args()
 
 name_to_cat = {
@@ -40,7 +41,7 @@ iterations = 10000; iterations += 1
 train_res = [512, 512]
 fc_voxel_grid_res = 31
 # model_idx = 2
-expt_id = 11
+expt_id = 14
 
 # ------------ data dirs ------------
 partnet_dir = '/datasets/PartNet'
@@ -110,21 +111,8 @@ def my_load_mesh(model_idx, tri=False):
     else:
         return trimesh.Trimesh(gt_vertices_aligned, gt_mesh.faces)
 
-num_shapes = 10
 num_parts = 1
-
-# ------------ init flexicubes ------------
-fc = FlexiCubes(device)
-x_nx3, cube_fx8 = fc.construct_voxel_grid(fc_voxel_grid_res)
-# NOTE: 2* is necessary! Dunno why
-x_nx3 = 2*x_nx3
-batch_points = x_nx3.clone().to(device)
-x_nx3 = x_nx3.clone().detach().requires_grad_(True)
-transformed_points = batch_points[None, None].expand(num_shapes, num_parts, -1, -1)
-
-# ------------ init gt meshes ------------
-gt_occ = torch.from_numpy(occ[0:num_shapes]).to(device)
-gt_meshes = [my_load_mesh(s) for s in range(0, num_shapes)]
+num_shapes = 10
 
 # ------------ embeddings ------------
 embed_dim = 128
@@ -141,6 +129,19 @@ model = SDFDecoder(input_dims=3,
 params = [p for _, p in model.named_parameters()]
 model.pre_train_sphere(1000) if args.train else None
 
+# ------------ init flexicubes ------------
+fc = FlexiCubes(device)
+x_nx3, cube_fx8 = fc.construct_voxel_grid(fc_voxel_grid_res)
+# NOTE: 2* is necessary! Dunno why
+x_nx3 = 2*x_nx3
+batch_points = x_nx3.clone().to(device)
+x_nx3 = x_nx3.clone().detach().requires_grad_(True)
+transformed_points = batch_points[None, None].expand(num_shapes, num_parts, -1, -1)
+
+# ------------ init gt meshes ------------
+gt_occ = torch.from_numpy(occ[0:num_shapes]).to(device)
+gt_meshes = [my_load_mesh(s) for s in range(0, num_shapes)]
+
 # ------------ optimizer ------------
 optimizer = torch.optim.Adam([{"params": params, "lr": lr},
                               {"params": embeddings.parameters(), "lr": lr}])
@@ -153,56 +154,69 @@ def loss_f(pred_values, gt_values):
     recon_loss = mse(pred_values, gt_values)
     return recon_loss
 
+# NOTE: worked MUCH better when pred_occ is set to loss_occ for some reason
+def run_flexi(s, sdf_deform, pred_occ, test=False):
+    # NOTE: using tanh gives slightly better SDF results, still scattered, but -1~1
+    # NOTE: not using tanh gives better final results, range very large
+    delta_sdf, deform = torch.tanh(sdf_deform[s, :, :1]), sdf_deform[s, :, 1:]
+    # delta_sdf, deform = sdf_deform[s, :, :1], sdf_deform[s, :, 1:]
+    sdf = (-2 * pred_occ[s] + 1) * delta_sdf
+
+    if not test:
+        gradient = torch.autograd.grad(outputs=sdf, inputs=x_nx3,
+                                        grad_outputs=torch.ones_like(sdf),
+                                        create_graph=True, retain_graph=True)[0]
+        grad_norm = torch.norm(gradient, dim=-1)
+        eikonal_loss = ((grad_norm - 1.0) ** 2).mean()
+    else:
+        eikonal_loss = 0
+
+    mv, mvp = render.get_random_camera_batch(
+        8, iter_res=train_res, device=device, use_kaolin=False)
+    target = render.render_mesh_paper(gt_meshes[s], mv, mvp, train_res)
+    grid_verts = x_nx3 + (2-1e-8) / (fc_voxel_grid_res * 2) * torch.tanh(deform)
+    vertices, faces, L_dev = fc(
+        grid_verts, sdf, cube_fx8, fc_voxel_grid_res, training=True)
+    flexicubes_mesh = util.Mesh(vertices, faces)
+    try: 
+        buffers = render.render_mesh_paper(flexicubes_mesh, mv, mvp, train_res)
+    except Exception as e:
+        import logging, traceback
+        logging.error(traceback.format_exc())
+        print(torch.min(sdf))
+        print(torch.max(sdf))
+        exit(0)
+    
+    if not test:
+        mask_loss = (buffers['mask'] - target['mask']).abs().mean()
+        depth_loss = (((((buffers['depth'] - (target['depth']))* target['mask'])**2).sum(-1)+1e-8)).sqrt().mean() * 10
+    else:
+        mask_loss = 0
+        depth_loss = 0
+
+    return eikonal_loss+mask_loss+depth_loss, grid_verts, sdf, vertices, faces
+
+# ------------ training ------------
 if args.train:
     for it in range(iterations):
         optimizer.zero_grad()
 
         embed_feat = embeddings(torch.arange(0, num_shapes).to(device))
+        # pred_occ = torch.sigmoid(model.get_occ(transformed_points, embed_feat))
+        sdf_deform = model.get_sdf_deform(x_nx3, embed_feat)
 
-        pred_occ = torch.sigmoid(model.get_occ(transformed_points, embed_feat))
-        loss_occ = loss_f(pred_occ, gt_occ)
-
-        model_out = model.get_sdf_deform(x_nx3, embed_feat)
+        # loss_occ = loss_f(pred_occ, gt_occ)
         
         all_loss = 0
         for s in range(num_shapes):
-            # NOTE: using tanh gives slightly better SDF results, still scattered, but -1~1
-            # NOTE: not using tanh gives better final results, range very large
-            # delta_sdf, deform = torch.tanh(model_out[s, :, :1]), model_out[s, :, 1:]
-            delta_sdf, deform = model_out[s, :, :1], model_out[s, :, 1:]
-
-            sdf = (-2 * pred_occ[s] + 1) * delta_sdf
-
-            gradient = torch.autograd.grad(outputs=sdf, inputs=x_nx3,
-                                           grad_outputs=torch.ones_like(sdf),
-                                           create_graph=True, retain_graph=True)[0]
-            grad_norm = torch.norm(gradient, dim=-1)
-            eikonal_loss = ((grad_norm - 1.0) ** 2).mean()
-
-            mv, mvp = render.get_random_camera_batch(
-                8, iter_res=train_res, device=device, use_kaolin=False)
-            target = render.render_mesh_paper(gt_meshes[s], mv, mvp, train_res)
-            grid_verts = x_nx3 + (2-1e-8) / (fc_voxel_grid_res * 2) * torch.tanh(deform)
-            vertices, faces, L_dev = fc(
-                grid_verts, sdf, cube_fx8, fc_voxel_grid_res, training=True)
-            flexicubes_mesh = util.Mesh(vertices, faces)
-            try: 
-                buffers = render.render_mesh_paper(flexicubes_mesh, mv, mvp, train_res)
-            except Exception as e:
-                import logging, traceback
-                logging.error(traceback.format_exc())
-                print(torch.min(sdf))
-                print(torch.max(sdf))
-                exit(0)
-            mask_loss = (buffers['mask'] - target['mask']).abs().mean()
-            depth_loss = (((((buffers['depth'] - (target['depth']))* target['mask'])**2).sum(-1)+1e-8)).sqrt().mean() * 10
-
-            all_loss += mask_loss + depth_loss + eikonal_loss    
+            one_mesh_loss, grid_verts, sdf, vertices, faces =\
+                run_flexi(s, sdf_deform, gt_occ)
+            all_loss += one_mesh_loss
 
         mesh_loss = all_loss / num_shapes
-        total_loss = loss_occ + mesh_loss
+        total_loss = mesh_loss
         writer.add_scalar('iteration loss', total_loss, it)
-        writer.add_scalar('occ loss', loss_occ, it)
+        # writer.add_scalar('occ loss', loss_occ, it)
         writer.add_scalar('mesh loss', mesh_loss, it)
 
         total_loss.backward()
@@ -214,8 +228,10 @@ if args.train:
                 vertices, faces, L_dev = fc(
                     grid_verts, sdf, cube_fx8, fc_voxel_grid_res,
                     training=False)
-            print ('Iteration {} - loss: {:.5f}, # of mesh vertices: {}, # of mesh faces: {}'.format(
-                it, total_loss, vertices.shape[0], faces.shape[0]))
+            prnt_str = 'Iteration {} - loss: {:.5f}, '+\
+                '# of mesh vertices: {}, # of mesh faces: {}'
+            print(prnt_str.format(it, total_loss,
+                                  vertices.shape[0], faces.shape[0]))
             # save reconstructed mesh
             timelapse.add_mesh_batch(
                 iteration=it+1,
@@ -233,43 +249,42 @@ if args.train:
                 }, os.path.join(ckpt_dir, f'model_{it}.pt'))
     writer.close()
 
-
+# ------------ reconstruction ------------
 if args.test:
     it = args.it
     model_idx = args.test_idx
     anno_id = model_idx_to_anno_id[model_idx]
 
-    results_dir = os.path.join(results_dir, anno_id)
+    results_dir = os.path.join(results_dir, 'recon', anno_id)
     misc.check_dir(results_dir)
     print("results dir: ", results_dir)
 
-    checkpoint = torch.load(os.path.join(ckpt_dir, f'model_{it}.pt'))
-    model.load_state_dict(checkpoint['model_state_dict'])
-    embeddings = torch.nn.Embedding(num_shapes, embed_dim).to(device)
-    embeddings.load_state_dict(checkpoint['embeddings_state_dict'])
-
-    embed_feat = embeddings(torch.arange(model_idx, model_idx+1).to(device))
-
+    # ------------ data ------------
     query_points = reconstruct.make_query_points(pt_sample_res,
                                                  limits=[(-1, 1)]*3)
     query_points = torch.from_numpy(query_points).to(device, torch.float32)
     query_points = query_points[None, None].expand(1, num_parts, -1, -1)
-
     transformed_points = batch_points[None, None].expand(1, num_parts, -1, -1)
+    gt_occ = gt_occ[model_idx:model_idx+1]
 
+    # ------------ model, embedding ------------
+    checkpoint = torch.load(os.path.join(ckpt_dir, f'model_{it}.pt'))
+    model.load_state_dict(checkpoint['model_state_dict'])
+    embeddings = torch.nn.Embedding(num_shapes, embed_dim).to(device)
+    embeddings.load_state_dict(checkpoint['embeddings_state_dict'])
+    embed_feat = embeddings(torch.arange(model_idx, model_idx+1).to(device))
+
+    # ------------ inference ------------
     print("running inference")
     with torch.no_grad():
         # predict occ to be turned into grid
-        pred_occ_grid = model.get_occ(query_points, embed_feat)
+        # pred_occ_grid = model.get_occ(query_points, embed_feat)
         # predict occ for flexi
-        pred_occ = model.get_occ(transformed_points, embed_feat)
-        model_out = model.get_sdf_deform(x_nx3, embed_feat)
-        delta_sdf, deform = model_out[0, :, :1], model_out[0, :, 1:]
-        sdf = (-2 * pred_occ[0] + 1) * delta_sdf
-        grid_verts = x_nx3 + (2-1e-8) / (fc_voxel_grid_res * 2) * torch.tanh(deform)
-        vertices, faces, L_dev = fc(
-            grid_verts, sdf, cube_fx8, fc_voxel_grid_res, training=True)
+        # pred_occ = model.get_occ(transformed_points, embed_feat)
+        sdf_deform = model.get_sdf_deform(x_nx3, embed_feat)
+        _, _, sdf, vertices, faces = run_flexi(0, sdf_deform, gt_occ, test=True)
 
+    # ------------ results paths ------------
     from utils import visualize    
     gt_color = [31, 119, 180, 255]
     mesh_pred_path = os.path.join(results_dir, 'mesh_pred.png')
@@ -304,11 +319,11 @@ if args.test:
     # # ------------ occ ------------
     # print("visualizing pred mesh")
     # occ_grid = torch.reshape(
-    #     pred_occ_grid,
+    #     gt_occ,
     #     (1, pt_sample_res, pt_sample_res, pt_sample_res))
     # occ_grid = torch.permute(occ_grid, (0, 2, 1, 3))
     # pred_vertices, pred_faces =\
-    #     kaolin.ops.conversions.voxelgrids_to_trianglemeshes(occ_grid, 0.3)
+    #     kaolin.ops.conversions.voxelgrids_to_trianglemeshes(occ_grid)
     # pred_vertices = kaolin.ops.pointcloud.center_points(
     #     pred_vertices[0].unsqueeze(0), normalize=True).squeeze(0)
     # pred_vertices = pred_vertices.cpu().numpy()
@@ -342,3 +357,40 @@ if args.test:
         os.path.join(results_dir,f'{anno_id}_results_{expt_id}.png'),
         images=[gt_mesh_vis, flexi_mesh_vis],
         adj=100)
+
+# ------------ shape inversion ------------
+if args.inversion:
+    it = args.it
+    model_idx = args.test_idx
+    anno_id = model_idx_to_anno_id[model_idx]
+
+    results_dir = os.path.join(results_dir, 'inv', anno_id)
+    misc.check_dir(results_dir)
+    print("results dir: ", results_dir)
+    checkpoint = torch.load(os.path.join(ckpt_dir, f'model_{it}.pt'))
+    model.load_state_dict(checkpoint['model_state_dict'])
+
+    # ------------ data ------------
+    query_points = reconstruct.make_query_points(pt_sample_res,
+                                                 limits=[(-1, 1)]*3)
+    query_points = torch.from_numpy(query_points).to(device, torch.float32)
+
+    # ------------ init gt mesh ------------
+    gt_mesh = my_load_mesh(model_idx)
+
+    # ------------ embedding ------------
+    embedding_fp = os.path.join(results_dir, 'embedding.pth')
+    if os.path.exists(embedding_fp):
+        embeddings = torch.load(embedding_fp).to(device)
+    else:
+        embeddings = torch.nn.Embedding(1, embed_dim).to(device)
+        torch.nn.init.normal_(embeddings.weight.data,
+                              0.0, 1 / math.sqrt(embed_dim))
+
+    # ------------ training ------------
+    optimizer = torch.optim.Adam([{"params": embeddings.parameters(), "lr": lr}])
+    scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer,
+                                                  lr_lambda=lambda x: lr_schedule(x))
+    iterations = 10000
+
+    print()
