@@ -39,7 +39,7 @@ iterations = 10000; iterations += 1
 train_res = [512, 512]
 fc_voxel_grid_res = 31
 # model_idx = 2
-expt_id = 20
+expt_id = 21
 
 # ------------ data dirs ------------
 partnet_dir = '/datasets/PartNet'
@@ -201,12 +201,11 @@ if args.train:
                 mask_loss = (buffers['mask'] - target['mask']).abs().mean()
                 depth_loss = (((((buffers['depth'] - (target['depth']))* target['mask'])**2).sum(-1)+1e-8)).sqrt().mean() * 10
 
-                # NOTE: learning rate can't be this high without eikonal loss
                 all_loss += mask_loss + depth_loss + eikonal_loss
                 # all_loss += mask_loss + depth_loss
 
             mesh_loss = all_loss / num_shapes
-            total_loss = loss_occ + mesh_loss
+            total_loss = loss_occ + 2 * mesh_loss
 
             total_loss.backward()
             optimizer.step()

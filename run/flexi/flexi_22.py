@@ -34,12 +34,12 @@ ds_start, ds_end = 0, 100
 OVERFIT = args.of
 overfit_idx = args.of_idx
 device = 'cuda'
-lr = 0.002
+lr = 0.001
 iterations = 10000; iterations += 1
-train_res = [512, 512]
+train_res = [1024, 1024]
 fc_voxel_grid_res = 31
 # model_idx = 2
-expt_id = 20
+expt_id = 22
 
 # ------------ data dirs ------------
 partnet_dir = '/datasets/PartNet'
@@ -151,25 +151,28 @@ def loss_f(pred_values, gt_values):
     recon_loss = mse(pred_values, gt_values)
     return recon_loss
 
+bs = 5
+nb = 10
+
 if args.train:
     for it in range(iterations):
         itr_loss = 0
         itr_occ_loss = 0
         itr_mesh_loss = 0
-        for b in range(5):
+        for b in range(nb):
             optimizer.zero_grad()
 
-            embed_feat = embeddings(torch.arange(b*10, (b+1)*10).to(device))
+            embed_feat = embeddings(torch.arange(b*bs, (b+1)*bs).to(device))
 
             transformed_points = batch_points.unsqueeze(0).unsqueeze(0).expand(
-                10, num_parts, -1, -1)
+                bs, num_parts, -1, -1)
             pred_occ = model.get_occ(transformed_points, embed_feat)
-            loss_occ = loss_f(pred_occ, gt_occ[b*10:(b+1)*10])
+            loss_occ = loss_f(pred_occ, gt_occ[b*bs:(b+1)*bs])
 
             model_out = model.get_sdf_deform(x_nx3, embed_feat)
             
             all_loss = 0
-            for s in range(10):
+            for s in range(bs):
                 # NOTE: using tanh gives slightly better SDF results, still scattered, but -1~1
                 # NOTE: not using tanh gives better final results, range very large
                 # delta_sdf, deform = torch.tanh(model_out[s, :, :1]), model_out[s, :, 1:]
@@ -185,7 +188,7 @@ if args.train:
 
                 mv, mvp = render.get_random_camera_batch(
                     8, iter_res=train_res, device=device, use_kaolin=False)
-                target = render.render_mesh_paper(gt_meshes[b*10+s], mv, mvp, train_res)
+                target = render.render_mesh_paper(gt_meshes[b*bs+s], mv, mvp, train_res)
                 grid_verts = x_nx3 + (2-1e-8) / (fc_voxel_grid_res * 2) * torch.tanh(deform)
                 vertices, faces, L_dev = fc(
                     grid_verts, sdf, cube_fx8, fc_voxel_grid_res, training=True)
@@ -216,9 +219,9 @@ if args.train:
             itr_occ_loss += loss_occ
             itr_mesh_loss += mesh_loss
 
-        itr_loss /= 5
-        itr_occ_loss /= 5
-        itr_mesh_loss /= 5
+        itr_loss /= nb
+        itr_occ_loss /= nb
+        itr_mesh_loss /= nb
 
         writer.add_scalar('iteration loss', itr_loss, it)
         writer.add_scalar('occ loss', itr_occ_loss, it)
