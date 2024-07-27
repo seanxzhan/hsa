@@ -826,48 +826,48 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
     
     # exit(0)
 
-    # fn = f'data/{cat_name}_train_{pt_sample_res}_17_{start}_{end}.hdf5'
-    # hdf5_file = h5py.File(fn, 'w')
-    # hdf5_file.create_dataset(
-    #     'part_num_indices', [num_shapes, num_parts],
-    #     dtype=np.int64)
-    # hdf5_file.create_dataset(
-    #     'all_indices', [num_shapes, ],
-    #     dtype=h5py.vlen_dtype(np.int64))
-    # hdf5_file.create_dataset(
-    #     'normalized_points', [num_shapes, (pt_sample_res/2)**3, 3],
-    #     dtype=np.float32)
-    # hdf5_file.create_dataset(
-    #     'values', [num_shapes, (pt_sample_res/2)**3, 1],
-    #     dtype=np.float32)
-    # hdf5_file.create_dataset(
-    #     'occ', [num_shapes, (pt_sample_res/2)**3, 1],
-    #     dtype=np.float32)
-    # hdf5_file.create_dataset(
-    #     'node_features', [num_shapes, num_union_nodes_class, OBB_REP_SIZE],
-    #     dtype=np.float32)
-    # hdf5_file.create_dataset(
-    #     'adj', [num_shapes, num_union_nodes_class, num_union_nodes_class],
-    #     dtype=np.float32)
-    # hdf5_file.create_dataset(
-    #     'part_nodes', [num_shapes, num_parts, num_union_nodes_class],
-    #     dtype=np.int64)
-    # hdf5_file.create_dataset(
-    #     'xforms', [num_shapes, num_parts, 4, 4],
-    #     dtype=np.float32)
-    # hdf5_file.create_dataset(
-    #     'extents', [num_shapes, num_parts, 3],
-    #     dtype=np.float32)
-    # hdf5_file.create_dataset(
-    #     'transformed_points', [num_shapes, num_parts, (pt_sample_res/2)**3, 3],
-    #     dtype=np.float32)
-    # hdf5_file.create_dataset(
-    #     'empty_parts', [num_shapes, (pt_sample_res/2)**3, num_parts],
-    #     dtype=np.uint8)
-    # hdf5_file.create_dataset(
-    #     'relations', [num_shapes, 4, 4, 4],
-    #     # 'relations', [num_shapes, 3, 4, 4],
-    #     dtype=np.float32)
+    fn = f'data/{cat_name}_train_{pt_sample_res}_17_{start}_{end}.hdf5'
+    hdf5_file = h5py.File(fn, 'w')
+    hdf5_file.create_dataset(
+        'part_num_indices', [num_shapes, num_parts],
+        dtype=np.int64)
+    hdf5_file.create_dataset(
+        'all_indices', [num_shapes, ],
+        dtype=h5py.vlen_dtype(np.int64))
+    hdf5_file.create_dataset(
+        'normalized_points', [num_shapes, (pt_sample_res/2)**3, 3],
+        dtype=np.float32)
+    hdf5_file.create_dataset(
+        'values', [num_shapes, (pt_sample_res/2)**3, 1],
+        dtype=np.float32)
+    hdf5_file.create_dataset(
+        'occ', [num_shapes, (pt_sample_res/2)**3, 1],
+        dtype=np.float32)
+    hdf5_file.create_dataset(
+        'node_features', [num_shapes, num_union_nodes_class, OBB_REP_SIZE],
+        dtype=np.float32)
+    hdf5_file.create_dataset(
+        'adj', [num_shapes, num_union_nodes_class, num_union_nodes_class],
+        dtype=np.float32)
+    hdf5_file.create_dataset(
+        'part_nodes', [num_shapes, num_parts, num_union_nodes_class],
+        dtype=np.int64)
+    hdf5_file.create_dataset(
+        'xforms', [num_shapes, num_parts, 4, 4],
+        dtype=np.float32)
+    hdf5_file.create_dataset(
+        'extents', [num_shapes, num_parts, 3],
+        dtype=np.float32)
+    hdf5_file.create_dataset(
+        'transformed_points', [num_shapes, num_parts, (pt_sample_res/2)**3, 3],
+        dtype=np.float32)
+    hdf5_file.create_dataset(
+        'empty_parts', [num_shapes, (pt_sample_res/2)**3, num_parts],
+        dtype=np.uint8)
+    hdf5_file.create_dataset(
+        'relations', [num_shapes, 4, 4, 4],
+        # 'relations', [num_shapes, 3, 4, 4],
+        dtype=np.float32)
 
     # all_pts_data = [None] * num_shapes
     # all_pts_whole_data = [None] * num_shapes
@@ -951,40 +951,40 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
     #                      all_pts_whole_data)
     # pyg.process()
 
-    all_pts_data = []
-    all_pts_whole_data = []
+    # all_pts_data = []
+    # all_pts_whole_data = []
 
     # print(f"creating dataset: {fn}")
     for i, anno_id in enumerate(tqdm(all_valid_anno_ids)):
-        print(anno_id)
-        exit(0)
+        # print(anno_id)
+        # exit(0)
         out = make_data_for_one(anno_id, unique_name_to_new_id,
                                 all_entire_meshes[i],
                                 all_ori_ids_to_new_ids[i])
-    #     hdf5_file['part_num_indices'][i] = out['part_num_indices']
-    #     hdf5_file['all_indices'][i] = out['all_indices']
-    #     hdf5_file['normalized_points'][i] = out['normalized_points']
-    #     hdf5_file['values'][i] = out['values']
-    #     hdf5_file['occ'][i] = out['occ']
-    #     hdf5_file['node_features'][i] = all_node_features[i]
-    #     hdf5_file['adj'][i] = all_adj[i]
-    #     hdf5_file['part_nodes'][i] = all_part_nodes[i]
-    #     hdf5_file['xforms'][i] = all_xforms[i]
-    #     hdf5_file['extents'][i] = all_extents[i]
-    #     hdf5_file['relations'][i] = all_relations[i]
-    #     all_pts_data.append(out['pts_data'])
-    #     all_pts_whole_data.append(out['pts_whole_data'])
+        hdf5_file['part_num_indices'][i] = out['part_num_indices']
+        hdf5_file['all_indices'][i] = out['all_indices']
+        hdf5_file['normalized_points'][i] = out['normalized_points']
+        hdf5_file['values'][i] = out['values']
+        hdf5_file['occ'][i] = out['occ']
+        hdf5_file['node_features'][i] = all_node_features[i]
+        hdf5_file['adj'][i] = all_adj[i]
+        hdf5_file['part_nodes'][i] = all_part_nodes[i]
+        hdf5_file['xforms'][i] = all_xforms[i]
+        hdf5_file['extents'][i] = all_extents[i]
+        hdf5_file['relations'][i] = all_relations[i]
+        # all_pts_data.append(out['pts_data'])
+        # all_pts_whole_data.append(out['pts_whole_data'])
 
-    #     for p in range(num_parts):
-    #         xform = all_xforms[i][p]
-    #         pts = out['normalized_points'][0]
-    #         hdf5_file['transformed_points'][i, p] =\
-    #             transform.transform_points(pts, xform)
-    #     hdf5_file['empty_parts'][i] = 1-torch.from_numpy(
-    #         all_part_nodes[i][0]).sum(1).unsqueeze(1).expand(
-    #             -1, len(pts)).transpose(0, 1).numpy()
+        for p in range(num_parts):
+            xform = all_xforms[i][p]
+            pts = out['normalized_points'][0]
+            hdf5_file['transformed_points'][i, p] =\
+                transform.transform_points(pts, xform)
+        hdf5_file['empty_parts'][i] = 1-torch.from_numpy(
+            all_part_nodes[i][0]).sum(1).unsqueeze(1).expand(
+                -1, len(pts)).transpose(0, 1).numpy()
 
-    # hdf5_file.close()
+    hdf5_file.close()
 
     # pyg = PartPtsDataset(f'data/{cat_name}_train_{pt_sample_res}_17_{start}_{end}',
     #                      all_pts_data)
