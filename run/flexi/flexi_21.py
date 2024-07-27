@@ -204,7 +204,7 @@ if args.train:
                 all_loss += mask_loss + depth_loss + eikonal_loss
                 # all_loss += mask_loss + depth_loss
 
-            mesh_loss = all_loss / num_shapes
+            mesh_loss = all_loss / 10
             total_loss = loss_occ + 2 * mesh_loss
 
             total_loss.backward()
