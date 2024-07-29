@@ -44,7 +44,7 @@ iterations = 10000; iterations += 1
 train_res = [512, 512]
 fc_voxel_grid_res = 31
 # model_idx = 2
-expt_id = 27
+expt_id = 33
 
 # ------------ data dirs ------------
 partnet_dir = '/datasets/PartNet'

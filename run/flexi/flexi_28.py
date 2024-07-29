@@ -270,7 +270,7 @@ def run_flexi(gt_mesh_idx, s, sdf_deform, pred_occ, gt_meshes, test=False):
     return mask_loss+depth_loss, grid_verts, sdf, vertices, faces
 
 def run_occ(bs, occ_embed_feat, batch_points, batch_node_feat, batch_adj, batch_part_nodes,
-            points_mask=None, parts_mask=None):
+            points_mask=None, parts_mask=None, occ_mask=None):
     batch_vec = torch.arange(start=0, end=bs).to(device)
     batch_vec = torch.repeat_interleave(batch_vec, num_union_nodes)
     batch_mask = torch.sum(batch_part_nodes, dim=1)
@@ -289,6 +289,7 @@ def run_occ(bs, occ_embed_feat, batch_points, batch_node_feat, batch_adj, batch_
         else:
             pred_occ = occ_model(transformed_points.masked_fill(points_mask==1,torch.tensor(0)),
                                  occ_embed_feat.masked_fill(parts_mask==1, torch.tensor(0)))
+            pred_occ = pred_occ.masked_fill(occ_mask==1,torch.tensor(float('-inf')))
         # loss_occ = loss_f(pred_occ, gt_occ[b*bs:(b+1)*bs])
     pred_occ, _ = torch.max(pred_occ, dim=-1, keepdim=True)
     return pred_occ
@@ -465,7 +466,9 @@ if args.mask:
     model_idx = args.test_idx
     anno_id = model_idx_to_anno_id[model_idx]
 
-    results_dir = os.path.join(results_dir, 'mask', anno_id)
+    part = 3
+
+    results_dir = os.path.join(results_dir, 'mask', anno_id, str(part))
     misc.check_dir(results_dir)
     print("results dir: ", results_dir)
 
@@ -486,18 +489,21 @@ if args.mask:
     # exit(0)
 
     parts_mask = torch.zeros((1, num_parts)).to(device, torch.float32)
-    parts_mask[:, 3] = 1
+    parts_mask[:, part] = 1
     parts_mask = torch.repeat_interleave(parts_mask, 32, dim=-1)
 
     points_mask = torch.zeros((1, num_parts, 1, 1)).to(device, torch.float32)
-    points_mask[:, 3] = 1
+    points_mask[:, part] = 1
+
+    occ_mask = torch.zeros((1, 1, num_parts)).to(device, torch.float32)
+    occ_mask[:, :, part] = 1
 
     print("running inference")
     with torch.no_grad():
         pred_occ_grid = run_occ(1, occ_embed_feat, query_points, batch_node_feat, batch_adj, batch_part_nodes,
-                                points_mask=points_mask, parts_mask=parts_mask)
+                                points_mask=points_mask, parts_mask=parts_mask, occ_mask=occ_mask)
         pred_occ = run_occ(1, occ_embed_feat, batch_points, batch_node_feat, batch_adj, batch_part_nodes,
-                           points_mask=points_mask, parts_mask=parts_mask)
+                           points_mask=points_mask, parts_mask=parts_mask, occ_mask=occ_mask)
         sdf_deform = model.get_sdf_deform(x_nx3, occ_embed_feat)        
         _, _, sdf, vertices, faces =\
             run_flexi(0, 0, sdf_deform, pred_occ, gt_meshes, test=True)
