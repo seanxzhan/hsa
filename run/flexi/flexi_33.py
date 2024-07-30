@@ -34,7 +34,7 @@ name_to_cat = {
 }
 cat_name = 'Chair'
 pt_sample_res = 64
-ds_start, ds_end = 0, 508
+ds_start, ds_end = 0, 10
 OVERFIT = args.of
 overfit_idx = args.of_idx
 device = 'cuda'
@@ -49,7 +49,7 @@ expt_id = 33
 # ------------ data dirs ------------
 partnet_dir = '/datasets/PartNet'
 partnet_index_path = '/sota/partnet_dataset/stats/all_valid_anno_info.txt'
-train_new_ids_to_objs_path = f'data/{cat_name}_train_new_ids_to_objs_12_{ds_start}_{ds_end}.json'
+train_new_ids_to_objs_path = f'data/{cat_name}_train_new_ids_to_objs_18_{ds_start}_{ds_end}.json'
 with open(train_new_ids_to_objs_path, 'r') as f:
     train_new_ids_to_objs: Dict = json.load(f)
 model_idx_to_anno_id = {}
@@ -66,7 +66,7 @@ ckpt_dir = os.path.join(logs_path, 'ckpt'); misc.check_dir(ckpt_dir)
 writer = SummaryWriter(os.path.join(logs_path, 'summary'))
 
 # ------------ data loading ------------
-train_data_path = f'data/{cat_name}_train_{pt_sample_res}_12_{ds_start}_{ds_end}.hdf5'
+train_data_path = f'data/{cat_name}_train_{pt_sample_res}_18_{ds_start}_{ds_end}.hdf5'
 train_data = h5py.File(train_data_path, 'r')
 if OVERFIT:
     part_num_indices = train_data['part_num_indices'][overfit_idx:overfit_idx+1]

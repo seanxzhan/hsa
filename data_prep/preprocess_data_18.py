@@ -186,6 +186,7 @@ def build_obbs(anno_id, part_info: Dict):
     count = 0
     # all_mesh_parts = []
     up_to_now = 0
+    concat_part_meshes = []
     for name, subparts in part_info.items():
         meshes = []
         for subpart in subparts:
@@ -194,6 +195,7 @@ def build_obbs(anno_id, part_info: Dict):
             up_to_now += curr_num_meshes
             count += 1
         mesh = trimesh.util.concatenate(meshes)
+        concat_part_meshes.append(mesh)
         try:
             obb: trimesh.primitives.Box = mesh.bounding_box
         except Exception as e:
@@ -210,7 +212,7 @@ def build_obbs(anno_id, part_info: Dict):
     
     entire_mesh_orig = trimesh.util.concatenate(all_mesh_parts)
 
-    return obbs, entire_mesh_orig, name_to_obbs
+    return obbs, entire_mesh_orig, name_to_obbs, concat_part_meshes
 
 
 def condense_obbs(obbs):
@@ -542,7 +544,7 @@ def merge_partnet_after_merging(anno_id, info=False):
         return None, None, None, None, None, None, anno_id, valid
 
     # -------- build bounding boxes --------
-    obbs, entire_mesh, name_to_obbs = build_obbs(anno_id, merged_parts_info)
+    obbs, entire_mesh, name_to_obbs, part_meshes = build_obbs(anno_id, merged_parts_info)
 
     def complete_hier_to_part_class_hier(new_root_node, node_to_add):
         """only add to new node if the name is new in new_root_node
@@ -597,7 +599,7 @@ def merge_partnet_after_merging(anno_id, info=False):
 
     valid = True
     return unique_part_names, name_to_ori_ids_and_objs,\
-        obbs, entire_mesh, name_to_obbs, new_root_node,\
+        obbs, entire_mesh, name_to_obbs, part_meshes, new_root_node,\
         anno_id, valid
 
 
@@ -623,6 +625,7 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
     dict_all_names_to_ori_ids_and_objs = {}
     dict_all_obbs = {}
     dict_all_entire_meshes = {}
+    dict_all_part_meshes = {}
     dict_all_name_to_obbs = {}
     dict_all_root_nodes = {}
     dict_all_valid_anno_ids = {}
@@ -636,6 +639,7 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
     set_dict(dict_all_names_to_ori_ids_and_objs, split_ids[start:end])
     set_dict(dict_all_obbs, split_ids[start:end])
     set_dict(dict_all_entire_meshes, split_ids[start:end])
+    set_dict(dict_all_part_meshes, split_ids[start:end])
     set_dict(dict_all_name_to_obbs, split_ids[start:end])
     set_dict(dict_all_root_nodes, split_ids[start:end])
     set_dict(dict_all_valid_anno_ids, split_ids[start:end])
@@ -652,8 +656,8 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
     while True:
         flag = True
         try:
-            unique_names, part_map, obbs, entire_mesh, name_to_obbs, root_node,\
-                anno_id, valid = q.get(True, 1.0)
+            unique_names, part_map, obbs, entire_mesh, name_to_obbs, part_meshes, \
+                root_node, anno_id, valid = q.get(True, 1.0)
         except queue.Empty:
             flag = False
         if flag:
@@ -663,6 +667,7 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
                 dict_all_names_to_ori_ids_and_objs[anno_id] = part_map
                 dict_all_obbs[anno_id] = obbs
                 dict_all_entire_meshes[anno_id] = entire_mesh
+                dict_all_part_meshes[anno_id] = part_meshes
                 dict_all_name_to_obbs[anno_id] = name_to_obbs
                 dict_all_root_nodes[anno_id] = root_node
                 dict_all_valid_anno_ids[anno_id] = True
@@ -687,6 +692,7 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
     all_names_to_ori_ids_and_objs = []
     all_obbs = []
     all_entire_meshes = []
+    all_part_meshes = []
     all_name_to_obbs = []
     all_root_nodes = []
     all_valid_anno_ids = []
@@ -697,6 +703,7 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
             all_names_to_ori_ids_and_objs.append(dict_all_names_to_ori_ids_and_objs[k])
             all_obbs.append(dict_all_obbs[k])
             all_entire_meshes.append(dict_all_entire_meshes[k])
+            all_part_meshes.append(dict_all_part_meshes[k])
             all_name_to_obbs.append(dict_all_name_to_obbs[k])
             all_root_nodes.append(dict_all_root_nodes[k])
             all_valid_anno_ids.append(k)
@@ -821,8 +828,8 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
     
 
     if not save_data:
-        return unique_name_to_new_id, all_entire_meshes, all_ori_ids_to_new_ids,\
-            all_obbs, all_name_to_obbs
+        return unique_name_to_new_id, all_entire_meshes, all_part_meshes,\
+            all_ori_ids_to_new_ids, all_obbs, all_name_to_obbs
     
     # exit(0)
 
@@ -868,88 +875,30 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
         'relations', [num_shapes, 4, 4, 4],
         # 'relations', [num_shapes, 3, 4, 4],
         dtype=np.float32)
-
-    # all_pts_data = [None] * num_shapes
-    # all_pts_whole_data = [None] * num_shapes
-
-    # valid_anno_id_to_idx = {}
-    # for i, x in enumerate(all_valid_anno_ids):
-    #     valid_anno_id_to_idx[x] = i
-
-    # # lol: list of lists 
-    # num_workers = 2
-    # lol_anno_ids = misc.chunks(all_valid_anno_ids, num_workers)
-    # lol_entire_meshes = misc.chunks(all_entire_meshes, num_workers)
-    # lol_ori_ids_to_new_ids = misc.chunks(all_ori_ids_to_new_ids, num_workers)
-
-    # n_lists = len(lol_anno_ids)
-    # assert n_lists == len(lol_entire_meshes)
-    # assert n_lists == len(lol_ori_ids_to_new_ids)
-
-    # q = Queue()
-    # workers = [
-    #     Process(target=make_data_for_one_mp,
-    #             args=(q, lol_anno_ids[i],
-    #                   unique_name_to_new_id,
-    #                   lol_entire_meshes[i],
-    #                   lol_ori_ids_to_new_ids[i]))
-    #     for i in range(n_lists)
-    # ]
-    # for p in workers:
-    #     p.start()
-
-    # # print(f"creating dataset: {fn}")
-    # pbar = tqdm(total=len(all_valid_anno_ids))
-    # while True:
-    #     flag = True
-    #     try:
-    #         anno_id, out = q.get(True, 1.0)
-    #     except queue.Empty:
-    #         flag = False
-    #     if flag:
-    #         idx = valid_anno_id_to_idx[anno_id]
-    #         # hdf5_file['part_num_indices'][idx] = out['part_num_indices']
-    #         # hdf5_file['all_indices'][idx] = out['all_indices']
-    #         # hdf5_file['normalized_points'][idx] = out['normalized_points']
-    #         # hdf5_file['values'][idx] = out['values']
-    #         # hdf5_file['node_features'][idx] = all_node_features[idx]
-    #         # hdf5_file['adj'][idx] = all_adj[idx]
-    #         # hdf5_file['part_nodes'][idx] = all_part_nodes[idx]
-    #         # hdf5_file['xforms'][idx] = all_xforms[idx]
-    #         # hdf5_file['extents'][idx] = all_extents[idx]
-    #         # all_pts_data[idx] = out['pts_data']
-    #         all_pts_whole_data[idx] = out['pts_whole_data']
-
-    #         # for p in range(num_parts):
-    #         #     xform = all_xforms[idx][p]
-    #         #     pts = out['normalized_points'][0]
-    #         #     hdf5_file['transformed_points'][idx, p] =\
-    #         #         transform.transform_points(pts, xform)
-    #         # hdf5_file['empty_parts'][idx] = 1-torch.from_numpy(
-    #         #     all_part_nodes[idx][0]).sum(1).unsqueeze(1).expand(
-    #         #         -1, len(pts)).transpose(0, 1).numpy()
-            
-    #         pbar.update(1)
-    #     all_exited = True
-    #     for p in workers:
-    #         if p.exitcode is None:
-    #             all_exited = False
-    #             break
-    #     if all_exited and q.empty():
-    #         break
-    # pbar.close()
-    # for p in workers:
-    #     p.join()
-
-    # # hdf5_file.close()
-    
-    # # pyg = PartPtsDataset(f'data/{cat_name}_train_{pt_sample_res}_16_{start}_{end}',
-    # #                      all_pts_data)
-    # # pyg.process()
-
-    # pyg = PartPtsDataset(f'data/{cat_name}_train_{pt_sample_res}_16_{start}_{end}_whole',
-    #                      all_pts_whole_data)
-    # pyg.process()
+    hdf5_file.create_dataset(
+        'part_verts_0', [num_shapes, ],
+        dtype=h5py.vlen_dtype(np.float32))
+    hdf5_file.create_dataset(
+        'part_faces_0', [num_shapes, ],
+        dtype=h5py.vlen_dtype(np.float32))
+    hdf5_file.create_dataset(
+        'part_verts_1', [num_shapes, ],
+        dtype=h5py.vlen_dtype(np.float32))
+    hdf5_file.create_dataset(
+        'part_faces_1', [num_shapes, ],
+        dtype=h5py.vlen_dtype(np.float32))
+    hdf5_file.create_dataset(
+        'part_verts_2', [num_shapes, ],
+        dtype=h5py.vlen_dtype(np.float32))
+    hdf5_file.create_dataset(
+        'part_faces_2', [num_shapes, ],
+        dtype=h5py.vlen_dtype(np.float32))
+    hdf5_file.create_dataset(
+        'part_verts_3', [num_shapes, ],
+        dtype=h5py.vlen_dtype(np.float32))
+    hdf5_file.create_dataset(
+        'part_faces_3', [num_shapes, ],
+        dtype=h5py.vlen_dtype(np.float32))
 
     # all_pts_data = []
     # all_pts_whole_data = []
@@ -972,6 +921,14 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
         hdf5_file['xforms'][i] = all_xforms[i]
         hdf5_file['extents'][i] = all_extents[i]
         hdf5_file['relations'][i] = all_relations[i]
+        hdf5_file['part_verts_0'][i] = all_part_meshes[i][0].vertices.flatten()
+        hdf5_file['part_verts_1'][i] = all_part_meshes[i][1].vertices.flatten()
+        hdf5_file['part_verts_2'][i] = all_part_meshes[i][2].vertices.flatten()
+        hdf5_file['part_verts_3'][i] = all_part_meshes[i][3].vertices.flatten()
+        hdf5_file['part_faces_0'][i] = all_part_meshes[i][0].faces.flatten()
+        hdf5_file['part_faces_1'][i] = all_part_meshes[i][1].faces.flatten()
+        hdf5_file['part_faces_2'][i] = all_part_meshes[i][2].faces.flatten()
+        hdf5_file['part_faces_3'][i] = all_part_meshes[i][3].faces.flatten()
         # all_pts_data.append(out['pts_data'])
         # all_pts_whole_data.append(out['pts_whole_data'])
 
@@ -1236,9 +1193,9 @@ if __name__ == "__main__":
     # merge_partnet_after_merging('39446', info=True)
     # exit(0)
 
-    unique_name_to_new_id, all_entire_meshes, all_ori_ids_to_new_ids,\
-            all_obbs, all_name_to_obbs =\
-                export_data(train_ids, save_data=False, start=0, end=30)
+    unique_name_to_new_id, all_entire_meshes, all_part_meshes,\
+        all_ori_ids_to_new_ids, all_obbs, all_name_to_obbs =\
+                export_data(ids_w_four_parts, save_data=False, start=0, end=10)
     # np.savez_compressed("data_prep/tmp/data.npz",
     #                     all_entire_meshes=all_entire_meshes,
     #                     all_ori_ids_to_new_ids=all_ori_ids_to_new_ids,
@@ -1246,7 +1203,7 @@ if __name__ == "__main__":
     #                     all_name_to_obbs=all_name_to_obbs)
 
     # with open('data/Chair_train_new_ids_to_objs_18_0_10.json', 'r') as f:
-    with open('data/Chair_train_new_ids_to_objs_18_0_30.json', 'r') as f:
+    with open('data/Chair_train_new_ids_to_objs_18_0_10.json', 'r') as f:
         all_obs = json.load(f)
     keys = list(all_obs.keys())
 
@@ -1254,6 +1211,11 @@ if __name__ == "__main__":
     #     f'data/{cat_name}_part_name_to_new_id_8_{0}_{2000}.json',
     #     'r') as f:
     #     unique_name_to_new_id = json.load(f)
+
+    print(all_part_meshes[0])
+    part_meshes = all_part_meshes[0]
+    print(part_meshes[0].vertices.flatten().shape)
+    exit(0)
 
     # # anno_id = '43941'
     # # model_idx = 3
