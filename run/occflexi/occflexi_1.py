@@ -119,7 +119,7 @@ center_indices, boundary_indices = get_center_boundary_index(fc_res, device)
 
 # ------------ init gt meshes ------------
 print("loading gt meshes")
-gt_meshes = [my_load_mesh(s) for s in tqdm(range(0, num_shapes))]
+gt_meshes = [my_load_mesh(s) for s in tqdm(range(model_idx, model_idx+1))]
 
 # ------------ embeddings ------------
 occ_embeddings = torch.nn.Embedding(num_shapes, embed_dim).to(device)
@@ -171,7 +171,7 @@ def recon_occ_mesh(occ_model, occ_name, mesh_name):
     query_points = reconstruct.make_query_points(pt_sample_res, limits=[(-0.5, 0.5)]*3)
     query_points = torch.from_numpy(query_points).to(device, torch.float32).unsqueeze(0)
     occ_embed_feat, batch_points, batch_values, gt_meshes = load_batch(
-        0, 0, start=model_idx, end=model_idx+1)
+        0, 0, start=0, end=1)
     with torch.no_grad():
         pred_occ = occ_model.forward(
             query_points,
@@ -188,6 +188,7 @@ def recon_occ_mesh(occ_model, occ_name, mesh_name):
 
 # ------------ flexicubes ------------
 def run_flexi(sdf, gt_mesh, pred_occ):
+    # NOTE: this chunk is crucial to keep training upon flexi injection!
     sdf_bxnxnxn = sdf.reshape((sdf.shape[0], fc_res+1, fc_res+1, fc_res+1))
     sdf_less_boundary = sdf_bxnxnxn[:, 1:-1, 1:-1, 1:-1].reshape(sdf.shape[0], -1)
     pos_shape = torch.sum((sdf_less_boundary > 0).int(), dim=-1)
@@ -241,7 +242,7 @@ if args.train:
     for it in range(iterations):
         optimizer.zero_grad()
         occ_embed_feat, batch_points, batch_values, gt_meshes = load_batch(
-            0, 0, start=model_idx, end=model_idx+1)
+            0, 0, start=0, end=1)
         pred_occ = occ_model.forward(
             batch_points,
             occ_embed_feat.unsqueeze(1).expand(-1, batch_points.shape[1], -1))
@@ -254,6 +255,9 @@ if args.train:
             pred_verts_occ.view(-1, fc_res+1, fc_res+1, fc_res+1))
 
         if it > 1000:
+            # NOTE: this delayed flexi injection is crucial!
+            # NOTE: it seems to be important that occ loss needs to be relatively 
+            #       low (shape is decent) to then have flexi kick in
             mesh_loss = 0
             for s in range(batch_size):
                 one_mesh_loss, vertices, faces = run_flexi(
@@ -285,10 +289,11 @@ if args.train:
             grid = comp_sdf[-1].reshape(fc_res+1, fc_res+1, fc_res+1)
             occ_pts = torch.from_numpy(torch.argwhere(grid <= 0.0).cpu().numpy())
             occ_pts = occ_pts/(fc_res+1) -0.5
-            timelapse.add_pointcloud_batch(
-                iteration=it+1,
-                category='pred_occ',
-                pointcloud_list=[occ_pts])
+            if occ_pts.shape[0] != 0:
+                timelapse.add_pointcloud_batch(
+                    iteration=it+1,
+                    category='pred_occ',
+                    pointcloud_list=[occ_pts])
             
         if it == 1000:
             # save occ, comp_sdf, mesh

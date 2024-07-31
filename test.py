@@ -1,134 +1,74 @@
-import torch
+import numpy as np
+import matplotlib.pyplot as plt
+from utils import ops
+
+# Generate a sample signal
+# x = np.random.beta(a=2, b=2, size=1000)  # Example data between 0 and 1
+x = np.load('results/occflexi/occflexi_1/bin2sdf_torch_6/1000occ.npy').flatten()
+y = np.load('results/occflexi/occflexi_1/bin2sdf_torch_6/outocc.npy').flatten()
+
+# Apply transformations
+epsilon = 1e-6
+log_transformed = np.log(x + epsilon)
+exp_transformed = np.exp(x) - 1
+sigmoid_transformed = 1 / (1 + np.exp(-10 * (x - 0.5)))
+power_transformed = np.power(x, 2)
+arsinh_transformed = np.arcsinh(1.15*x)
+smoothed = ops.smoothing_sinh_np(x)
 
 
-# def compute_bounding_box_and_center(voxel_grid):
-#     # Ensure the voxel grid is a binary tensor
-#     voxel_grid = (voxel_grid > 0).to(torch.bool)
-    
-#     # Get the indices of all non-zero elements
-#     non_zero_indices = torch.nonzero(voxel_grid)
-    
-#     # Compute the min and max indices along each dimension
-#     min_indices = torch.min(non_zero_indices, dim=0)[0]
-#     max_indices = torch.max(non_zero_indices, dim=0)[0]
-    
-#     # Compute the center of the bounding box
-#     center_indices = (min_indices + max_indices).float() / 2.0
-    
-#     return min_indices, max_indices, center_indices
+# Plot the transformations
+plt.figure(figsize=(24, 16))
 
+nrows = 4
 
-# def differentiable_bounding_box_and_center(voxel_grid):
-#     # Ensure the voxel grid is a float tensor
-#     voxel_grid = voxel_grid.to(torch.float32)
-    
-#     # Create coordinate grids
-#     dims = voxel_grid.shape
-#     coords = torch.stack(torch.meshgrid([torch.arange(d) for d in dims], indexing='ij'), dim=-1).to(voxel_grid.device)
-    
-#     # Flatten the voxel grid and coordinates
-#     voxel_grid_flat = voxel_grid.view(-1)
-#     coords_flat = coords.view(-1, len(dims))
-    
-#     # Normalize voxel grid to get weights
-#     weights = voxel_grid_flat / torch.sum(voxel_grid_flat)
-    
-#     # Compute weighted sum of coordinates for center
-#     center_coords = torch.sum(coords_flat * weights[:, None], dim=0)
-    
-#     # Compute soft min and max coordinates using weighted sums
-#     weighted_coords = coords_flat * weights[:, None]
-#     min_coords = torch.sum(weighted_coords, dim=0)
-#     max_coords = torch.sum(weighted_coords + (1 - voxel_grid_flat[:, None]) * coords_flat, dim=0)
-    
-#     return min_coords, max_coords, center_coords
+plt.subplot(nrows, 2, 1)
+plt.hist(x, bins=50, color='blue', alpha=0.7)
+plt.xlim((-0.25, 1.5))
+plt.ylim((0, 250000))
+plt.title('Original Data')
 
+plt.subplot(nrows, 2, 2)
+plt.hist(log_transformed, bins=50, color='green', alpha=0.7)
+plt.xlim((-0.25, 1.5))
+plt.ylim((0, 250000))
+plt.title('Log Transformation')
 
-# # Example usage
-# voxel_grid = torch.zeros((10, 10, 10), dtype=torch.float32)
-# voxel_grid[2:5, 3:6, 1:4] = 1.0  # Example geometry
+plt.subplot(nrows, 2, 3)
+plt.hist(exp_transformed, bins=50, color='red', alpha=0.7)
+plt.xlim((-0.25, 1.5))
+plt.ylim((0, 250000))
+plt.title('Exponential Transformation')
 
-# min_indices, max_indices, center_indices = compute_bounding_box_and_center(voxel_grid)
-# print("Min indices:", min_indices)
-# print("Max indices:", max_indices)
-# print("Center indices:", center_indices)
+plt.subplot(nrows, 2, 4)
+plt.hist(sigmoid_transformed, bins=50, color='purple', alpha=0.7)
+plt.xlim((-0.25, 1.5))
+plt.ylim((0, 250000))
+plt.title('Sigmoid Transformation')
 
-# min_indices, max_indices, center_indices = differentiable_bounding_box_and_center(voxel_grid)
-# print("Min indices:", min_indices)
-# print("Max indices:", max_indices)
-# print("Center indices:", center_indices)
+plt.subplot(nrows, 2, 5)
+plt.hist(power_transformed, bins=50, color='orange', alpha=0.7)
+plt.xlim((-0.25, 1.5))
+plt.ylim((0, 250000))
+plt.title('Power Transformation')
 
-def differentiable_bounding_box_and_center(query_points, occupancy_values):
-    # Ensure inputs are float tensors
-    query_points = query_points.to(torch.float32)
-    occupancy_values = occupancy_values.to(torch.float32)
-    
-    # Normalize occupancy values to get weights
-    weights = occupancy_values / (occupancy_values.sum(dim=1, keepdim=True) + 1e-8)
+plt.subplot(nrows, 2, 6)
+plt.hist(arsinh_transformed, bins=50, color='brown', alpha=0.7)
+plt.xlim((-0.25, 1.5))
+plt.ylim((0, 250000))
+plt.title('Arsinh Transformation')
 
-    # print("weights:", weights[0, :, 0])
-    # print("points:", query_points[0])
+plt.subplot(nrows, 2, 7)
+plt.hist(smoothed, bins=50, color='magenta', alpha=0.7)
+plt.xlim((-0.25, 1.5))
+plt.ylim((0, 250000))
+plt.title('Smoothed Transformation')
 
-    # Compute the weighted sum of coordinates for the center
-    # center_coords = torch.einsum('bnp,bcn->bnp', query_points, weights.transpose(1, 2))
-    center_coords = torch.einsum('bcn,bnp->bcp', weights.transpose(1, 2), query_points)
+plt.subplot(nrows, 2, 8)
+plt.hist(y, bins=50, color='gray', alpha=0.7)
+plt.xlim((-0.25, 1.5))
+plt.ylim((0, 250000))
+plt.title('Target Transformation')
 
-    # print("center coords:", center_coords[0])
-    
-    # Compute the soft min and max coordinates using log-sum-exp trick
-    beta = 10.0  # This is a smoothing parameter
-    soft_min_coords = -torch.logsumexp(-query_points[:, :, None, :] * weights[:, :, :, None] * beta, dim=1) / beta
-    soft_max_coords = torch.logsumexp(query_points[:, :, None, :] * weights[:, :, :, None] * beta, dim=1) / beta
-    
-    return soft_min_coords, soft_max_coords, center_coords
-
-# Example usage
-batch_size = 2
-num_points = 4
-query_points = torch.tensor([
-    [
-        [1.0, 2.0, 3.0],
-        [2.0, 3.0, 4.0],
-        [3.0, 4.0, 5.0],
-        [4.0, 5.0, 6.0],
-        [5.0, 6.0, 7.0]
-    ],
-    [
-        [1.0, 2.0, 3.0],
-        [2.0, 3.0, 4.0],
-        [3.0, 4.0, 5.0],
-        [4.0, 5.0, 6.0],
-        [5.0, 6.0, 7.0]
-    ]
-], dtype=torch.float32)
-
-occupancy_values = torch.tensor([
-    [
-        [0, 1, 1, 0],
-        [0, 1, 1, 0],
-        [0, 1, 1, 0],
-        [0, 1, 1, 0],
-        [0, 1, 1, 0]
-    ],
-    [
-        [1, 0, 0, 1],
-        [1, 0, 0, 1],
-        [1, 0, 0, 1],
-        [1, 0, 0, 1],
-        [1, 0, 0, 1]
-    ]
-], dtype=torch.float32)
-
-
-# print(query_points.shape)
-# print(occupancy_values.shape)
-
-min_coords, max_coords, center_coords = differentiable_bounding_box_and_center(query_points, occupancy_values)
-# print("Min coordinates:", min_coords)
-# print("Max coordinates:", max_coords)
-print("query points:", query_points[0])
-print("occupancy:", occupancy_values[0, :, 0])
-print("center coords:", center_coords[0, 0, :])
-
-# print(occupancy_values[:, :, 0])
-
+plt.tight_layout()
+plt.show()

@@ -369,6 +369,25 @@ def bin2sdf_torch_5(input_tensor, epsilon=1e-6):
     return min_distances
 
 
+def bin2sdf_torch_6(input):
+    return -input + 1
+
+
+def bin2sdf_torch_7(input):
+    return -smoothing_sinh(input)+1
+
+
+def smoothing_sinh(input):
+    return 0.1 * torch.sinh(4.625*(input-0.5)) + 0.5
+
+
+def smoothing_sinh_np(input):
+    return 0.1 * np.sinh(4.625*(input-0.5)) + 0.5
+    # return 0.01 * np.sinh(9.21*(input-0.5)) + 0.5
+    # return 0.05 * np.sinh(5.996*(input-0.5)) + 0.5
+    # return 0.075 * np.sinh(5.19169*(input-0.5)) + 0.5
+
+
 def sample_near_sdf_surface(sdf_grid, voxel_grid,
                             use_sdf_values=False):
     # print(np.sum(sdf_grid == 0))
