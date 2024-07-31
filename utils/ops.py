@@ -188,6 +188,156 @@ def bin2sdf(vox_path='', input=None):
     return output
 
 
+import torch.nn.functional as F
+def bin2sdf_torch(input):
+    input = input.float()
+    device = input.device
+    fill_map = torch.zeros_like(input, dtype=torch.bool)
+    output = torch.zeros_like(input, dtype=torch.float32)
+    
+    # Structuring element for 3D convolution
+    struct_elem = torch.ones((1, 1, 3, 3, 3), device=device)
+
+    # Fill inside
+    changing_map = input.clone()
+    sdf_in = -1
+    while torch.sum(fill_map) != torch.sum(input):
+        changing_map_padded = F.pad(changing_map, (1, 1, 1, 1, 1, 1), mode='constant', value=0)
+        changing_map_new = F.conv3d(changing_map_padded.unsqueeze(0).unsqueeze(0), struct_elem, stride=1).squeeze() == 27
+        changing_map_new = changing_map_new.float()
+        fill_map = fill_map | (changing_map_new != changing_map)
+        output[fill_map & (changing_map_new != changing_map)] = sdf_in
+        changing_map = changing_map_new.clone()
+        sdf_in -= 1
+
+    # Fill outside
+    changing_map = input.clone()
+    sdf_out = 1
+    while torch.sum(fill_map) != torch.numel(input):
+        changing_map_padded = F.pad(changing_map, (1, 1, 1, 1, 1, 1), mode='constant', value=0)
+        changing_map_new = F.conv3d(changing_map_padded.unsqueeze(0).unsqueeze(0), struct_elem, stride=1).squeeze() > 0
+        changing_map_new = changing_map_new.float()
+        fill_map = fill_map | (changing_map_new != changing_map)
+        output[fill_map & (changing_map_new != changing_map)] = sdf_out
+        changing_map = changing_map_new.clone()
+        sdf_out += 1
+
+    # Normalization
+    output[output < 0] /= (-sdf_in - 1)
+    output[output > 0] /= (sdf_out - 1)
+
+    return output
+
+
+def bin2sdf_torch_1(input):
+    input = input.float()
+    device = input.device
+    
+    # Initialize distance transform
+    max_dist = torch.tensor(input.shape[1:], dtype=torch.float32, device=device).norm().item()
+    
+    # Inside distance
+    dist_inside = torch.where(input == 1, 0.0, max_dist)
+    for _ in range(int(max_dist)):
+        dist_inside_padded = F.pad(dist_inside, (1, 1, 1, 1, 1, 1), mode='constant', value=max_dist)
+        dist_inside_new = F.conv3d(dist_inside_padded.unsqueeze(0).unsqueeze(0), 
+                                   torch.ones((1, 1, 3, 3, 3), device=device), stride=1).squeeze()
+        dist_inside = torch.min(dist_inside, dist_inside_new)
+        dist_inside[input == 1] = 0.0
+    
+    # Outside distance
+    dist_outside = torch.where(input == 0, 0.0, max_dist)
+    for _ in range(int(max_dist)):
+        dist_outside_padded = F.pad(dist_outside, (1, 1, 1, 1, 1, 1), mode='constant', value=max_dist)
+        dist_outside_new = F.conv3d(dist_outside_padded.unsqueeze(0).unsqueeze(0), 
+                                    torch.ones((1, 1, 3, 3, 3), device=device), stride=1).squeeze()
+        dist_outside = torch.min(dist_outside, dist_outside_new)
+        dist_outside[input == 0] = 0.0
+    
+    # Combine inside and outside distances
+    output = -dist_inside + dist_outside
+
+    # Normalization
+    output = output / max_dist
+
+    return output
+
+
+def bin2sdf_torch_2(input):
+    input = input.float()
+    device = input.device
+    
+    # Initialize distance transform
+    max_dist = torch.tensor(input.shape[1:], dtype=torch.float32, device=device).norm().item()
+    
+    # Inside distance
+    dist_inside = torch.where(input == 1, 0.0, max_dist)
+    # for _ in range(int(max_dist)):
+    dist_inside_padded = F.pad(dist_inside, (1, 1, 1, 1, 1, 1), mode='constant', value=max_dist)
+    dist_inside_new = F.conv3d(dist_inside_padded.unsqueeze(0).unsqueeze(0), 
+                                torch.ones((1, 1, 3, 3, 3), device=device), stride=1).squeeze()
+    dist_inside = torch.min(dist_inside, dist_inside_new)
+    dist_inside[input == 1] = 0.0
+    
+    # Outside distance
+    dist_outside = torch.where(input == 0, 0.0, max_dist)
+    # for _ in range(int(max_dist)):
+    dist_outside_padded = F.pad(dist_outside, (1, 1, 1, 1, 1, 1), mode='constant', value=max_dist)
+    dist_outside_new = F.conv3d(dist_outside_padded.unsqueeze(0).unsqueeze(0), 
+                                torch.ones((1, 1, 3, 3, 3), device=device), stride=1).squeeze()
+    dist_outside = torch.min(dist_outside, dist_outside_new)
+    dist_outside[input == 0] = 0.0
+    
+    # Combine inside and outside distances
+    output = -dist_inside + dist_outside
+
+    # Normalization
+    output = output / max_dist
+
+    return output
+
+
+def bin2sdf_torch_3(input):
+    return -2 * input + 1
+
+
+def bin2sdf_torch_4(input):
+    input = input.float()
+    device = input.device
+    
+    # Initialize distance transform
+    max_dist = torch.tensor(input.shape[1:], dtype=torch.float32, device=device).norm().item()
+    # print(max_dist)
+    # exit(0)
+    # Inside distance
+    # dist_inside = torch.where(input == 1, 0.0, max_dist)
+    dist_inside = (1 - input) * max_dist
+    # for _ in range(int(max_dist)):
+    dist_inside_padded = F.pad(dist_inside, (1, 1, 1, 1, 1, 1), mode='constant', value=max_dist)
+    dist_inside_new = F.conv3d(dist_inside_padded.unsqueeze(0).unsqueeze(0), 
+                                torch.ones((1, 1, 3, 3, 3), device=device), stride=1).squeeze()
+    dist_inside = torch.min(dist_inside, dist_inside_new)
+    # dist_inside[input == 1] = 0.0
+    
+    # Outside distance
+    # dist_outside = torch.where(input == 0, 0.0, max_dist)
+    dist_outside = input * max_dist
+    # for _ in range(int(max_dist)):
+    dist_outside_padded = F.pad(dist_outside, (1, 1, 1, 1, 1, 1), mode='constant', value=max_dist)
+    dist_outside_new = F.conv3d(dist_outside_padded.unsqueeze(0).unsqueeze(0), 
+                                torch.ones((1, 1, 3, 3, 3), device=device), stride=1).squeeze()
+    dist_outside = torch.min(dist_outside, dist_outside_new)
+    # dist_outside[input == 0] = 0.0
+    
+    # Combine inside and outside distances
+    output = -dist_inside + dist_outside
+
+    # Normalization
+    output = output / max_dist
+
+    return output
+
+
 def sample_near_sdf_surface(sdf_grid, voxel_grid,
                             use_sdf_values=False):
     # print(np.sum(sdf_grid == 0))

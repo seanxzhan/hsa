@@ -19,6 +19,7 @@ parser.add_argument('--test', action="store_true")
 parser.add_argument('--test_idx', '--ti', type=int)
 parser.add_argument('--of', action="store_true", default=False)
 parser.add_argument('--of_idx', '--oi', type=int)
+parser.add_argument('--mask', '--mk', action="store_true")
 args = parser.parse_args()
 
 name_to_cat = {
@@ -27,7 +28,7 @@ name_to_cat = {
 }
 cat_name = 'Chair'
 pt_sample_res = 64
-ds_start, ds_end = 0, 100
+ds_start, ds_end = 0, 10
 OVERFIT = args.of
 overfit_idx = args.of_idx
 device = 'cuda'
@@ -36,11 +37,11 @@ iterations = 3000
 train_res = [512, 512]
 fc_voxel_grid_res = 31
 occ_res = fc_voxel_grid_res + 1
-model_idx = 2
+model_idx = 0
 
 partnet_dir = '/datasets/PartNet'
 partnet_index_path = '/sota/partnet_dataset/stats/all_valid_anno_info.txt'
-train_new_ids_to_objs_path = f'data/{cat_name}_train_new_ids_to_objs_17_{ds_start}_{ds_end}.json'
+train_new_ids_to_objs_path = f'data/{cat_name}_train_new_ids_to_objs_18_{ds_start}_{ds_end}.json'
 with open(train_new_ids_to_objs_path, 'r') as f:
     train_new_ids_to_objs: Dict = json.load(f)
 model_idx_to_anno_id = {}
@@ -52,7 +53,7 @@ timelapse_dir = os.path.join(results_dir, 'training_timelapse')
 print("timelapse dir: ", timelapse_dir)
 timelapse = kaolin.visualize.Timelapse(timelapse_dir)
 
-train_data_path = f'data/{cat_name}_train_{pt_sample_res}_17_{ds_start}_{ds_end}.hdf5'
+train_data_path = f'data/{cat_name}_train_{pt_sample_res}_18_{ds_start}_{ds_end}.hdf5'
 train_data = h5py.File(train_data_path, 'r')
 if OVERFIT:
     part_num_indices = train_data['part_num_indices'][overfit_idx:overfit_idx+1]
@@ -112,75 +113,112 @@ gt_sdf = torch.from_numpy(values[model_idx]).to(device)
 np.save(os.path.join(results_dir, f'{anno_id}_gt_occ.npy'), occ[model_idx])
 gt_occ = torch.from_numpy(occ[model_idx]).to(device)
 
-def differentiable_sdf(occupancy_grid, radius=3):
-    """
-    Computes a differentiable approximation of the SDF for a given occupancy grid.
-    
-    Args:
-        occupancy_grid (torch.Tensor): The occupancy grid (binary or probabilistic).
-        radius (int): The radius within which to compute the local distances.
-        
-    Returns:
-        torch.Tensor: The approximate SDF.
-    """
-    # device = occupancy_grid.device
-    # dtype = occupancy_grid.dtype
-
-    # # Generate a distance kernel
-    # coords = torch.stack(torch.meshgrid(
-    #     torch.arange(-radius, radius+1),
-    #     torch.arange(-radius, radius+1),
-    #     torch.arange(-radius, radius+1)
-    # ), dim=-1).to(device=device, dtype=dtype)
-    # distances = torch.norm(coords, dim=-1, keepdim=True)
-    # distances = distances.unsqueeze(0).unsqueeze(0).squeeze(-1)
-
-    # # Compute the local distance transform using convolutions
-    # occupancy_grid = occupancy_grid.unsqueeze(0).unsqueeze(0)  # Add batch and channel dimensions
-
-    # dist_inside = torch.nn.functional.conv3d(occupancy_grid, distances, padding=radius)
-    # dist_outside = torch.nn.functional.conv3d(1 - occupancy_grid, distances, padding=radius)
-
-    # print(torch.min(dist_inside))
-    # print(torch.max(dist_inside))
-    # print(torch.min(dist_outside))
-    # print(torch.max(dist_outside))
-
-    # # # Soft approximation of the minimum distance
-    # # dist_inside = -torch.logsumexp(-dist_inside, dim=[2, 3, 4], keepdim=True)
-    # # dist_outside = -torch.logsumexp(-dist_outside, dim=[2, 3, 4], keepdim=True)
-
-    # # Compute the signed distance function
-    # sdf = dist_inside - dist_outside
-    # return sdf.squeeze()
-
-    # occupancy_grid = (occupancy_grid > 0.5).float()
-
-    # Create distance transform for occupied and free space
-    occupied_dist = torch.cdist(occupancy_grid, occupancy_grid, p=2)
-    free_dist = torch.cdist(1 - occupancy_grid, 1 - occupancy_grid, p=2)
-
-    # Compute the signed distance
-    sdf = free_dist - occupied_dist
-
-    return sdf
-
-# comp_sdf = differentiable_sdf(gt_occ.reshape([occ_res, occ_res, occ_res]))
-comp_sdf = ops.bin2sdf(input=gt_occ.reshape([occ_res, occ_res, occ_res]).cpu().numpy())
-comp_sdf = torch.from_numpy(comp_sdf).to(device)
-# print(comp_sdf)
-# print(comp_sdf.shape)
-# np.save(os.path.join(results_dir, f'{anno_id}_comp_sdf.npy'), comp_sdf.cpu().numpy())
-np.save(os.path.join(results_dir, f'{anno_id}_comp_sdf.npy'), comp_sdf.cpu().numpy())
-# exit(0)
-
-
 fc = FlexiCubes(device)
 x_nx3, cube_fx8 = fc.construct_voxel_grid(fc_voxel_grid_res)
 # NOTE: 2* is necessary! Dunno why
+batch_points = x_nx3.clone().to(device)
 x_nx3 = 2*x_nx3
-
 x_nx3 = x_nx3.clone().detach().requires_grad_(True)
+
+# NOTE: testing network output
+from occ_networks.xform_decoder_nasa_obbgnn_ae_58 import SDFDecoder
+from utils import misc, reconstruct
+occ_ckpt_path = 'logs/local_66-bs-25/64/ckpt/model_3000.pt'
+occ_checkpoint = torch.load(occ_ckpt_path)
+num_parts = 4
+num_union_nodes = adj.shape[1]
+occ_model = SDFDecoder(num_parts=4,
+                       feature_dims=32,
+                       internal_dims=128,
+                       hidden=4,
+                       multires=2).to(device)
+occ_model.load_state_dict(occ_checkpoint['model_state_dict'])
+occ_embeddings = torch.nn.Embedding(508, 128).to(device)
+occ_embeddings.load_state_dict(occ_checkpoint['embeddings_state_dict'])
+
+def run_occ(bs, occ_embed_feat, batch_points, batch_node_feat, batch_adj, batch_part_nodes,
+            points_mask=None, parts_mask=None, occ_mask=None):
+    batch_vec = torch.arange(start=0, end=bs).to(device)
+    batch_vec = torch.repeat_interleave(batch_vec, num_union_nodes)
+    batch_mask = torch.sum(batch_part_nodes, dim=1)
+    with torch.no_grad():
+        _, learned_xforms = occ_model.learn_geom_xform(batch_node_feat,
+                                                        batch_adj,
+                                                        batch_mask,
+                                                        batch_vec)
+    learned_xforms = learned_xforms[:, [0, 1, 2, 3], [0, 1, 2, 3], :]
+    transformed_points = batch_points.unsqueeze(0).unsqueeze(0).expand(
+        -1, num_parts, -1, -1) + learned_xforms.unsqueeze(2)
+    
+    with torch.no_grad():
+        if not args.mask:
+            pred_occ = occ_model(transformed_points, occ_embed_feat)
+        else:
+            pred_occ = occ_model(transformed_points.masked_fill(points_mask==1,torch.tensor(0)),
+                                 occ_embed_feat.masked_fill(parts_mask==1, torch.tensor(0)))
+            pred_occ = pred_occ.masked_fill(occ_mask==1,torch.tensor(float('-inf')))
+        # loss_occ = loss_f(pred_occ, gt_occ[b*bs:(b+1)*bs])
+    pred_occ, _ = torch.max(pred_occ, dim=-1, keepdim=True)
+    return pred_occ
+
+def load_batch(batch_idx, batch_size, start=None, end=None):
+    if start is None:
+        start = batch_idx*batch_size
+    if end is None:
+        end = start + batch_size
+    return occ_embeddings(torch.arange(start, end).to(device)),\
+        torch.from_numpy(node_features[start:end, :, :3]).to(device, torch.float32),\
+        torch.from_numpy(adj[start:end]).to(device, torch.long),\
+        torch.from_numpy(part_nodes[start:end]).to(device, torch.long),\
+
+# comp_sdf = differentiable_sdf(gt_occ.reshape([occ_res, occ_res, occ_res]))
+# comp_sdf = ops.bin2sdf(input=gt_occ.reshape([occ_res, occ_res, occ_res]).cpu().numpy())
+# comp_sdf = torch.from_numpy(comp_sdf).to(device)
+# comp_sdf = ops.bin2sdf_torch_1(input=gt_occ.reshape([occ_res, occ_res, occ_res]))
+# comp_sdf = ops.bin2sdf_torch_2(input=gt_occ.reshape([occ_res, occ_res, occ_res]))
+# comp_sdf = ops.bin2sdf_torch_3(input=gt_occ.reshape([occ_res, occ_res, occ_res]))
+# comp_sdf = ops.bin2sdf_torch_4(input=gt_occ.reshape([occ_res, occ_res, occ_res]))
+
+occ_embed_feat, batch_node_feat, batch_adj, batch_part_nodes = load_batch(0, 0, model_idx, model_idx+1)
+# pred_occ = run_occ(1, occ_embed_feat, batch_points, batch_node_feat, batch_adj, batch_part_nodes).squeeze(0)
+
+part = [1, 2, 3]
+
+parts_mask = torch.zeros((1, num_parts)).to(device, torch.float32)
+parts_mask[:, part] = 1
+parts_mask = torch.repeat_interleave(parts_mask, 32, dim=-1)
+
+points_mask = torch.zeros((1, num_parts, 1, 1)).to(device, torch.float32)
+points_mask[:, part] = 1
+
+occ_mask = torch.zeros((1, 1, num_parts)).to(device, torch.float32)
+occ_mask[:, :, part] = 1
+
+pred_occ = run_occ(1, occ_embed_feat, batch_points, batch_node_feat, batch_adj, batch_part_nodes,
+                   points_mask=points_mask, parts_mask=parts_mask, occ_mask=occ_mask).squeeze(0)
+
+plot_vals = False
+if plot_vals:
+    import matplotlib.pyplot as plt
+    plt.hist(pred_occ.cpu().numpy().flatten(), bins=50, color='blue')
+    plt.title("Histogram of Sampled SDF Values")
+    plt.xlabel("SDF Value")
+    plt.ylabel("Frequency")
+    plt.xlim(-1, 1)
+    misc.save_fig(plt, '', results_dir+'/partitioned_hist.png')
+    plt.close()
+
+# # pred_occ = (pred_occ > 0.5).float()
+np.save(os.path.join(results_dir, f'{anno_id}_pred_occ.npy'), pred_occ.reshape([occ_res, occ_res, occ_res]).cpu().numpy())
+# import time
+# st = time.time()
+comp_sdf = ops.bin2sdf_torch_3(input=pred_occ.reshape([occ_res, occ_res, occ_res]))
+# print(time.time()-st)
+# comp_sdf = comp_sdf.to(device)
+
+
+np.save(os.path.join(results_dir, f'{anno_id}_comp_sdf.npy'), comp_sdf.cpu().numpy())
+# exit(0)
 
 # model = SDFDecoder(input_dims=3,
 #                    num_parts=1,
@@ -191,7 +229,7 @@ x_nx3 = x_nx3.clone().detach().requires_grad_(True)
 # params = [p for _, p in model.named_parameters()]
 # model.pre_train_sphere(2000)
 
-sdf = torch.rand_like(x_nx3[:,0]) - 0.1 # randomly init SDF
+# sdf = torch.rand_like(x_nx3[:,0]) - 0.1 # randomly init SDF
 # print(sdf.shape)
 # sdf    = torch.nn.Parameter(sdf.clone().detach(), requires_grad=True)
 # deform = torch.nn.Parameter(torch.zeros_like(x_nx3), requires_grad=True)
@@ -210,23 +248,10 @@ def loss_f(pred_values, gt_values):
     recon_loss = mse(pred_values, gt_values)
     return recon_loss
 
-# print(comp_sdf.shape)
-# exit(0)
-
-# print(comp_sdf.flatten().shape)
-# exit(0)
-
-# mv, mvp = render.get_random_camera_batch(
-#     8, iter_res=train_res, device=device, use_kaolin=False)
-# target = render.render_mesh_paper(gt_mesh, mv, mvp, train_res)
-# grid_verts = x_nx3 + (2-1e-8) / (fc_voxel_grid_res * 2) * torch.tanh(deform)
+# -------- NOTE: testing flexicube's ability to convert sdf/psuedo sdf to mesh
 grid_verts = x_nx3
 vertices, faces, L_dev = fc(
     grid_verts, comp_sdf.flatten(), cube_fx8, fc_voxel_grid_res, training=False)
-# vertices, faces, L_dev = fc(
-#     grid_verts, sdf, cube_fx8, fc_voxel_grid_res,
-#     beta_fx12=weight[:,:12], alpha_fx8=weight[:,12:20],
-#     gamma_f=weight[:,20], training=True)
 flexicubes_mesh = util.Mesh(vertices, faces)
 np.save(os.path.join(results_dir, f'{anno_id}_flexi_sdf.npy'), comp_sdf.detach().cpu().numpy())
 mesh_np = trimesh.Trimesh(vertices = vertices.detach().cpu().numpy(), faces=faces.detach().cpu().numpy(), process=False)
