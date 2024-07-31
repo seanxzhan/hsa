@@ -1,4 +1,4 @@
-import math
+from tqdm import tqdm
 import torch
 from align_networks.gnn_dense_ae_58 import OBBGNN
 
@@ -89,6 +89,23 @@ class SmallMLPs(torch.nn.Module):
         p = torch.concat((p, feature), dim=-1)
         out = self.net(p)
         return out
+    
+    def pre_train_sphere(self, iter):
+        print("initializing SDF to sphere")
+        loss_fn = torch.nn.MSELoss()
+        optimizer = torch.optim.Adam(list(self.parameters()), lr=1e-4)
+
+        for _ in tqdm(range(iter)):
+            p = torch.rand((1, 1024,3), device='cuda') - 0.5
+            distances = torch.sqrt((p**2).sum(-1))
+            occupancy = (distances <= 0.3).float()
+            output = self.forward(p, torch.zeros((1, 1024, 128)).to('cuda'))
+            loss = loss_fn(output[...,0], occupancy)
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+
+        print("Pre-trained MLP", loss.item())
 
 
 # Positional Encoding from https://github.com/yenchenlin/nerf-pytorch/blob/1f064835d2cca26e4df2d7d130daa39a8cee1795/run_nerf_helpers.py

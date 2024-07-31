@@ -212,7 +212,7 @@ if plot_vals:
 np.save(os.path.join(results_dir, f'{anno_id}_pred_occ.npy'), pred_occ.reshape([occ_res, occ_res, occ_res]).cpu().numpy())
 # import time
 # st = time.time()
-comp_sdf = ops.bin2sdf_torch_3(input=pred_occ.reshape([occ_res, occ_res, occ_res]))
+comp_sdf = ops.bin2sdf_torch_5(pred_occ.reshape([occ_res, occ_res, occ_res]))
 # print(time.time()-st)
 # comp_sdf = comp_sdf.to(device)
 
@@ -229,19 +229,19 @@ np.save(os.path.join(results_dir, f'{anno_id}_comp_sdf.npy'), comp_sdf.cpu().num
 # params = [p for _, p in model.named_parameters()]
 # model.pre_train_sphere(2000)
 
-# sdf = torch.rand_like(x_nx3[:,0]) - 0.1 # randomly init SDF
-# print(sdf.shape)
-# sdf    = torch.nn.Parameter(sdf.clone().detach(), requires_grad=True)
-# deform = torch.nn.Parameter(torch.zeros_like(x_nx3), requires_grad=True)
-# weight = torch.zeros((cube_fx8.shape[0], 21), dtype=torch.float, device='cuda') 
-# weight    = torch.nn.Parameter(weight.clone().detach(), requires_grad=True)
+sdf = torch.rand_like(x_nx3[:,0]) - 0.1 # randomly init SDF
+print(sdf.shape)
+sdf    = torch.nn.Parameter(sdf.clone().detach(), requires_grad=True)
+deform = torch.nn.Parameter(torch.zeros_like(x_nx3), requires_grad=True)
+weight = torch.zeros((cube_fx8.shape[0], 21), dtype=torch.float, device='cuda') 
+weight    = torch.nn.Parameter(weight.clone().detach(), requires_grad=True)
 
-# optimizer = torch.optim.Adam([sdf], lr=lr)
-# # optimizer = torch.optim.Adam([sdf, deform], lr=lr)
-# # optimizer = torch.optim.Adam([sdf, deform, weight], lr=lr)
-# # optimizer = torch.optim.Adam(params=params, lr=lr)
-# scheduler = torch.optim.lr_scheduler.LambdaLR(
-#     optimizer, lr_lambda=lambda x: lr_schedule(x)) 
+optimizer = torch.optim.Adam([sdf], lr=lr)
+# optimizer = torch.optim.Adam([sdf, deform], lr=lr)
+# optimizer = torch.optim.Adam([sdf, deform, weight], lr=lr)
+# optimizer = torch.optim.Adam(params=params, lr=lr)
+scheduler = torch.optim.lr_scheduler.LambdaLR(
+    optimizer, lr_lambda=lambda x: lr_schedule(x)) 
 
 mse = torch.nn.MSELoss()
 def loss_f(pred_values, gt_values):

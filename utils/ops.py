@@ -338,6 +338,37 @@ def bin2sdf_torch_4(input):
     return output
 
 
+def bin2sdf_torch_5(input_tensor, epsilon=1e-6):
+    device = input_tensor.device
+    # Create meshgrid for 3D coordinates
+    D, H, W = input_tensor.shape
+    z = torch.arange(0, D, device=device)
+    y = torch.arange(0, H, device=device)
+    x = torch.arange(0, W, device=device)
+    zz, yy, xx = torch.meshgrid(z, y, x, indexing='ij')
+    
+    # Stack coordinates into a single tensor
+    coords = torch.stack([zz, yy, xx], dim=-1).float()
+    
+    # Create a mask for foreground and background
+    foreground_mask = input_tensor == 1
+    
+    # Get foreground coordinates
+    foreground_coords = coords[foreground_mask].view(-1, 3)
+    
+    # Compute squared Euclidean distance to each foreground pixel
+    distances = torch.cdist(coords.view(-1, 3).float(), foreground_coords.float(), p=2.0)
+    
+    # Take the minimum distance for each background pixel
+    min_distances, _ = torch.min(distances, dim=1)
+    min_distances = min_distances.view(D, H, W)
+    
+    # Apply differentiable approximation (soft minimum) if needed
+    min_distances = torch.sqrt(min_distances + epsilon)
+    
+    return min_distances
+
+
 def sample_near_sdf_surface(sdf_grid, voxel_grid,
                             use_sdf_values=False):
     # print(np.sum(sdf_grid == 0))
