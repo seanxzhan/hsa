@@ -27,13 +27,25 @@ def apply_3d_gaussian_blur(input_tensor, kernel_size=3, sigma=1.0):
 def test_conv():
     occ = np.load('results/flexi-occsdf/bin2sdf/43941_gt_occ.npy')
     occ = occ.reshape([32]*3)
-    # polyvis.vis_occ(occ, [32]*3, 'occ_before.png')
+    polyvis.vis_occ(occ, [32]*3, 'test_pseudo_sdf/occ_before.png',
+                    plot_hist=True,
+                    hist_path='test_pseudo_sdf/hist_before.png')
     occ = torch.from_numpy(occ)
-    pseudo_sdf = apply_3d_gaussian_blur(occ)
-    np.save('psuedo_sdf.npy', pseudo_sdf.numpy())
-    polyvis.vis_occ(pseudo_sdf, [32]*3, 'occ_after.png')
+    blurred_occ = apply_3d_gaussian_blur(occ).squeeze(0).numpy()
+    # np.save('psuedo_sdf.npy', pseudo_sdf.numpy())
+    polyvis.vis_occ(blurred_occ, [32]*3, 'test_pseudo_sdf/occ_after.png',
+                    plot_hist=True,
+                    hist_path='test_pseudo_sdf/hist_after.png')
+    
+    sdf_before = ops.bin2sdf_torch_3(occ)
+    polyvis.vis_sdf(sdf_before.numpy(), [32]*3, 'test_pseudo_sdf/sdf_before.png',
+                    plot_hist=True,
+                    hist_path='test_pseudo_sdf/hist_sdf_before.png')
+    sdf_after = ops.bin2sdf_torch_3(torch.from_numpy(blurred_occ))
+    polyvis.vis_sdf(sdf_after.numpy(), [32]*3, 'test_pseudo_sdf/sdf_after.png',
+                    plot_hist=True,
+                    hist_path='test_pseudo_sdf/hist_sdf_after.png')
 
-test_conv()
 
 
 def test_distr():
@@ -107,3 +119,7 @@ def test_distr():
 
     plt.tight_layout()
     plt.show()
+
+
+if __name__ == "__main__":
+    test_conv()
