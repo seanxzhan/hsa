@@ -92,7 +92,7 @@ def my_load_mesh_part(model_idx, part_verts, part_faces, part):
 # ------------ additional params ------------
 num_shapes = 1
 batch_size = 1
-model_idx = 0
+model_idx = 1
 embed_dim = 128
 
 # ------------ init flexicubes ------------
@@ -139,9 +139,9 @@ optimizer = torch.optim.Adam([{"params": occ_model_params, "lr": lr},
 # def lr_schedule(iter):
 #     return max(0.0, 10**(-(iter)*0.0002)) # Exponential falloff from [1.0, 0.1] over 5k epochs.    
 def lr_schedule(iter):
-    return max(0.0, 10**(-(iter)*0.0001)) # Exponential falloff from [1.0, 0.1] over 5k epochs.    
-scheduler = torch.optim.lr_scheduler.LambdaLR(
-    optimizer, lr_lambda=lambda x: lr_schedule(x))
+    return max(0.0, 10**(-(iter)*0.0001)) # Exponential falloff from [1.0, 0.1] over 10k epochs.    
+# scheduler = torch.optim.lr_scheduler.LambdaLR(
+#     optimizer, lr_lambda=lambda x: lr_schedule(x))
 
 # ------------ loss ------------
 mse = torch.nn.MSELoss()
@@ -156,8 +156,8 @@ def load_batch(batch_idx, batch_size, start=None, end=None):
     if end is None:
         end = start + batch_size
     return occ_embeddings(torch.arange(start, end).to(device)),\
-        torch.from_numpy(normalized_points[start:end]).to(device, torch.float32),\
-        torch.from_numpy(values[start:end]).to(device, torch.float32),\
+        torch.from_numpy(normalized_points[model_idx:model_idx+1]).to(device, torch.float32),\
+        torch.from_numpy(values[model_idx:model_idx+1]).to(device, torch.float32),\
         [gt_meshes[i] for i in range(start, end)]
 
 # ------------ reconstruction ------------
@@ -259,8 +259,8 @@ def apply_3d_gaussian_blur(input_tensor, kernel_size=3, sigma=1.0):
     return blurred_tensor.squeeze(1)  # Removing batch and channel dimensions
 
 def mesh_loss_schedule(iter):
-    # approaches 1 from 0 for 2000 iterations
-    return -10**(-0.0005*iter) + 1
+    # approaches 1 from 0 for 5000 iterations
+    return -10**(-0.0002*iter) + 1
 
 # ------------ batch loading ------------
 if args.train:
@@ -279,7 +279,7 @@ if args.train:
         comp_sdf = ops.bin2sdf_torch_3(
             apply_3d_gaussian_blur(pred_verts_occ.view(-1, fc_res+1, fc_res+1, fc_res+1)))
 
-        if it > 1000:
+        if it > 2000:
             # NOTE: this delayed flexi injection is crucial!
             # NOTE: it seems to be important that occ loss needs to be relatively 
             #       low (shape is decent) to then have flexi kick in
@@ -295,7 +295,7 @@ if args.train:
 
         total_loss.backward()
         optimizer.step()
-        scheduler.step()
+        # scheduler.step()
 
         if (it) % 100 == 0 or it == (iterations - 1): 
             with torch.no_grad():
@@ -320,7 +320,7 @@ if args.train:
                     category='pred_occ',
                     pointcloud_list=[occ_pts])
             
-        if it == 1000:
+        if it == 2000:
             # save occ, comp_sdf, mesh
             recon_occ_mesh(occ_model, '1000occ', '1000occmesh')
             np.save(os.path.join(results_dir, '1000sdf.npy'), comp_sdf[0].detach().cpu().numpy())

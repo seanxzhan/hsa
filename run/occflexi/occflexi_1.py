@@ -154,8 +154,8 @@ def load_batch(batch_idx, batch_size, start=None, end=None):
     if end is None:
         end = start + batch_size
     return occ_embeddings(torch.arange(start, end).to(device)),\
-        torch.from_numpy(normalized_points[start:end]).to(device, torch.float32),\
-        torch.from_numpy(values[start:end]).to(device, torch.float32),\
+        torch.from_numpy(normalized_points[model_idx:model_idx+1]).to(device, torch.float32),\
+        torch.from_numpy(values[model_idx:model_idx+1]).to(device, torch.float32),\
         [gt_meshes[i] for i in range(start, end)]
 
 # ------------ reconstruction ------------

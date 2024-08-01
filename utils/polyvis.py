@@ -36,7 +36,7 @@ def vis_sdf(sdf, dims, img_path, plot_hist=False, hist_path=None):
     # add a scalar function on the grid
     ps_grid.add_scalar_quantity("node scalar1", scalar_vals, 
                                 defined_on='nodes', 
-                                enable_isosurface_viz=True,
+                                enable_isosurface_viz=False,
                                 isosurface_color=[x/255 for x in [43, 151, 242]],
                                 isolines_enabled=True,
                                 vminmax=(np.min(scalar_vals), np.max(scalar_vals)),
