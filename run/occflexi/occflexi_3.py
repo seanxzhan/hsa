@@ -89,7 +89,8 @@ def my_load_mesh(model_idx):
     assert os.path.exists(obj_dir)
     gt_mesh_path = os.path.join(obj_dir, f'{anno_id}.obj')
     gt_mesh = trimesh.load_mesh(gt_mesh_path)
-    return util.load_mesh_vf(gt_mesh.vertices, gt_mesh.faces, device)
+    # return util.load_mesh_vf(gt_mesh.vertices, gt_mesh.faces, device)
+    return util.load_mesh_vf_kaolin(gt_mesh.vertices, gt_mesh.faces, device)
 def my_load_mesh_part(model_idx, part_verts, part_faces, part):
     verts = np.array(part_verts[part][model_idx]).reshape(-1, 3)
     faces = np.array(part_faces[part][model_idx]).reshape(-1, 3)
@@ -102,7 +103,7 @@ flexi_verts = x_nx3.to(device).unsqueeze(0)
 # NOTE: 2* is necessary! Dunno why
 # the small the factor, the bigger the fleximesh
 # x_nx3 = 1.75*x_nx3
-x_nx3 = 2*x_nx3
+# x_nx3 = 2*x_nx3
 def get_center_boundary_index(grid_res, device):
     v = torch.zeros((grid_res + 1, grid_res + 1, grid_res + 1),
                     dtype=torch.bool, device=device)
@@ -125,8 +126,12 @@ gt_meshes = [my_load_mesh(s) for s in tqdm(range(model_idx, model_idx+1))]
 timelapse.add_mesh_batch(category='gt_mesh',
                          vertices_list=[gt_meshes[0].vertices.cpu()],
                          faces_list=[gt_meshes[0].faces.cpu()])
-np.save(os.path.join(results_dir, 'gt_occ.npy'), occ[model_idx])
-exit(0)
+occ_pts = torch.from_numpy(
+    torch.argwhere(
+        torch.from_numpy(occ[model_idx]).reshape([fc_res+1]*3) == 1.0).cpu().numpy())
+occ_pts = occ_pts/(fc_res+1) - 0.5
+timelapse.add_pointcloud_batch(category='gt_occ', pointcloud_list=[occ_pts])
+# np.save(os.path.join(results_dir, 'gt_occ.npy'), occ[model_idx]); exit(0)
 
 # ------------ embeddings ------------
 occ_embeddings = torch.nn.Embedding(num_shapes, embed_dim).to(device)
@@ -145,8 +150,8 @@ optimizer = torch.optim.Adam([{"params": occ_model_params, "lr": lr},
                               {"params": occ_embeddings.parameters(), "lr": lr}])
 # def lr_schedule(iter):
 #     return max(0.0, 10**(-(iter)*0.0002)) # Exponential falloff from [1.0, 0.1] over 5k epochs.    
-def lr_schedule(iter):
-    return max(0.0, 10**(-(iter)*0.0001)) # Exponential falloff from [1.0, 0.1] over 10k epochs.    
+# def lr_schedule(iter):
+#     return max(0.0, 10**(-(iter)*0.0001)) # Exponential falloff from [1.0, 0.1] over 10k epochs.    
 # scheduler = torch.optim.lr_scheduler.LambdaLR(
 #     optimizer, lr_lambda=lambda x: lr_schedule(x))
 
@@ -271,10 +276,7 @@ def apply_3d_gaussian_blur(input_tensor, kernel_size=3, sigma=1.0):
     
     return blurred_tensor.squeeze(1)  # Removing batch and channel dimensions
 
-
-# exit(0)
-
-# ------------ batch loading ------------
+# ------------ training ------------
 if args.train:
     for it in range(iterations):
         optimizer.zero_grad()
@@ -289,8 +291,8 @@ if args.train:
             flexi_verts,
             occ_embed_feat.unsqueeze(1).expand(-1, flexi_verts.shape[1], -1))
         comp_sdf = ops.bin2sdf_torch_3(
+            pred_verts_occ.view(-1, fc_res+1, fc_res+1, fc_res+1))
             # apply_3d_gaussian_blur(pred_verts_occ.view(-1, fc_res+1, fc_res+1, fc_res+1)))
-            apply_3d_gaussian_blur(pred_verts_occ.view(-1, fc_res+1, fc_res+1, fc_res+1)))
 
         if it > 2000:
             # NOTE: this delayed flexi injection is crucial!

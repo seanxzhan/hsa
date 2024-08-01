@@ -99,6 +99,15 @@ def load_mesh_vf(vertices, faces, device):
     return Mesh(vertices, faces)
 
 
+def load_mesh_vf_kaolin(vertices, faces, device):
+    vertices = torch.tensor(vertices, device=device, dtype=torch.float)
+    faces = torch.tensor(faces, device=device, dtype=torch.long)
+
+    vertices = kaolin.ops.pointcloud.center_points(
+        vertices.unsqueeze(0), normalize=True).squeeze(0)
+    return Mesh(vertices, faces)
+
+
 def compute_sdf(points, vertices, faces):
     face_vertices = kaolin.ops.mesh.index_vertices_by_faces(vertices.clone().unsqueeze(0), faces)
     distance = kaolin.metrics.trianglemesh.point_to_mesh_distance(points.unsqueeze(0), face_vertices)[0]

@@ -5,10 +5,13 @@ import trimesh
 
 # NOTE: polyscope doesn't work with headless display
 
-def vis_sdf(sdf, dims, img_path, plot_hist=False, hist_path=None):
+def vis_sdf(sdf, dims, img_path, plot_hist=False, hist_path=None, show=False):
     """sdf: numpy array
     """
     ps.init()
+    if show:
+        ps.remove_all_structures()
+        ps.remove_last_scene_slice_plane()
     ps.look_at((-2., 2., 2.), (0., 0., 0.))
     ps.set_ground_plane_mode("shadow_only")
     bound_low = (-1., -1., -1.)
@@ -43,18 +46,20 @@ def vis_sdf(sdf, dims, img_path, plot_hist=False, hist_path=None):
                                 enabled=True,
                                 cmap='rainbow')
     
-    if img_path is not None:
-        ps.screenshot(filename=img_path, transparent_bg=False)
-    else:
-        ps.show()
-    ps.remove_all_structures()
-    ps.remove_last_scene_slice_plane()
+    ps.screenshot(filename=img_path, transparent_bg=False)
+    if show: ps.show()
+    if not show:
+        ps.remove_all_structures()
+        ps.remove_last_scene_slice_plane()
 
 
-def vis_occ(occ, dims, img_path=None, plot_hist=False, hist_path=None):
+def vis_occ(occ, dims, img_path=None, plot_hist=False, hist_path=None, show=False):
     """occ: numpy array
     """
     ps.init()
+    if show:
+        ps.remove_all_structures()
+        ps.remove_last_scene_slice_plane()
     ps.look_at((-2., 2., 2.), (0., 0., 0.))
     ps.set_ground_plane_mode("shadow_only")
     bound_low = (-1., -1., -1.)
@@ -92,13 +97,12 @@ def vis_occ(occ, dims, img_path=None, plot_hist=False, hist_path=None):
                                 enabled=True,
                                 cmap='rainbow')
     
-    if img_path is not None:
-        ps.screenshot(filename=img_path, transparent_bg=False)
-    else:
-        ps.show()
+    ps.screenshot(filename=img_path, transparent_bg=False)
+    if show: ps.show()
+    if not show:
+        ps.remove_all_structures()
+        ps.remove_last_scene_slice_plane()
     # ps.remove_volume_grid("sdf grid")
-    ps.remove_all_structures()
-    ps.remove_last_scene_slice_plane()
 
 
 def vis_mesh(vertices, faces, img_path):
@@ -112,7 +116,8 @@ def vis_mesh(vertices, faces, img_path):
 
 
 if __name__ == "__main__":
-    expt_name = 'occflexi_2'
+    # expt_name = 'occflexi_3'
+    expt_name = 'occflexi_3/43941'
 
     vis_occ(
         np.load(f'results/occflexi/{expt_name}/1000occ.npy'),
