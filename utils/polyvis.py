@@ -6,7 +6,7 @@ import trimesh
 # NOTE: polyscope doesn't work with headless display
 
 def vis_sdf(sdf, dims, img_path, plot_hist=False, hist_path=None):
-    """sdf: torch tensor
+    """sdf: numpy array
     """
     ps.init()
     ps.look_at((-2., 2., 2.), (0., 0., 0.))
@@ -43,13 +43,16 @@ def vis_sdf(sdf, dims, img_path, plot_hist=False, hist_path=None):
                                 enabled=True,
                                 cmap='rainbow')
     
-    ps.screenshot(filename=img_path, transparent_bg=False)
+    if img_path is not None:
+        ps.screenshot(filename=img_path, transparent_bg=False)
+    else:
+        ps.show()
     ps.remove_all_structures()
     ps.remove_last_scene_slice_plane()
 
 
-def vis_occ(occ, dims, img_path, plot_hist=False, hist_path=None):
-    """occ: torch tensor
+def vis_occ(occ, dims, img_path=None, plot_hist=False, hist_path=None):
+    """occ: numpy array
     """
     ps.init()
     ps.look_at((-2., 2., 2.), (0., 0., 0.))
@@ -89,8 +92,10 @@ def vis_occ(occ, dims, img_path, plot_hist=False, hist_path=None):
                                 enabled=True,
                                 cmap='rainbow')
     
-    ps.screenshot(filename=img_path, transparent_bg=False)
-    # ps.show()
+    if img_path is not None:
+        ps.screenshot(filename=img_path, transparent_bg=False)
+    else:
+        ps.show()
     # ps.remove_volume_grid("sdf grid")
     ps.remove_all_structures()
     ps.remove_last_scene_slice_plane()

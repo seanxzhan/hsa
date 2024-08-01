@@ -990,6 +990,12 @@ def make_data_for_one(anno_id,
     partnet_pcd_in_fg_vox_grid = transform.mesh_space_to_voxel_space_centered(
         fg_binvox_xform, partnet_pcd_orig.vertices)
     
+    # print(fg_voxels.shape)
+    # print(fg_binvox_xform)
+    # from utils import polyvis
+    # polyvis.vis_occ(fg_voxels, [64]*3)
+    # exit(0)
+    
     partnet_pcd_part_points = []
     partnet_pcd_part_labels = []
     for un in unique_names:
@@ -1024,23 +1030,23 @@ def make_data_for_one(anno_id,
     # exit(0)
 
     # random.seed(319)
-    # points, values = gather_hdf5.sample_points_values(fg_voxels, pt_sample_res)
-    points = pt_sample_res * x_nx3 + pt_sample_res / 2
+    points, values = gather_hdf5.sample_points_values(fg_voxels, pt_sample_res)
+    
+    flexi_points = pt_sample_res * x_nx3 + pt_sample_res / 2
     sdf_grid = torch.from_numpy(sdf_grid)
-    values = ops.vectorized_trilinear_interpolate(sdf_grid.expand(1, 1, -1, -1, -1),
-                                                  points.expand(1, -1, -1),
+    flexi_values = ops.vectorized_trilinear_interpolate(sdf_grid.expand(1, 1, -1, -1, -1),
+                                                  flexi_points.expand(1, -1, -1),
                                                   64)
-    points = points.numpy()
-    values = np.squeeze(values.numpy())[:, None]
-    occ = np.where(values <= 0, 1, 0)
+    # points = points.numpy()
+    flexi_values = np.squeeze(flexi_values.numpy())[:, None]
+    occ = np.where(flexi_values <= 0, 1, 0)
     # np.save('data_prep/values_occ.npy', occ)
 
-    # pv_indices = np.arange(len(points))
-    # # np.random.seed(319)
-    # np.random.shuffle(pv_indices)
-    # points = points[pv_indices]
-    # values = values[pv_indices]
-    # occ = occ[pv_indices]
+    pv_indices = np.arange(len(points))
+    # np.random.seed(319)
+    np.random.shuffle(pv_indices)
+    points = points[pv_indices]
+    values = values[pv_indices]
 
     # fg_occ_points = points[values.astype('bool').flatten()]
     fg_occ_points_indices = np.where(values <= 0)[0]
@@ -1114,7 +1120,8 @@ def get_info_from_voxels(anno_id, res, entire_mesh):
     entire_mesh.export(gt_mesh_path)
     vox_path = os.path.join(obj_dir, f'{anno_id}_{res}.binvox')
     vox_c_path = os.path.join(obj_dir, f'{anno_id}_{res}_c.binvox')
-    if not os.path.exists(vox_c_path):
+    # if not os.path.exists(vox_c_path):
+    if True:
         ops.setup_vox(obj_dir)
         ops.voxelize_obj(
             obj_dir,
@@ -1185,10 +1192,10 @@ if __name__ == "__main__":
 
     # export_data(ids_w_four_parts, save_data=False,
     #             start=0, end=len(ids_w_four_parts))
-    # # export_data(ids_w_four_parts, save_data=True,
-    # #             start=0, end=100)
-    # # print(ids_w_four_parts[:50])
-    # exit(0)
+    export_data(ids_w_four_parts, save_data=True,
+                start=0, end=10)
+    # print(ids_w_four_parts[:50])
+    exit(0)
 
     # merge_partnet_after_merging('39446', info=True)
     # exit(0)
@@ -1212,10 +1219,10 @@ if __name__ == "__main__":
     #     'r') as f:
     #     unique_name_to_new_id = json.load(f)
 
-    print(all_part_meshes[0])
-    part_meshes = all_part_meshes[0]
-    print(part_meshes[0].vertices.flatten().shape)
-    exit(0)
+    # print(all_part_meshes[0])
+    # part_meshes = all_part_meshes[0]
+    # print(part_meshes[0].vertices.flatten().shape)
+    # exit(0)
 
     # # anno_id = '43941'
     # # model_idx = 3

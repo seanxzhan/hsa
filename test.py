@@ -25,7 +25,8 @@ def apply_3d_gaussian_blur(input_tensor, kernel_size=3, sigma=1.0):
 
 
 def test_conv():
-    occ = np.load('results/flexi-occsdf/bin2sdf/43941_gt_occ.npy')
+    # occ = np.load('results/flexi-occsdf/bin2sdf/43941_gt_occ.npy')
+    occ = np.load('results/occflexi/occflexi_3/43941/gt_occ.npy')
     occ = occ.reshape([32]*3)
     polyvis.vis_occ(occ, [32]*3, 'test_pseudo_sdf/occ_before.png',
                     plot_hist=True,
