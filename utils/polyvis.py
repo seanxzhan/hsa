@@ -117,7 +117,7 @@ def vis_mesh(vertices, faces, img_path):
 
 if __name__ == "__main__":
     # expt_name = 'occflexi_3'
-    expt_name = 'occflexi_3/43941'
+    expt_name = 'occflexi_3/37986'
 
     vis_occ(
         np.load(f'results/occflexi/{expt_name}/1000occ.npy'),

@@ -104,7 +104,8 @@ def load_mesh_vf_kaolin(vertices, faces, device):
     faces = torch.tensor(faces, device=device, dtype=torch.long)
 
     vertices = kaolin.ops.pointcloud.center_points(
-        vertices.unsqueeze(0), normalize=True).squeeze(0)
+        # vertices.unsqueeze(0), normalize=True).squeeze(0) * 0.95
+        vertices.unsqueeze(0), normalize=True).squeeze(0) * 0.95
     return Mesh(vertices, faces)
 
 

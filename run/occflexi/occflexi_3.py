@@ -43,7 +43,7 @@ batch_size = 1
 embed_dim = 128
 dataset_id = 19
 expt_id = 3
-model_idx = 0
+model_idx = 1
 
 # ------------ data dirs ------------
 partnet_dir = '/datasets/PartNet'
@@ -104,6 +104,7 @@ flexi_verts = x_nx3.to(device).unsqueeze(0)
 # the small the factor, the bigger the fleximesh
 # x_nx3 = 1.75*x_nx3
 # x_nx3 = 2*x_nx3
+x_nx3 = x_nx3
 def get_center_boundary_index(grid_res, device):
     v = torch.zeros((grid_res + 1, grid_res + 1, grid_res + 1),
                     dtype=torch.bool, device=device)
@@ -304,8 +305,8 @@ if args.train:
                     torch.flatten(comp_sdf[s]).unsqueeze(0), gt_meshes[s],
                     pred_verts_occ[s])
                 mesh_loss += one_mesh_loss
-            total_loss = occ_loss +\
-                mesh_loss * mesh_loss_schedule(it)
+            # total_loss = occ_loss + mesh_loss * mesh_loss_schedule(it)
+            total_loss = occ_loss + mesh_loss
         else:
             total_loss = occ_loss
 
