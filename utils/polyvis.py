@@ -107,48 +107,50 @@ def vis_mesh(vertices, faces, img_path):
 
 
 if __name__ == "__main__":
-    vis_occ(
-        np.load('results/occflexi/occflexi_1/1000occ.npy'),
-        (64, 64, 64),
-        'results/occflexi/occflexi_1/img-1000occ.png',
-        plot_hist=True,
-        hist_path='results/occflexi/occflexi_1/hist-1000occ.png')
-    mesh = trimesh.load_mesh('results/occflexi/occflexi_1/1000occmesh.obj')
-    V, F = mesh.vertices, mesh.faces
-    vis_mesh(
-        V, F,
-        'results/occflexi/occflexi_1/img-1000occmesh.png')
-    vis_sdf(
-        np.load('results/occflexi/occflexi_1/1000sdf.npy'),
-        (32, 32, 32),
-        'results/occflexi/occflexi_1/img-1000sdf.png',
-        plot_hist=True,
-        hist_path='results/occflexi/occflexi_1/hist-1000sdf.png')
-    mesh = trimesh.load_mesh('results/occflexi/occflexi_1/1000fleximesh.obj')
-    V, F = mesh.vertices, mesh.faces
-    vis_mesh(
-        V, F,
-        'results/occflexi/occflexi_1/img-1000fleximesh.png')
+    expt_name = 'occflexi_2'
 
     vis_occ(
-        np.load('results/occflexi/occflexi_1/outocc.npy'),
+        np.load(f'results/occflexi/{expt_name}/1000occ.npy'),
         (64, 64, 64),
-        'results/occflexi/occflexi_1/img-outocc.png',
+        f'results/occflexi/{expt_name}/img-1000occ.png',
         plot_hist=True,
-        hist_path='results/occflexi/occflexi_1/hist-outocc.png')
-    mesh = trimesh.load_mesh('results/occflexi/occflexi_1/outoccmesh.obj')
+        hist_path=f'results/occflexi/{expt_name}/hist-1000occ.png')
+    mesh = trimesh.load_mesh(f'results/occflexi/{expt_name}/1000occmesh.obj')
     V, F = mesh.vertices, mesh.faces
     vis_mesh(
         V, F,
-        'results/occflexi/occflexi_1/img-outoccmesh.png')
+        f'results/occflexi/{expt_name}/img-1000occmesh.png')
     vis_sdf(
-        np.load('results/occflexi/occflexi_1/outsdf.npy'),
+        np.load(f'results/occflexi/{expt_name}/1000sdf.npy'),
         (32, 32, 32),
-        'results/occflexi/occflexi_1/img-outsdf.png',
+        f'results/occflexi/{expt_name}/img-1000sdf.png',
         plot_hist=True,
-        hist_path='results/occflexi/occflexi_1/hist-outsdf.png')
-    mesh = trimesh.load_mesh('results/occflexi/occflexi_1/outfleximesh.obj')
+        hist_path=f'results/occflexi/{expt_name}/hist-1000sdf.png')
+    mesh = trimesh.load_mesh(f'results/occflexi/{expt_name}/1000fleximesh.obj')
     V, F = mesh.vertices, mesh.faces
     vis_mesh(
         V, F,
-        'results/occflexi/occflexi_1/img-outfleximesh.png')
+        f'results/occflexi/{expt_name}/img-1000fleximesh.png')
+
+    vis_occ(
+        np.load(f'results/occflexi/{expt_name}/outocc.npy'),
+        (64, 64, 64),
+        f'results/occflexi/{expt_name}/img-outocc.png',
+        plot_hist=True,
+        hist_path=f'results/occflexi/{expt_name}/hist-outocc.png')
+    mesh = trimesh.load_mesh(f'results/occflexi/{expt_name}/outoccmesh.obj')
+    V, F = mesh.vertices, mesh.faces
+    vis_mesh(
+        V, F,
+        f'results/occflexi/{expt_name}/img-outoccmesh.png')
+    vis_sdf(
+        np.load(f'results/occflexi/{expt_name}/outsdf.npy'),
+        (32, 32, 32),
+        f'results/occflexi/{expt_name}/img-outsdf.png',
+        plot_hist=True,
+        hist_path=f'results/occflexi/{expt_name}/hist-outsdf.png')
+    mesh = trimesh.load_mesh(f'results/occflexi/{expt_name}/outfleximesh.obj')
+    V, F = mesh.vertices, mesh.faces
+    vis_mesh(
+        V, F,
+        f'results/occflexi/{expt_name}/img-outfleximesh.png')
