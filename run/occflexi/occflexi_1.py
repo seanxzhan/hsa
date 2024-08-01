@@ -34,8 +34,8 @@ pt_sample_res = 64
 occ_res = int(pt_sample_res / 2)
 ds_start, ds_end = 0, 508
 device = 'cuda'
-lr = 0.005
-iterations = 5000; iterations += 1
+lr = 0.001
+iterations = 10000; iterations += 1
 train_res = [512, 512]
 fc_res = 31
 dataset_id = 12
@@ -92,7 +92,7 @@ def my_load_mesh_part(model_idx, part_verts, part_faces, part):
 # ------------ additional params ------------
 num_shapes = 1
 batch_size = 1
-model_idx = 0
+model_idx = 1
 embed_dim = 128
 
 # ------------ init flexicubes ------------
@@ -237,6 +237,10 @@ def run_flexi(sdf, gt_mesh, pred_occ):
                      target['mask'])**2).sum(-1)+1e-8)).sqrt().mean() * 10
     return mask_loss+depth_loss, vertices, faces
 
+def mesh_loss_schedule(iter):
+    # approaches 1 from 0 for 5000 iterations
+    return -10**(-0.0002*iter) + 1.1
+
 # ------------ batch loading ------------
 if args.train:
     for it in range(iterations):
@@ -254,7 +258,7 @@ if args.train:
         comp_sdf = ops.bin2sdf_torch_3(
             pred_verts_occ.view(-1, fc_res+1, fc_res+1, fc_res+1))
 
-        if it > 1000:
+        if it > 2000:
             # NOTE: this delayed flexi injection is crucial!
             # NOTE: it seems to be important that occ loss needs to be relatively 
             #       low (shape is decent) to then have flexi kick in
@@ -264,13 +268,13 @@ if args.train:
                     torch.flatten(comp_sdf[s]).unsqueeze(0), gt_meshes[s],
                     pred_verts_occ[s])
                 mesh_loss += one_mesh_loss
-            total_loss = occ_loss + mesh_loss
+            total_loss = occ_loss + mesh_loss * mesh_loss_schedule(it-1000)
         else:
             total_loss = occ_loss
 
         total_loss.backward()
         optimizer.step()
-        scheduler.step()
+        # scheduler.step()
 
         if (it) % 100 == 0 or it == (iterations - 1): 
             with torch.no_grad():
@@ -295,7 +299,7 @@ if args.train:
                     category='pred_occ',
                     pointcloud_list=[occ_pts])
             
-        if it == 1000:
+        if it == 2000:
             # save occ, comp_sdf, mesh
             recon_occ_mesh(occ_model, '1000occ', '1000occmesh')
             np.save(os.path.join(results_dir, '1000sdf.npy'), comp_sdf[0].detach().cpu().numpy())

@@ -92,7 +92,7 @@ def my_load_mesh_part(model_idx, part_verts, part_faces, part):
 # ------------ additional params ------------
 num_shapes = 1
 batch_size = 1
-model_idx = 1
+model_idx = 0
 embed_dim = 128
 
 # ------------ init flexicubes ------------
@@ -100,7 +100,7 @@ fc = FlexiCubes(device)
 x_nx3, cube_fx8 = fc.construct_voxel_grid(fc_res)
 flexi_verts = x_nx3.to(device).unsqueeze(0)
 # NOTE: 2* is necessary! Dunno why
-x_nx3 = 2*x_nx3
+x_nx3 = 1.8*x_nx3
 def get_center_boundary_index(grid_res, device):
     v = torch.zeros((grid_res + 1, grid_res + 1, grid_res + 1),
                     dtype=torch.bool, device=device)
@@ -260,7 +260,19 @@ def apply_3d_gaussian_blur(input_tensor, kernel_size=3, sigma=1.0):
 
 def mesh_loss_schedule(iter):
     # approaches 1 from 0 for 5000 iterations
-    return -10**(-0.0002*iter) + 1
+    return -10**(-0.0002*iter) + 1.1
+
+def occ_loss_schedule(iter):
+    # approaches 0.1 from 1 for 10000 iterations
+    return max(0, -10**(-0.0001*iter))
+
+anno_id = model_idx_to_anno_id[model_idx]
+print("anno_id: ", anno_id)
+timelapse.add_mesh_batch(category='gt_mesh',
+                         vertices_list=[gt_meshes[0].vertices.cpu()],
+                         faces_list=[gt_meshes[0].faces.cpu()])
+
+# exit(0)
 
 # ------------ batch loading ------------
 if args.train:
@@ -289,7 +301,8 @@ if args.train:
                     torch.flatten(comp_sdf[s]).unsqueeze(0), gt_meshes[s],
                     pred_verts_occ[s])
                 mesh_loss += one_mesh_loss
-            total_loss = occ_loss + mesh_loss * mesh_loss_schedule(it-1000)
+            total_loss = occ_loss +\
+                mesh_loss * mesh_loss_schedule(it)
         else:
             total_loss = occ_loss
 
