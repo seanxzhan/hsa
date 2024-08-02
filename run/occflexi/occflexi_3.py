@@ -43,7 +43,7 @@ batch_size = 1
 embed_dim = 128
 dataset_id = 19
 expt_id = 3
-model_idx = 1
+model_idx = 9
 
 # ------------ data dirs ------------
 partnet_dir = '/datasets/PartNet'

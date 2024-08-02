@@ -39,7 +39,7 @@ def vis_sdf(sdf, dims, img_path, plot_hist=False, hist_path=None, show=False):
     # add a scalar function on the grid
     ps_grid.add_scalar_quantity("node scalar1", scalar_vals, 
                                 defined_on='nodes', 
-                                enable_isosurface_viz=True,
+                                enable_isosurface_viz=False,
                                 isosurface_color=[x/255 for x in [43, 151, 242]],
                                 isolines_enabled=True,
                                 vminmax=(np.min(scalar_vals), np.max(scalar_vals)),
@@ -117,7 +117,7 @@ def vis_mesh(vertices, faces, img_path):
 
 if __name__ == "__main__":
     # expt_name = 'occflexi_3'
-    expt_name = 'occflexi_3/37986'
+    expt_name = 'occflexi_3/43941'
 
     vis_occ(
         np.load(f'results/occflexi/{expt_name}/1000occ.npy'),
