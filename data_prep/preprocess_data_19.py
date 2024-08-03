@@ -848,8 +848,9 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
         'values', [num_shapes, (pt_sample_res/2)**3, 1],
         dtype=np.float32)
     hdf5_file.create_dataset(
-        'occ', [num_shapes, (pt_sample_res/2)**3, 1],
+        'occ', [num_shapes, x_nx3.shape[0], 1],
         dtype=np.float32)
+    # print("dataset occ shape: ", (pt_sample_res/2)**3)
     hdf5_file.create_dataset(
         'node_features', [num_shapes, num_union_nodes_class, OBB_REP_SIZE],
         dtype=np.float32)
@@ -993,7 +994,8 @@ def make_data_for_one(anno_id,
     # print(fg_voxels.shape)
     # print(fg_binvox_xform)
     # from utils import polyvis
-    # polyvis.vis_occ(fg_voxels, [64]*3)
+    # print(fg_voxels.shape)
+    # polyvis.vis_occ(fg_voxels, [pt_sample_res]*3, show=True)
     # exit(0)
     
     partnet_pcd_part_points = []
@@ -1026,6 +1028,7 @@ def make_data_for_one(anno_id,
 
     sdf_grid = ops.bin2sdf(input=fg_voxels)
     sdf_grid = np.swapaxes(sdf_grid, 0, 2)
+    # np.save(f'data_prep/{anno_id}_occ_grid.npy', fg_voxels)
     # np.save(f'data_prep/{anno_id}_sdf_grid.npy', sdf_grid)
     # exit(0)
 
@@ -1034,13 +1037,16 @@ def make_data_for_one(anno_id,
     
     flexi_points = pt_sample_res * x_nx3 + pt_sample_res / 2
     sdf_grid = torch.from_numpy(sdf_grid)
-    flexi_values = ops.vectorized_trilinear_interpolate(sdf_grid.expand(1, 1, -1, -1, -1),
-                                                  flexi_points.expand(1, -1, -1),
-                                                  64)
+    flexi_values = ops.vectorized_trilinear_interpolate(
+        sdf_grid.expand(1, 1, -1, -1, -1), flexi_points.expand(1, -1, -1),
+        pt_sample_res)
     # points = points.numpy()
     flexi_values = np.squeeze(flexi_values.numpy())[:, None]
     occ = np.where(flexi_values <= 0, 1, 0)
     # np.save('data_prep/values_occ.npy', occ)
+    # print("points shape: ", points.shape)
+    # print("occ shape: ", occ.shape)
+    # exit(0)
 
     pv_indices = np.arange(len(points))
     # np.random.seed(319)
@@ -1162,6 +1168,8 @@ if __name__ == "__main__":
     from flexi.flexicubes import FlexiCubes
     fc = FlexiCubes('cpu')
     x_nx3, cube_fx8 = fc.construct_voxel_grid(31)
+    # print("x_nx3 shape: ", x_nx3.shape)
+    # exit(0)
 
     # # pass one to create the preprocess_16 dataset
     # # export_data(train_ids, save_data=False, start=0, end=4489)
@@ -1228,7 +1236,7 @@ if __name__ == "__main__":
     # # model_idx = 3
     # anno_id = '38725'
     # model_idx = 6
-    model_idx = 0
+    model_idx = 6
     anno_id = keys[model_idx]
     print(anno_id)
 
