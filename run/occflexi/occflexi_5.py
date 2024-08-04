@@ -43,7 +43,7 @@ batch_size = 1
 embed_dim = 128
 dataset_id = 19
 expt_id = 5
-model_idx = 0
+model_idx = 6
 
 # ------------ data dirs ------------
 partnet_dir = '/datasets/PartNet'
@@ -75,7 +75,7 @@ part_num_indices = train_data['part_num_indices']
 all_indices = train_data['all_indices']
 normalized_points = train_data['normalized_points'] # sampled points, shuffled
 values = train_data['values']                       # vals of sampled points
-occ = train_data['occ']                             # occ grid of flexi verts
+occ = train_data['occ']                             # occ vals of flexi verts
 part_nodes = train_data['part_nodes']
 xforms = train_data['xforms']
 extents = train_data['extents']
@@ -98,6 +98,7 @@ def my_load_mesh_part(model_idx, part_verts, part_faces, part):
 # ------------ init flexicubes ------------
 fc = FlexiCubes(device)
 x_nx3, cube_fx8 = fc.construct_voxel_grid(fc_res)
+x_nx3 *= 1.1
 flexi_verts = x_nx3.to(device).unsqueeze(0)
 def get_center_boundary_index(grid_res, device):
     v = torch.zeros((grid_res + 1, grid_res + 1, grid_res + 1),
@@ -293,7 +294,7 @@ if args.train:
                 faces_list=[faces.cpu()])
             grid = comp_sdf[-1].reshape(fc_res+1, fc_res+1, fc_res+1)
             occ_pts = torch.from_numpy(torch.argwhere(grid <= 0.0).cpu().numpy())
-            occ_pts = occ_pts/(fc_res+1) -0.5
+            occ_pts = occ_pts/(fc_res+1) - 0.5
             if occ_pts.shape[0] != 0:
                 timelapse.add_pointcloud_batch(
                     iteration=it+1,

@@ -996,8 +996,14 @@ def make_data_for_one(anno_id,
     # from utils import polyvis
     # print(fg_voxels.shape)
     # polyvis.vis_occ(fg_voxels, [pt_sample_res]*3, show=True)
-    # exit(0)
-    
+    # polyvis.vis_occ(fill_internal_voxels(
+    #     torch.from_numpy(fg_voxels)).numpy(), [pt_sample_res]*3, show=True)
+    # # filled = fill_internal_voxels(torch.from_numpy(fg_voxels))
+    # # print(filled.shape)
+    # # exit(0)
+
+    fg_voxels = fill_internal_voxels(torch.from_numpy(fg_voxels)).numpy()
+
     partnet_pcd_part_points = []
     partnet_pcd_part_labels = []
     for un in unique_names:
@@ -1162,6 +1168,63 @@ def convert_flat_list_to_fg_part_indices(part_num_indices, all_indices):
     return fg_part_indices
 
 
+def fill_internal_voxels(voxel_grid):
+    """
+    Fill the internal voxels of a 3D voxel grid.
+
+    Parameters:
+    voxel_grid (torch.Tensor): A 3D tensor of shape (D, H, W) with boolean values where
+                               True indicates a voxel is filled.
+
+    Returns:
+    torch.Tensor: A 3D tensor of the same shape as voxel_grid with internal voxels filled.
+    """
+    D, H, W = voxel_grid.shape
+
+    # Create a copy of the voxel grid to mark visited and filled voxels
+    filled_grid = voxel_grid.clone()
+
+    # Stack for depth-first search (DFS)
+    stack = []
+
+    # Use advanced indexing to mark boundary voxels as outside
+    def mark_outside(indices):
+        filled_grid[indices] = True
+        stack.extend(zip(*[idx.tolist() for idx in indices]))
+
+    # Mark boundary voxels
+    # Mark the faces along the Z-axis
+    mark_outside((torch.arange(D), torch.arange(H), torch.zeros(H, dtype=torch.long)))
+    mark_outside((torch.arange(D), torch.arange(H), torch.full((H,), W-1, dtype=torch.long)))
+
+    # Mark the faces along the Y-axis
+    mark_outside((torch.arange(D), torch.zeros(W, dtype=torch.long), torch.arange(W)))
+    mark_outside((torch.arange(D), torch.full((W,), H-1, dtype=torch.long), torch.arange(W)))
+
+    # Mark the faces along the X-axis
+    mark_outside((torch.zeros(H, dtype=torch.long), torch.arange(H), torch.arange(W)))
+    mark_outside((torch.full((H,), D-1, dtype=torch.long), torch.arange(H), torch.arange(W)))
+
+    # Perform DFS to mark all outside connected components
+    while stack:
+        x, y, z = stack.pop()
+        # Check all 6 neighbors
+        for dx, dy, dz in [(-1, 0, 0), (1, 0, 0), (0, -1, 0), (0, 1, 0), (0, 0, -1), (0, 0, 1)]:
+            nx, ny, nz = x + dx, y + dy, z + dz
+            if 0 <= nx < D and 0 <= ny < H and 0 <= nz < W and not filled_grid[nx, ny, nz]:
+                filled_grid[nx, ny, nz] = True
+                stack.append((nx, ny, nz))
+
+    # Fill the internal voxels (the unvisited ones)
+    internal_voxels_filled = ~filled_grid & ~voxel_grid
+
+    # Combine the original voxel grid with the filled internal voxels
+    result_grid = voxel_grid | internal_voxels_filled
+
+    result_grid += 2
+
+    return result_grid
+
 if __name__ == "__main__":
     np.random.seed(319)
 
@@ -1236,7 +1299,7 @@ if __name__ == "__main__":
     # # model_idx = 3
     # anno_id = '38725'
     # model_idx = 6
-    model_idx = 6
+    model_idx = 0
     anno_id = keys[model_idx]
     print(anno_id)
 
