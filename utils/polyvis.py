@@ -117,7 +117,17 @@ def vis_mesh(vertices, faces, img_path):
 
 if __name__ == "__main__":
     # expt_name = 'occflexi_3'
-    expt_name = 'occflexi_6/43941'
+    anno_id = '43941'
+    expt_id = 5
+    expt_name = f'occflexi_{expt_id}/{anno_id}'
+
+    # vis_sdf(
+    #     np.load(f'results/occflexi/{expt_name}/{anno_id}_flexi_sdf_{expt_id}.npy'),
+    #     (32, 32, 32),
+    #     f'results/occflexi/{expt_name}/img-outsdf.png',
+    #     plot_hist=True,
+    #     hist_path=f'results/occflexi/{expt_name}/hist-outsdf.png')
+    # exit(0)
 
     # vis_occ(
     #     np.load(f'results/occflexi/{expt_name}/1000occ.npy'),

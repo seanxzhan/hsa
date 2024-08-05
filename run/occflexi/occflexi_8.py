@@ -286,6 +286,7 @@ if args.train:
 
             itr_loss += total_loss.detach().cpu().numpy()
         itr_loss /= num_shapes
+        writer.add_scalar('iteration loss', itr_loss, it)
 
         if (it) % 100 == 0 or it == (iterations - 1): 
             with torch.no_grad():
@@ -317,7 +318,8 @@ if args.train:
                 'embeddings_state_dict': occ_embeddings.state_dict(),
                 'total_loss': total_loss,
                 }, os.path.join(ckpt_dir, f'model_{it}.pt'))  
-      
+    writer.close()
+
 # recon_occ_mesh(occ_model, 'outocc', 'outoccmesh')
 # np.save(os.path.join(results_dir, 'outsdf.npy'), comp_sdf[0].detach().cpu().numpy())
 # V, F = export_mesh_normalized('outfleximesh', vertices.detach(), faces.detach())
