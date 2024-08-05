@@ -18,7 +18,7 @@ def vis_sdf(sdf, dims, img_path, plot_hist=False, hist_path=None, show=False):
     bound_high = (1., 1., 1.)
     ps_grid = ps.register_volume_grid("sdf grid", dims, bound_low, bound_high)
     scalar_vals = np.reshape(sdf, dims)
-    # print(np.min(scalar_vals), np.max(scalar_vals))
+    print(np.min(scalar_vals), np.max(scalar_vals))
 
     if plot_hist:
         import matplotlib.pyplot as plt
@@ -69,7 +69,7 @@ def vis_occ(occ, dims, img_path=None, plot_hist=False, hist_path=None, show=Fals
                                     #   edge_width=1.5,
                                       cube_size_factor=0.1)
     scalar_vals = np.reshape(occ, dims)
-    # print(np.min(scalar_vals), np.max(scalar_vals))
+    print(np.min(scalar_vals), np.max(scalar_vals))
 
     if plot_hist:
         import matplotlib.pyplot as plt
@@ -117,30 +117,30 @@ def vis_mesh(vertices, faces, img_path):
 
 if __name__ == "__main__":
     # expt_name = 'occflexi_3'
-    expt_name = 'occflexi_3/43941'
+    expt_name = 'occflexi_6/43941'
 
-    vis_occ(
-        np.load(f'results/occflexi/{expt_name}/1000occ.npy'),
-        (64, 64, 64),
-        f'results/occflexi/{expt_name}/img-1000occ.png',
-        plot_hist=True,
-        hist_path=f'results/occflexi/{expt_name}/hist-1000occ.png')
-    mesh = trimesh.load_mesh(f'results/occflexi/{expt_name}/1000occmesh.obj')
-    V, F = mesh.vertices, mesh.faces
-    vis_mesh(
-        V, F,
-        f'results/occflexi/{expt_name}/img-1000occmesh.png')
-    vis_sdf(
-        np.load(f'results/occflexi/{expt_name}/1000sdf.npy'),
-        (32, 32, 32),
-        f'results/occflexi/{expt_name}/img-1000sdf.png',
-        plot_hist=True,
-        hist_path=f'results/occflexi/{expt_name}/hist-1000sdf.png')
-    mesh = trimesh.load_mesh(f'results/occflexi/{expt_name}/1000fleximesh.obj')
-    V, F = mesh.vertices, mesh.faces
-    vis_mesh(
-        V, F,
-        f'results/occflexi/{expt_name}/img-1000fleximesh.png')
+    # vis_occ(
+    #     np.load(f'results/occflexi/{expt_name}/1000occ.npy'),
+    #     (64, 64, 64),
+    #     f'results/occflexi/{expt_name}/img-1000occ.png',
+    #     plot_hist=True,
+    #     hist_path=f'results/occflexi/{expt_name}/hist-1000occ.png')
+    # mesh = trimesh.load_mesh(f'results/occflexi/{expt_name}/1000occmesh.obj')
+    # V, F = mesh.vertices, mesh.faces
+    # vis_mesh(
+    #     V, F,
+    #     f'results/occflexi/{expt_name}/img-1000occmesh.png')
+    # vis_sdf(
+    #     np.load(f'results/occflexi/{expt_name}/1000sdf.npy'),
+    #     (32, 32, 32),
+    #     f'results/occflexi/{expt_name}/img-1000sdf.png',
+    #     plot_hist=True,
+    #     hist_path=f'results/occflexi/{expt_name}/hist-1000sdf.png')
+    # mesh = trimesh.load_mesh(f'results/occflexi/{expt_name}/1000fleximesh.obj')
+    # V, F = mesh.vertices, mesh.faces
+    # vis_mesh(
+    #     V, F,
+    #     f'results/occflexi/{expt_name}/img-1000fleximesh.png')
 
     vis_occ(
         np.load(f'results/occflexi/{expt_name}/outocc.npy'),
