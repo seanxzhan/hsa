@@ -34,16 +34,18 @@ pt_sample_res = 64
 occ_res = int(pt_sample_res / 2)
 ds_start, ds_end = 0, 10
 device = 'cuda'
-lr = 0.001
+lr = 0.01
 iterations = 10000; iterations += 1
 train_res = [512, 512]
 fc_res = 31
-num_shapes = 1
-batch_size = 1
+num_shapes = 10
+batch_size = 10
 embed_dim = 128
 dataset_id = 19
-expt_id = 5
-model_idx = 6
+expt_id = 7
+# model_idx = 6
+anchor_idx = -1
+num_batches = num_shapes // batch_size
 
 # ------------ data dirs ------------
 partnet_dir = '/datasets/PartNet'
@@ -55,15 +57,15 @@ with open(train_new_ids_to_objs_path, 'r') as f:
 model_idx_to_anno_id = {}
 for mi, ai in enumerate(train_new_ids_to_objs.keys()):
     model_idx_to_anno_id[mi] = ai
-anno_id = model_idx_to_anno_id[model_idx]
-print("anno_id: ", anno_id)
+# anno_id = model_idx_to_anno_id[model_idx]
+# print("anno_id: ", anno_id)
 
 # ------------ logging ------------
-results_dir = os.path.join('results', 'occflexi', f'occflexi_{expt_id}', anno_id)
+results_dir = os.path.join('results', 'occflexi', f'occflexi_{expt_id}')
 timelapse_dir = os.path.join(results_dir, 'training_timelapse')
 print("timelapse dir: ", timelapse_dir)
 timelapse = kaolin.visualize.Timelapse(timelapse_dir)
-logs_path = os.path.join('logs', 'flexi', f'flexi_{expt_id}')
+logs_path = os.path.join('logs', 'occflexi', f'occflexi_{expt_id}')
 ckpt_dir = os.path.join(logs_path, 'ckpt'); misc.check_dir(ckpt_dir)
 writer = SummaryWriter(os.path.join(logs_path, 'summary'))
 
@@ -99,7 +101,7 @@ def my_load_mesh_part(model_idx, part_verts, part_faces, part):
 fc = FlexiCubes(device)
 x_nx3, cube_fx8 = fc.construct_voxel_grid(fc_res)
 x_nx3 *= 1.1
-flexi_verts = x_nx3.to(device).unsqueeze(0)
+flexi_verts = x_nx3.to(device).unsqueeze(0).expand(num_shapes, -1, -1)
 def get_center_boundary_index(grid_res, device):
     v = torch.zeros((grid_res + 1, grid_res + 1, grid_res + 1),
                     dtype=torch.bool, device=device)
@@ -118,13 +120,13 @@ center_indices, boundary_indices = get_center_boundary_index(fc_res, device)
 
 # ------------ init gt meshes ------------
 print("loading gt meshes")
-gt_meshes = [my_load_mesh(s) for s in tqdm(range(model_idx, model_idx+1))]
+gt_meshes = [my_load_mesh(s) for s in tqdm(range(0, num_shapes))]
 timelapse.add_mesh_batch(category='gt_mesh',
-                         vertices_list=[gt_meshes[0].vertices.cpu()],
-                         faces_list=[gt_meshes[0].faces.cpu()])
+                         vertices_list=[gt_meshes[anchor_idx].vertices.cpu()],
+                         faces_list=[gt_meshes[anchor_idx].faces.cpu()])
 occ_pts = torch.from_numpy(
     torch.argwhere(
-        torch.from_numpy(occ[model_idx]).reshape([fc_res+1]*3) == 1.0).cpu().numpy())
+        torch.from_numpy(occ[anchor_idx]).reshape([fc_res+1]*3) == 1.0).cpu().numpy())
 occ_pts = occ_pts/(fc_res+1) - 0.5
 timelapse.add_pointcloud_batch(category='gt_occ', pointcloud_list=[occ_pts])
 # np.save(os.path.join(results_dir, 'gt_occ.npy'), occ[model_idx]); exit(0)
@@ -170,8 +172,8 @@ def load_batch(batch_idx, batch_size, start=None, end=None):
     if end is None:
         end = start + batch_size
     return occ_embeddings(torch.arange(start, end).to(device)),\
-        torch.from_numpy(normalized_points[model_idx:model_idx+1]).to(device, torch.float32),\
-        torch.from_numpy(values[model_idx:model_idx+1]).to(device, torch.float32),\
+        torch.from_numpy(normalized_points[start:end]).to(device, torch.float32),\
+        torch.from_numpy(values[start:end]).to(device, torch.float32),\
         [gt_meshes[i] for i in range(start, end)]
 
 # ------------ reconstruction ------------
@@ -183,11 +185,11 @@ def export_mesh_normalized(mesh_name, vertices, faces):
     pred_mesh = trimesh.Trimesh(vertices, faces)
     pred_mesh.export(os.path.join(results_dir, f'{mesh_name}.obj'))
     return vertices, faces
-def recon_occ_mesh(occ_model, occ_name, mesh_name):
+def recon_occ_mesh(idx, occ_model, occ_name, mesh_name):
     query_points = reconstruct.make_query_points(pt_sample_res, limits=[(-0.5, 0.5)]*3)
     query_points = torch.from_numpy(query_points).to(device, torch.float32).unsqueeze(0)
     occ_embed_feat, batch_points, batch_values, gt_meshes = load_batch(
-        0, 0, start=0, end=1)
+        0, 0, start=idx, end=idx+1)
     with torch.no_grad():
         pred_occ = occ_model.forward(
             query_points,
@@ -251,40 +253,46 @@ def run_flexi(sdf, gt_mesh, pred_occ):
 # ------------ training ------------
 if args.train:
     for it in range(iterations):
-        optimizer.zero_grad()
-        occ_embed_feat, batch_points, batch_values, gt_meshes = load_batch(
-            0, 0, start=0, end=1)
-        # don't use sigmoid to the output
-        pred_occ = occ_model.forward(
-            batch_points,
-            occ_embed_feat.unsqueeze(1).expand(-1, batch_points.shape[1], -1))
-        occ_loss = loss_f(pred_occ, batch_values)
+        itr_loss = 0
 
-        pred_verts_occ = occ_model.forward(
-            flexi_verts,
-            occ_embed_feat.unsqueeze(1).expand(-1, flexi_verts.shape[1], -1))
-        comp_sdf = ops.bin2sdf_torch_3(
-            pred_verts_occ.view(-1, fc_res+1, fc_res+1, fc_res+1))
+        for b in range(num_batches):
+            optimizer.zero_grad()
+            occ_embed_feat, batch_points, batch_values, gt_meshes = load_batch(
+                b, batch_size)
 
-        mesh_loss = 0
-        for s in range(batch_size):
-            one_mesh_loss, vertices, faces = run_flexi(
-                torch.flatten(comp_sdf[s]).unsqueeze(0), gt_meshes[s],
-                pred_verts_occ[s])
-            mesh_loss += one_mesh_loss
-        total_loss = occ_loss + mesh_loss
+            pred_occ = occ_model.forward(
+                batch_points,
+                occ_embed_feat.unsqueeze(1).expand(-1, batch_points.shape[1], -1))
+            occ_loss = loss_f(pred_occ, batch_values)
 
-        total_loss.backward()
-        optimizer.step()
-        # scheduler.step()
+            pred_verts_occ = occ_model.forward(
+                flexi_verts,
+                occ_embed_feat.unsqueeze(1).expand(-1, flexi_verts.shape[1], -1))
+            comp_sdf = ops.bin2sdf_torch_3(
+                pred_verts_occ.view(-1, fc_res+1, fc_res+1, fc_res+1))
+
+            mesh_loss = 0
+            for s in range(batch_size):
+                one_mesh_loss, vertices, faces = run_flexi(
+                    torch.flatten(comp_sdf[s]).unsqueeze(0), gt_meshes[s],
+                    pred_verts_occ[s])
+                mesh_loss += one_mesh_loss
+            total_loss = occ_loss + mesh_loss
+
+            total_loss.backward()
+            optimizer.step()
+            # scheduler.step()
+
+            itr_loss += total_loss.detach().cpu().numpy()
+        itr_loss /= num_shapes
 
         if (it) % 100 == 0 or it == (iterations - 1): 
             with torch.no_grad():
                 vertices, faces, L_dev = fc(
-                    x_nx3, torch.flatten(comp_sdf[-1]), cube_fx8,
+                    x_nx3, torch.flatten(comp_sdf[anchor_idx]), cube_fx8,
                     fc_res, training=False)
             print(
-                'Iteration {} - loss: {:.5f}, '.format(it, total_loss)+
+                'Iteration {} - loss: {:.5f}, '.format(it, itr_loss)+
                 '# of mesh vertices: {}, # of mesh faces: {}'.format(
                     vertices.shape[0], faces.shape[0]))
             timelapse.add_mesh_batch(
@@ -292,7 +300,7 @@ if args.train:
                 category='pred_mesh',
                 vertices_list=[vertices.cpu()],
                 faces_list=[faces.cpu()])
-            grid = comp_sdf[-1].reshape(fc_res+1, fc_res+1, fc_res+1)
+            grid = comp_sdf[anchor_idx].reshape(fc_res+1, fc_res+1, fc_res+1)
             occ_pts = torch.from_numpy(torch.argwhere(grid <= 0.0).cpu().numpy())
             occ_pts = occ_pts/(fc_res+1) - 0.5
             if occ_pts.shape[0] != 0:
@@ -300,7 +308,125 @@ if args.train:
                     iteration=it+1,
                     category='pred_occ',
                     pointcloud_list=[occ_pts])
-            
-recon_occ_mesh(occ_model, 'outocc', 'outoccmesh')
-np.save(os.path.join(results_dir, 'outsdf.npy'), comp_sdf[0].detach().cpu().numpy())
-V, F = export_mesh_normalized('outfleximesh', vertices.detach(), faces.detach())
+
+        if (it) % 500 == 0 or it == (iterations - 1): 
+            torch.save({
+                'epoch': it,
+                'model_state_dict': occ_model.state_dict(),
+                'embeddings_state_dict': occ_embeddings.state_dict(),
+                'total_loss': total_loss,
+                }, os.path.join(ckpt_dir, f'model_{it}.pt'))  
+      
+# recon_occ_mesh(occ_model, 'outocc', 'outoccmesh')
+# np.save(os.path.join(results_dir, 'outsdf.npy'), comp_sdf[0].detach().cpu().numpy())
+# V, F = export_mesh_normalized('outfleximesh', vertices.detach(), faces.detach())
+
+if args.test:
+    it = args.it
+    model_idx = args.test_idx
+    anno_id = model_idx_to_anno_id[model_idx]
+
+    results_dir = os.path.join(results_dir, anno_id)
+    misc.check_dir(results_dir)
+    print("results dir: ", results_dir)
+
+    checkpoint = torch.load(os.path.join(ckpt_dir, f'model_{it}.pt'))
+    occ_model.load_state_dict(checkpoint['model_state_dict'])
+    occ_embeddings = torch.nn.Embedding(num_shapes, embed_dim).to(device)
+    occ_embeddings.load_state_dict(checkpoint['embeddings_state_dict'])
+    occ_embed_feat = occ_embeddings(torch.arange(model_idx, model_idx+1).to(device))
+
+    query_points = reconstruct.make_query_points(pt_sample_res,
+                                                 limits=[(-0.5, 0.5)]*3)
+    query_points = torch.from_numpy(query_points).to(device, torch.float32)
+    query_points = query_points[None]
+    # query_points = query_points[None, None].expand(1, num_parts, -1, -1)
+    # transformed_points = batch_points[None, None].expand(1, num_parts, -1, -1)
+
+    print("running inference")
+    with torch.no_grad():
+        pred_occ = occ_model.forward(
+            query_points,
+            occ_embed_feat.unsqueeze(1).expand(-1, query_points.shape[1], -1))
+
+        pred_verts_occ = occ_model.forward(
+            flexi_verts[0:1],
+            occ_embed_feat.unsqueeze(1).expand(-1, flexi_verts.shape[1], -1))
+        comp_sdf = ops.bin2sdf_torch_3(
+            pred_verts_occ.view(-1, fc_res+1, fc_res+1, fc_res+1))
+        
+        one_mesh_loss, vertices, faces = run_flexi(
+            torch.flatten(comp_sdf[0]).unsqueeze(0), gt_meshes[model_idx],
+            pred_verts_occ[0])
+
+    from utils import visualize    
+    gt_color = [31, 119, 180, 255]
+    mesh_pred_path = os.path.join(results_dir, 'mesh_pred.png')
+    mesh_flexi_path = os.path.join(results_dir, 'mesh_flexi.png')
+    mesh_gt_path = os.path.join(results_dir, 'mesh_gt.png')
+    lst_paths = [
+        mesh_gt_path,
+        mesh_pred_path,
+        mesh_flexi_path]
+
+    mag = 0.8; white_bg = False
+
+    # ------------ gt ------------
+    print("visualizing gt mesh")
+    obj_dir = os.path.join(partnet_dir, anno_id, 'vox_models')
+    assert os.path.exists(obj_dir)
+    gt_mesh_path = os.path.join(obj_dir, f'{anno_id}.obj')
+    gt_mesh = trimesh.load(gt_mesh_path, file_type='obj', force='mesh')
+    gt_vertices_aligned = torch.from_numpy(
+        gt_mesh.vertices).to(device).to(torch.float32)
+    gt_vertices_aligned = kaolin.ops.pointcloud.center_points(
+        gt_vertices_aligned.unsqueeze(0), normalize=True).squeeze(0)
+    gt_vertices_aligned = gt_vertices_aligned.cpu().numpy()
+    aligned_gt_mesh = trimesh.Trimesh(gt_vertices_aligned, gt_mesh.faces)
+    aligned_gt_mesh.export(os.path.join(results_dir, 
+                                        f'{anno_id}_mesh_gt_{expt_id}.obj'))
+    aligned_gt_mesh.visual.vertex_colors = gt_color
+    gt_mesh_vis = visualize.save_mesh_vis(aligned_gt_mesh, mesh_gt_path,
+                                          mag=mag, white_bg=white_bg,
+                                          save_img=False)
+    
+    # ------------ occ ------------
+    print("visualizing pred mesh")
+    occ_grid = torch.reshape(
+        pred_occ,
+        (1, pt_sample_res, pt_sample_res, pt_sample_res))
+    occ_grid = torch.permute(occ_grid, (0, 2, 1, 3))
+    pred_vertices, pred_faces =\
+        kaolin.ops.conversions.voxelgrids_to_trianglemeshes(occ_grid)
+    pred_vertices = kaolin.ops.pointcloud.center_points(
+        pred_vertices[0].unsqueeze(0), normalize=True).squeeze(0)
+    pred_vertices = pred_vertices.cpu().numpy()
+    pred_faces = pred_faces[0].cpu().numpy()
+    pred_mesh = trimesh.Trimesh(pred_vertices, pred_faces)
+    pred_mesh.export(os.path.join(results_dir, 
+                                  f'{anno_id}_mesh_pred_{expt_id}.obj'))
+    pred_mesh_vis = visualize.save_mesh_vis(pred_mesh, mesh_pred_path,
+                                            mag=mag, white_bg=white_bg,
+                                            save_img=False)
+
+    # ------------ flexi ------------
+    print("visualizing flexi mesh")
+    flexi_faces = faces.detach().cpu().numpy()
+    flexi_vertices_aligned = kaolin.ops.pointcloud.center_points(
+        vertices.detach().unsqueeze(0), normalize=True).squeeze(0)
+    flexi_vertices_aligned = flexi_vertices_aligned.cpu().numpy()
+    flexi_mesh = trimesh.Trimesh(flexi_vertices_aligned, flexi_faces)
+    flexi_mesh.export(os.path.join(results_dir,
+                                   f'{anno_id}_flexi_mesh_{expt_id}.obj'))
+    flexi_mesh_vis = visualize.save_mesh_vis(flexi_mesh, mesh_flexi_path,
+                                             mag=mag, white_bg=white_bg,
+                                             save_img=False)
+    print("saving flexi sdf")
+    np.save(os.path.join(results_dir, f'{anno_id}_flexi_sdf_{expt_id}.npy'),
+            comp_sdf[0].detach().cpu().numpy())
+    
+    print("saving images")
+    visualize.stitch_imges(
+        os.path.join(results_dir,f'{anno_id}_results_{expt_id}.png'),
+        images=[gt_mesh_vis, pred_mesh_vis, flexi_mesh_vis],
+        adj=100)
