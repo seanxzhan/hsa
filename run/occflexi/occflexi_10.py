@@ -38,11 +38,11 @@ lr = 0.01
 iterations = 10000; iterations += 1
 train_res = [512, 512]
 fc_res = 31
-num_shapes = 100
+num_shapes = 500
 batch_size = 25
 embed_dim = 128
 dataset_id = 19
-expt_id = 8
+expt_id = 10
 # model_idx = 6
 anchor_idx = -1
 num_batches = num_shapes // batch_size

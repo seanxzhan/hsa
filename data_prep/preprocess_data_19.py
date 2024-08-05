@@ -1061,11 +1061,8 @@ def make_data_for_one(anno_id,
     values = values[pv_indices]
 
     # fg_occ_points = points[values.astype('bool').flatten()]
-    fg_occ_points_indices = np.where(values <= 0)[0]
+    fg_occ_points_indices = np.where(values >= 0.5)[0]
     fg_occ_points = points[fg_occ_points_indices]
-    
-    # print(fg_occ_points_indices.shape)
-    # exit(0)
 
     fg_closest_indices = ops.find_nearest_point(
         fg_occ_points,
@@ -1132,8 +1129,8 @@ def get_info_from_voxels(anno_id, res, entire_mesh):
     entire_mesh.export(gt_mesh_path)
     vox_path = os.path.join(obj_dir, f'{anno_id}_{res}.binvox')
     vox_c_path = os.path.join(obj_dir, f'{anno_id}_{res}_c.binvox')
-    # if not os.path.exists(vox_c_path):
-    if True:
+    if not os.path.exists(vox_c_path):
+    # if True:
         ops.setup_vox(obj_dir)
         ops.voxelize_obj(
             obj_dir,
@@ -1231,8 +1228,6 @@ if __name__ == "__main__":
     from flexi.flexicubes import FlexiCubes
     fc = FlexiCubes('cpu')
     x_nx3, cube_fx8 = fc.construct_voxel_grid(31)
-    # print("x_nx3 shape: ", x_nx3.shape)
-    # exit(0)
 
     # # pass one to create the preprocess_16 dataset
     # # export_data(train_ids, save_data=False, start=0, end=4489)
@@ -1261,44 +1256,21 @@ if __name__ == "__main__":
             ids_w_four_parts.append(x)
     ids_w_four_parts = [ids_w_four_parts[x] for x in good_indices]
 
-    export_data(ids_w_four_parts, save_data=True,
-                start=0, end=len(ids_w_four_parts))
     # export_data(ids_w_four_parts, save_data=True,
-    #             start=0, end=10)
+    #             start=0, end=len(ids_w_four_parts))
+    export_data(ids_w_four_parts, save_data=True,
+                start=0, end=10)
     # print(ids_w_four_parts[:50])
     exit(0)
-
-    # merge_partnet_after_merging('39446', info=True)
-    # exit(0)
 
     unique_name_to_new_id, all_entire_meshes, all_part_meshes,\
         all_ori_ids_to_new_ids, all_obbs, all_name_to_obbs =\
                 export_data(ids_w_four_parts, save_data=False, start=0, end=10)
-    # np.savez_compressed("data_prep/tmp/data.npz",
-    #                     all_entire_meshes=all_entire_meshes,
-    #                     all_ori_ids_to_new_ids=all_ori_ids_to_new_ids,
-    #                     all_obbs=all_obbs,
-    #                     all_name_to_obbs=all_name_to_obbs)
 
-    # with open('data/Chair_train_new_ids_to_objs_19_0_10.json', 'r') as f:
     with open('data/Chair_train_new_ids_to_objs_19_0_10.json', 'r') as f:
         all_obs = json.load(f)
     keys = list(all_obs.keys())
 
-    # with open(
-    #     f'data/{cat_name}_part_name_to_new_id_8_{0}_{2000}.json',
-    #     'r') as f:
-    #     unique_name_to_new_id = json.load(f)
-
-    # print(all_part_meshes[0])
-    # part_meshes = all_part_meshes[0]
-    # print(part_meshes[0].vertices.flatten().shape)
-    # exit(0)
-
-    # # anno_id = '43941'
-    # # model_idx = 3
-    # anno_id = '38725'
-    # model_idx = 6
     model_idx = 0
     anno_id = keys[model_idx]
     print(anno_id)
