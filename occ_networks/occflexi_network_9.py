@@ -33,12 +33,12 @@ class SDFDecoder(torch.nn.Module):
                                        output_dims,
                                        multires))
         
-    #     self.obb_gnn = OBBGNN(num_node_features=3,
-    #                           graph_feature_dim=32,
-    #                           num_parts=num_parts)
+        self.obb_gnn = OBBGNN(num_node_features=3,
+                              graph_feature_dim=32,
+                              num_parts=num_parts)
         
-    # def learn_geom_xform(self, node_feat, adj, mask, batch):
-    #     return self.obb_gnn.forward(node_feat, adj, mask, batch)
+    def learn_geom_xform(self, node_feat, adj, mask, batch):
+        return self.obb_gnn.forward(node_feat, adj, mask, batch)
 
     def forward(self, points, features, mask=None):
         # xforms: batch size x 4 x 3

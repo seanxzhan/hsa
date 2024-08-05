@@ -320,27 +320,27 @@ if args.train:
         occ_mask = torch.zeros((batch_size, 1, num_parts)).to(device, torch.float32)
         occ_mask[:, :, rand_indices] = 1
 
-        # # learning xforms
-        # batch_vec = torch.arange(start=0, end=batch_size).to(device)
-        # batch_vec = torch.repeat_interleave(batch_vec, num_union_nodes)
-        # batch_mask = torch.sum(batch_part_nodes, dim=1)
-        # learned_geom, learned_xforms = occ_model.learn_geom_xform(batch_node_feat,
-        #                                                         batch_adj,
-        #                                                         batch_mask,
-        #                                                         batch_vec)
-        # learned_xforms = learned_xforms[:, [0, 1, 2, 3], [0, 1, 2, 3], :]
+        # learning xforms
+        batch_vec = torch.arange(start=0, end=batch_size).to(device)
+        batch_vec = torch.repeat_interleave(batch_vec, num_union_nodes)
+        batch_mask = torch.sum(batch_part_nodes, dim=1)
+        learned_geom, learned_xforms = occ_model.learn_geom_xform(batch_node_feat,
+                                                                batch_adj,
+                                                                batch_mask,
+                                                                batch_vec)
+        learned_xforms = learned_xforms[:, [0, 1, 2, 3], [0, 1, 2, 3], :]
 
-        # batch_geom = torch.einsum('ijk, ikm -> ijm',
-        #                         batch_part_nodes.to(torch.float32),
-        #                         batch_node_feat)
+        batch_geom = torch.einsum('ijk, ikm -> ijm',
+                                batch_part_nodes.to(torch.float32),
+                                batch_node_feat)
 
-        # pairwise_xforms = learned_xforms[:, connectivity]
-        # learned_relations = pairwise_xforms[:, :, 1] - pairwise_xforms[:, :, 0]
+        pairwise_xforms = learned_xforms[:, connectivity]
+        learned_relations = pairwise_xforms[:, :, 1] - pairwise_xforms[:, :, 0]
 
-        # transformed_points = batch_points.unsqueeze(1).expand(-1, num_parts, -1, -1) +\
-        #     learned_xforms.unsqueeze(2)
         transformed_points = batch_points.unsqueeze(1).expand(-1, num_parts, -1, -1) +\
-            batch_xforms.unsqueeze(2)
+            learned_xforms.unsqueeze(2)
+        # transformed_points = batch_points.unsqueeze(1).expand(-1, num_parts, -1, -1) +\
+        #     batch_xforms.unsqueeze(2)
 
         occs1 = occ_model.forward(
             transformed_points.masked_fill(points_mask==1,torch.tensor(0)),
@@ -355,7 +355,9 @@ if args.train:
 
         # ------------ flexi ------------
         transformed_flexi_verts = flexi_verts.unsqueeze(1).expand(-1, num_parts, -1, -1) +\
-            batch_xforms.unsqueeze(2)
+            learned_xforms.unsqueeze(2)
+        # transformed_flexi_verts = flexi_verts.unsqueeze(1).expand(-1, num_parts, -1, -1) +\
+        #     batch_xforms.unsqueeze(2)
 
         pred_verts_occ, _ = torch.max(occ_model.forward(
             transformed_flexi_verts, batch_embed), dim=-1, keepdim=True)
@@ -369,21 +371,21 @@ if args.train:
                 pred_verts_occ[s])
             mesh_loss += one_mesh_loss
 
-        # loss_bbox_geom = loss_f(
-        #     embed_fn(learned_geom.view(-1, 3)),
-        #     embed_fn(batch_geom.view(-1, 3)),)
+        loss_bbox_geom = loss_f(
+            embed_fn(learned_geom.view(-1, 3)),
+            embed_fn(batch_geom.view(-1, 3)),)
 
-        # loss_xform = loss_f(
-            # embed_fn(learned_xforms.view(-1, 3)),
-            # embed_fn(batch_xforms.view(-1, 3)))
+        loss_xform = loss_f(
+            embed_fn(learned_xforms.view(-1, 3)),
+            embed_fn(batch_xforms.view(-1, 3)))
 
-        # loss_relations = loss_f(
-        #     embed_fn(learned_relations.view(-1, 3)),
-        #     embed_fn(batch_relations.view(-1, 3)))
+        loss_relations = loss_f(
+            embed_fn(learned_relations.view(-1, 3)),
+            embed_fn(batch_relations.view(-1, 3)))
 
-        # total_loss = loss1 + loss2 + mesh_loss + loss_bbox_geom +\
-        #              10 * loss_xform + 10 * loss_relations
-        total_loss = loss1 + loss2 + mesh_loss
+        total_loss = loss1 + loss2 + mesh_loss + loss_bbox_geom +\
+                     10 * loss_xform + 10 * loss_relations
+        # total_loss = loss1 + loss2 + mesh_loss
         # total_loss = loss1 + loss2
         # total_loss = loss1
 
@@ -394,9 +396,9 @@ if args.train:
         writer.add_scalar('loss1', loss1, it)
         writer.add_scalar('loss2', loss2, it)
         writer.add_scalar('mesh', mesh_loss, it)
-        # writer.add_scalar('bbox', loss_bbox_geom, it)
-        # writer.add_scalar('xform', loss_xform, it)
-        # writer.add_scalar('relations', loss_relations, it)
+        writer.add_scalar('bbox', loss_bbox_geom, it)
+        writer.add_scalar('xform', loss_xform, it)
+        writer.add_scalar('relations', loss_relations, it)
 
         if (it) % 100 == 0 or it == (iterations - 1): 
             with torch.no_grad():
@@ -527,28 +529,27 @@ if args.test:
         occ_mask = torch.zeros((1, 1, num_parts)).to(device, torch.float32)
         occ_mask[:, :, masked_indices] = 1
 
-        # # learning xforms
-        # batch_vec = torch.arange(start=0, end=1).to(device)
-        # batch_vec = torch.repeat_interleave(batch_vec, num_union_nodes)
-        # batch_mask = torch.sum(batch_part_nodes, dim=1)
-        # learned_geom, learned_xforms = model.learn_geom_xform(batch_node_feat,
-        #                                             batch_adj,
-        #                                             batch_mask,
-        #                                             batch_vec)
-        # learned_relations = learned_xforms[:, connectivity[:, 0], connectivity[:, 1], :]
-        # learned_xforms = learned_xforms[:, [0, 1, 2, 3], [0, 1, 2, 3], :]
+        # learning xforms
+        batch_vec = torch.arange(start=0, end=1).to(device)
+        batch_vec = torch.repeat_interleave(batch_vec, num_union_nodes)
+        batch_mask = torch.sum(batch_part_nodes, dim=1)
+        learned_geom, learned_xforms = occ_model.learn_geom_xform(batch_node_feat,
+                                                                  batch_adj,
+                                                                  batch_mask,
+                                                                  batch_vec)
+        learned_xforms = learned_xforms[:, [0, 1, 2, 3], [0, 1, 2, 3], :]
 
-        # batch_geom = torch.einsum('ijk, ikm ->k ijm',
-        #                         batch_part_nodes.to(torch.float32),
-        #                         batch_node_feat)
+        batch_geom = torch.einsum('ijk, ikm ->k ijm',
+                                batch_part_nodes.to(torch.float32),
+                                batch_node_feat)
 
-        # pairwise_xforms = learned_xforms[:, connectivity]
-        # learned_relations = pairwise_xforms[:, :, 1] - pairwise_xforms[:, :, 0]
+        pairwise_xforms = learned_xforms[:, connectivity]
+        learned_relations = pairwise_xforms[:, :, 1] - pairwise_xforms[:, :, 0]
 
-        # transformed_points = query_points.unsqueeze(1).expand(-1, num_parts, -1, -1) +\
-        #     learned_xforms.unsqueeze(2)
         transformed_points = query_points.unsqueeze(1).expand(-1, num_parts, -1, -1) +\
-            batch_xforms.unsqueeze(2)
+            learned_xforms.unsqueeze(2)
+        # transformed_points = query_points.unsqueeze(1).expand(-1, num_parts, -1, -1) +\
+        #     batch_xforms.unsqueeze(2)
 
         occs1 = occ_model(transformed_points.masked_fill(points_mask==1,torch.tensor(0)),
                           batch_embed.masked_fill(parts_mask==1, torch.tensor(0)))
@@ -557,7 +558,9 @@ if args.test:
 
         # ------------ flexi ------------
         transformed_flexi_verts = flexi_verts.unsqueeze(1).expand(-1, num_parts, -1, -1) +\
-            batch_xforms.unsqueeze(2)
+            learned_xforms.unsqueeze(2)
+        # transformed_flexi_verts = flexi_verts.unsqueeze(1).expand(-1, num_parts, -1, -1) +\
+        #     batch_xforms.unsqueeze(2)
 
         pred_verts_occ, _ = torch.max(
             occ_model.forward(
@@ -572,8 +575,8 @@ if args.test:
             torch.flatten(comp_sdf[0]).unsqueeze(0), batch_gt_meshes[0],
             pred_verts_occ[0])
 
-    # learned_xforms = learned_xforms[0].cpu().numpy()
-    learned_xforms = batch_xforms[0].cpu().numpy()
+    learned_xforms = learned_xforms[0].cpu().numpy()
+    # learned_xforms = batch_xforms[0].cpu().numpy()
     learned_obbs_of_interest = [[]] * num_parts
     for i in range(num_parts):
         ext = extents[model_idx, i]
