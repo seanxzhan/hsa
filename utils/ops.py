@@ -1,11 +1,24 @@
 import os
 import json
 import torch
-from anytree import AnyNode
+import kaolin
+import trimesh
 import subprocess
 import numpy as np
 import scipy.ndimage as ndimage
-from utils import misc, binvox_rw, transform
+from utils import binvox_rw
+
+
+def export_mesh_norm(vertices, faces, path):
+    """vertices, faces: torch.Tensor
+    """
+    vertices = kaolin.ops.pointcloud.center_points(
+        vertices.unsqueeze(0), normalize=True).squeeze(0)
+    vertices = vertices.numpy()
+    faces = faces.numpy()
+    mesh = trimesh.Trimesh(vertices, faces)
+    mesh.export(path)
+    return mesh
 
 
 def load_voxels(vox_path):
