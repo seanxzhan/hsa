@@ -39,17 +39,19 @@ pt_sample_res = 64
 occ_res = int(pt_sample_res / 2)
 ds_start, ds_end = 0, 10
 device = 'cuda'
-lr = 0.01
+lr = 0.005
 iterations = 10000; iterations += 1
 train_res = [512, 512]
 fc_res = 31
-num_shapes = 1
-batch_size = 1
+num_shapes = 500
+batch_size = 25
 each_part_feat = 32
 embed_dim = 128
 dataset_id = 19
-expt_id = 9
-model_idx = 2
+expt_id = 11
+# model_idx = 2
+anchor_idx = -1
+num_batches = num_shapes // batch_size
 
 # ------------ data dirs ------------
 partnet_dir = '/datasets/PartNet'
@@ -61,11 +63,11 @@ with open(train_new_ids_to_objs_path, 'r') as f:
 model_idx_to_anno_id = {}
 for mi, ai in enumerate(train_new_ids_to_objs.keys()):
     model_idx_to_anno_id[mi] = ai
-anno_id = model_idx_to_anno_id[model_idx]
-print("anno_id: ", anno_id)
+# anno_id = model_idx_to_anno_id[model_idx]
+# print("anno_id: ", anno_id)
 
 # ------------ logging ------------
-results_dir = os.path.join('results', 'occflexi', f'occflexi_{expt_id}', anno_id)
+results_dir = os.path.join('results', 'occflexi', f'occflexi_{expt_id}')
 timelapse_dir = os.path.join(results_dir, 'training_timelapse')
 print("timelapse dir: ", timelapse_dir)
 timelapse = kaolin.visualize.Timelapse(timelapse_dir)
@@ -108,7 +110,7 @@ num_union_nodes = adj.shape[1]
 num_points = normalized_points.shape[1]
 _, num_parts = part_num_indices.shape
 all_fg_part_indices = []
-for i in range(model_idx, model_idx+1):
+for i in range(num_shapes):
     indices = preprocess_data_19.convert_flat_list_to_fg_part_indices(
         part_num_indices[i], all_indices[i])
     all_fg_part_indices.append(np.array(indices, dtype=object))
@@ -136,13 +138,13 @@ center_indices, boundary_indices = get_center_boundary_index(fc_res, device)
 
 # ------------ init gt meshes ------------
 print("loading gt meshes")
-gt_meshes = [my_load_mesh(s) for s in tqdm(range(model_idx, model_idx+1))]
+gt_meshes = [my_load_mesh(s) for s in tqdm(range(0, num_shapes))]
 timelapse.add_mesh_batch(category='gt_mesh',
-                         vertices_list=[gt_meshes[0].vertices.cpu()],
-                         faces_list=[gt_meshes[0].faces.cpu()])
+                         vertices_list=[gt_meshes[anchor_idx].vertices.cpu()],
+                         faces_list=[gt_meshes[anchor_idx].faces.cpu()])
 occ_pts = torch.from_numpy(
     torch.argwhere(
-        torch.from_numpy(occ[model_idx]).reshape([fc_res+1]*3) == 1.0).cpu().numpy())
+        torch.from_numpy(occ[anchor_idx]).reshape([fc_res+1]*3) == 1.0).cpu().numpy())
 occ_pts = occ_pts/(fc_res+1) - 0.5
 timelapse.add_pointcloud_batch(category='gt_occ', pointcloud_list=[occ_pts])
 # np.save(os.path.join(results_dir, 'gt_occ.npy'), occ[model_idx]); exit(0)
@@ -194,13 +196,13 @@ def load_batch(batch_idx, batch_size, start=None, end=None):
     return all_fg_part_indices[start:end],\
         torch.from_numpy(normalized_points[start:end]).to(device, torch.float32),\
         torch.from_numpy(values[start:end]).to(device, torch.float32),\
-        occ_embeddings(torch.arange(0, 1).to(device)),\
+        occ_embeddings(torch.arange(start, end).to(device)),\
         torch.from_numpy(node_features[start:end, :, :3]).to(device, torch.float32),\
         torch.from_numpy(adj[start:end]).to(device, torch.long),\
         torch.from_numpy(part_nodes[start:end]).to(device, torch.long),\
         torch.from_numpy(xforms[start:end, :, :3, 3]).to(device, torch.float32),\
         torch.from_numpy(relations[start:end, :, :3, 3]).to(device, torch.float32),\
-        [gt_meshes[i] for i in range(0, 1)]
+        [gt_meshes[i] for i in range(start, end)]
 
 # ------------ reconstruction ------------
 def export_mesh_normalized(mesh_name, vertices, faces):
@@ -279,120 +281,118 @@ def run_flexi(sdf, gt_mesh, pred_occ):
 # ------------ training ------------
 if args.train:
     for it in range(iterations):
-        optimizer.zero_grad()
-        # occ_embed_feat, batch_points, batch_values, gt_meshes = load_batch(
-        #     0, 0, start=0, end=1)
-        batch_fg_part_indices,\
-            batch_points, batch_values,\
-            batch_embed, \
-            batch_node_feat, batch_adj, batch_part_nodes,\
-            batch_xforms, batch_relations, batch_gt_meshes =\
-                load_batch(0, 0, start=model_idx, end=model_idx+1)
+        itr_loss = 0
+
+        for b in range(num_batches):
+
+            optimizer.zero_grad()
         
-        num_parts_to_mask = np.random.randint(1, num_parts)
-        # num_parts_to_mask = 1
-        rand_indices = np.random.choice(num_parts, num_parts_to_mask,
-                                        replace=False)
-        # rand_indices = np.array([1, 2, 3])
+            batch_fg_part_indices, batch_points, batch_values,\
+                batch_embed, batch_node_feat, batch_adj, batch_part_nodes,\
+                batch_xforms, batch_relations, batch_gt_meshes =\
+                load_batch(b, batch_size)
+        
+            num_parts_to_mask = np.random.randint(1, num_parts)
+            rand_indices = np.random.choice(num_parts, num_parts_to_mask,
+                                            replace=False)
+            masked_indices = torch.from_numpy(rand_indices).to(device, torch.long)
 
-        masked_indices = torch.from_numpy(rand_indices).to(device, torch.long)
-        # make gt value mask
-        val_mask = torch.ones_like(batch_values).to(device, torch.float32)
-        for i in range(batch_size):
-            fg_part_indices = all_fg_part_indices[i]
-            fg_part_indices_masked = fg_part_indices[masked_indices.cpu().numpy()]
-            if len(fg_part_indices_masked) != 0:
-                fg_part_indices_masked = np.concatenate(fg_part_indices_masked, axis=0)
-            else:
-                fg_part_indices_masked = np.array([])
-            val_mask[i][fg_part_indices_masked] = 0
-        modified_values = batch_values * val_mask
+            # ------------ gt value mask ------------
+            val_mask = torch.ones_like(batch_values).to(device, torch.float32)
+            for i in range(batch_size):
+                fg_part_indices = all_fg_part_indices[i]
+                fg_part_indices_masked = fg_part_indices[masked_indices.cpu().numpy()]
+                if len(fg_part_indices_masked) != 0:
+                    fg_part_indices_masked = np.concatenate(fg_part_indices_masked, axis=0)
+                else:
+                    fg_part_indices_masked = np.array([])
+                val_mask[i][fg_part_indices_masked] = 0
+            modified_values = batch_values * val_mask
 
-        parts_mask = torch.zeros((batch_embed.shape[0], num_parts)).to(device, torch.float32)
-        if len(masked_indices) != 0:
+            # ------------ parts, points, occ masks ------------
+            parts_mask = torch.zeros((batch_embed.shape[0], num_parts)).to(device, torch.float32)
             parts_mask[:, rand_indices] = 1
-        parts_mask = torch.repeat_interleave(parts_mask,
-                                             each_part_feat, dim=-1)
+            parts_mask = torch.repeat_interleave(parts_mask, each_part_feat, dim=-1)
+            points_mask = torch.zeros((batch_size, num_parts, 1, 1)).to(device, torch.float32)
+            points_mask[:, rand_indices] = 1
+            occ_mask = torch.zeros((batch_size, 1, num_parts)).to(device, torch.float32)
+            occ_mask[:, :, rand_indices] = 1
 
-        points_mask = torch.zeros((batch_size, num_parts, 1, 1)).to(device, torch.float32)
-        points_mask[:, rand_indices] = 1
+            # ------------ learning bbox & xforms ------------
+            batch_vec = torch.arange(start=0, end=batch_size).to(device)
+            batch_vec = torch.repeat_interleave(batch_vec, num_union_nodes)
+            batch_mask = torch.sum(batch_part_nodes, dim=1)
+            learned_geom, learned_xforms = occ_model.learn_geom_xform(batch_node_feat,
+                                                                      batch_adj,
+                                                                      batch_mask,
+                                                                      batch_vec)
+            batch_geom = torch.einsum('ijk, ikm -> ijm',
+                                      batch_part_nodes.to(torch.float32),
+                                      batch_node_feat)
+            pairwise_xforms = learned_xforms[:, connectivity]
+            learned_relations = pairwise_xforms[:, :, 1] - pairwise_xforms[:, :, 0]
 
-        occ_mask = torch.zeros((batch_size, 1, num_parts)).to(device, torch.float32)
-        occ_mask[:, :, rand_indices] = 1
+            # ------------ occ ------------
+            transformed_points =\
+                batch_points.unsqueeze(1).expand(-1, num_parts, -1, -1) +\
+                learned_xforms.unsqueeze(2)
+            # transformed_points = batch_points.unsqueeze(1).expand(-1, num_parts, -1, -1) +\
+            #     batch_xforms.unsqueeze(2)
 
-        # learning xforms
-        batch_vec = torch.arange(start=0, end=batch_size).to(device)
-        batch_vec = torch.repeat_interleave(batch_vec, num_union_nodes)
-        batch_mask = torch.sum(batch_part_nodes, dim=1)
-        learned_geom, learned_xforms = occ_model.learn_geom_xform(batch_node_feat,
-                                                                batch_adj,
-                                                                batch_mask,
-                                                                batch_vec)
-        # learned_xforms = learned_xforms[:, [0, 1, 2, 3], [0, 1, 2, 3], :]
+            occs1 = occ_model.forward(
+                transformed_points.masked_fill(points_mask==1,torch.tensor(0)),
+                batch_embed.masked_fill(parts_mask==1, torch.tensor(0)))
+            occs1 = occs1.masked_fill(occ_mask==1,torch.tensor(float('-inf')))
+            pred_values1, _ = torch.max(occs1, dim=-1, keepdim=True)
+            loss1 = loss_f(pred_values1, modified_values)
 
-        batch_geom = torch.einsum('ijk, ikm -> ijm',
-                                batch_part_nodes.to(torch.float32),
-                                batch_node_feat)
+            pred_values2, _ = torch.max(occ_model.forward(
+                transformed_points, batch_embed), dim=-1, keepdim=True)
+            loss2 = loss_f(pred_values2, batch_values)
 
-        pairwise_xforms = learned_xforms[:, connectivity]
-        learned_relations = pairwise_xforms[:, :, 1] - pairwise_xforms[:, :, 0]
+            # ------------ flexi ------------
+            transformed_flexi_verts =\
+                flexi_verts.unsqueeze(1).expand(-1, num_parts, -1, -1) +\
+                learned_xforms.unsqueeze(2)
+            # transformed_flexi_verts = flexi_verts.unsqueeze(1).expand(-1, num_parts, -1, -1) +\
+            #     batch_xforms.unsqueeze(2)
 
-        # ------------ occ ------------
-        transformed_points = batch_points.unsqueeze(1).expand(-1, num_parts, -1, -1) +\
-            learned_xforms.unsqueeze(2)
-        # transformed_points = batch_points.unsqueeze(1).expand(-1, num_parts, -1, -1) +\
-        #     batch_xforms.unsqueeze(2)
+            pred_verts_occ, _ = torch.max(occ_model.forward(
+                transformed_flexi_verts, batch_embed), dim=-1, keepdim=True)
+            comp_sdf = ops.bin2sdf_torch_3(
+                pred_verts_occ.view(-1, fc_res+1, fc_res+1, fc_res+1))
 
-        occs1 = occ_model.forward(
-            transformed_points.masked_fill(points_mask==1,torch.tensor(0)),
-            batch_embed.masked_fill(parts_mask==1, torch.tensor(0)))
-        occs1 = occs1.masked_fill(occ_mask==1,torch.tensor(float('-inf')))
-        pred_values1, _ = torch.max(occs1, dim=-1, keepdim=True)
-        loss1 = loss_f(pred_values1, modified_values)
+            mesh_loss = 0
+            for s in range(batch_size):
+                one_mesh_loss, vertices, faces = run_flexi(
+                    torch.flatten(comp_sdf[s]).unsqueeze(0), batch_gt_meshes[s],
+                    pred_verts_occ[s])
+                mesh_loss += one_mesh_loss
+            mesh_loss /= batch_size
 
-        pred_values2, _ = torch.max(occ_model.forward(
-            transformed_points, batch_embed), dim=-1, keepdim=True)
-        loss2 = loss_f(pred_values2, batch_values)
+            loss_bbox_geom = loss_f(
+                embed_fn(learned_geom.view(-1, 3)),
+                embed_fn(batch_geom.view(-1, 3)),)
 
-        # ------------ flexi ------------
-        transformed_flexi_verts = flexi_verts.unsqueeze(1).expand(-1, num_parts, -1, -1) +\
-            learned_xforms.unsqueeze(2)
-        # transformed_flexi_verts = flexi_verts.unsqueeze(1).expand(-1, num_parts, -1, -1) +\
-        #     batch_xforms.unsqueeze(2)
+            loss_xform = loss_f(
+                embed_fn(learned_xforms.view(-1, 3)),
+                embed_fn(batch_xforms.view(-1, 3)))
 
-        pred_verts_occ, _ = torch.max(occ_model.forward(
-            transformed_flexi_verts, batch_embed), dim=-1, keepdim=True)
-        comp_sdf = ops.bin2sdf_torch_3(
-            pred_verts_occ.view(-1, fc_res+1, fc_res+1, fc_res+1))
+            loss_relations = loss_f(
+                embed_fn(learned_relations.view(-1, 3)),
+                embed_fn(batch_relations.view(-1, 3)))
 
-        mesh_loss = 0
-        for s in range(batch_size):
-            one_mesh_loss, vertices, faces = run_flexi(
-                torch.flatten(comp_sdf[s]).unsqueeze(0), batch_gt_meshes[s],
-                pred_verts_occ[s])
-            mesh_loss += one_mesh_loss
+            total_loss = loss1 + loss2 + mesh_loss + loss_bbox_geom +\
+                         10 * loss_xform + 10 * loss_relations
+            # total_loss = loss1 + loss2 + mesh_loss
+            # total_loss = loss1 + loss2
+            # total_loss = loss1
 
-        loss_bbox_geom = loss_f(
-            embed_fn(learned_geom.view(-1, 3)),
-            embed_fn(batch_geom.view(-1, 3)),)
-
-        loss_xform = loss_f(
-            embed_fn(learned_xforms.view(-1, 3)),
-            embed_fn(batch_xforms.view(-1, 3)))
-
-        loss_relations = loss_f(
-            embed_fn(learned_relations.view(-1, 3)),
-            embed_fn(batch_relations.view(-1, 3)))
-
-        total_loss = loss1 + loss2 + mesh_loss + loss_bbox_geom +\
-                     10 * loss_xform + 10 * loss_relations
-        # total_loss = loss1 + loss2 + mesh_loss
-        # total_loss = loss1 + loss2
-        # total_loss = loss1
-
-        total_loss.backward()
-        optimizer.step()
-        # scheduler.step()
+            total_loss.backward()
+            optimizer.step()
+            # scheduler.step()
+            itr_loss += total_loss.detach().cpu().numpy()
+        itr_loss /= num_shapes
 
         writer.add_scalar('iteration loss', total_loss, it)
         writer.add_scalar('loss1', loss1, it)
