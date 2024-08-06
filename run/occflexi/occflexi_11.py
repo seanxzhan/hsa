@@ -39,7 +39,7 @@ pt_sample_res = 64
 occ_res = int(pt_sample_res / 2)
 ds_start, ds_end = 0, 10
 device = 'cuda'
-lr = 0.001
+lr = 0.01
 iterations = 10000; iterations += 1
 train_res = [512, 512]
 fc_res = 31
@@ -49,7 +49,7 @@ each_part_feat = 32
 embed_dim = 128
 dataset_id = 19
 expt_id = 9
-model_idx = 3
+model_idx = 2
 
 # ------------ data dirs ------------
 partnet_dir = '/datasets/PartNet'

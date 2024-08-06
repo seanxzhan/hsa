@@ -1,6 +1,7 @@
 from tqdm import tqdm
 import torch
-from align_networks.gnn_dense_ae_58 import OBBGNN
+# from align_networks.gnn_dense_ae_58 import OBBGNN
+from align_networks.occflexi_gnn_9 import OBBGNN
 
 
 class SDFDecoder(torch.nn.Module):

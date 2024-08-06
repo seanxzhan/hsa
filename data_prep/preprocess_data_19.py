@@ -1256,10 +1256,10 @@ if __name__ == "__main__":
             ids_w_four_parts.append(x)
     ids_w_four_parts = [ids_w_four_parts[x] for x in good_indices]
 
-    # export_data(ids_w_four_parts, save_data=True,
-    #             start=0, end=len(ids_w_four_parts))
     export_data(ids_w_four_parts, save_data=True,
-                start=0, end=10)
+                start=0, end=len(ids_w_four_parts))
+    # export_data(ids_w_four_parts, save_data=True,
+    #             start=0, end=10)
     # print(ids_w_four_parts[:50])
     exit(0)
 
