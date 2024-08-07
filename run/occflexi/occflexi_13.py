@@ -423,7 +423,7 @@ if args.train:
                 }, os.path.join(ckpt_dir, f'model_{it}.pt'))
     writer.close()
 
-# ------------ testing ------------
+# ------------ reconstruction ------------
 if args.test:
     from utils import visualize
     white_bg = True
