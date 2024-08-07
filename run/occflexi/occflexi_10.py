@@ -34,7 +34,7 @@ pt_sample_res = 64
 occ_res = int(pt_sample_res / 2)
 ds_start, ds_end = 0, 508
 device = 'cuda'
-lr = 0.01
+lr = 0.001
 iterations = 10000; iterations += 1
 train_res = [512, 512]
 fc_res = 31

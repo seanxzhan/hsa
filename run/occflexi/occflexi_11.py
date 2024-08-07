@@ -430,7 +430,7 @@ if args.test:
     anno_id = model_idx_to_anno_id[model_idx]
     model_id = misc.anno_id_to_model_id(partnet_index_path)[anno_id]
     print(f"anno id: {anno_id}, model id: {model_id}")
-    results_dir = os.path.join(results_dir, anno_id)
+    results_dir = os.path.join(results_dir, 'recon', anno_id)
     misc.check_dir(results_dir)
     print("results dir: ", results_dir)
 
@@ -460,7 +460,7 @@ if args.test:
 
     # ------------ img paths ------------
     gt_color = [31, 119, 180, 255]
-    mesh_pred_path = os.path.join(results_dir, 'mesh_pred.png')
+    mesh_pred_path = os.path.join(results_dir, 'mesh_occ.png')
     mesh_gt_path = os.path.join(results_dir, 'mesh_gt.png')
     learned_obbs_path = os.path.join(results_dir, 'obbs_pred.png')
     obbs_path = os.path.join(results_dir, 'obbs_gt.png')
