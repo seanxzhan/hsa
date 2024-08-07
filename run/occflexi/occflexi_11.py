@@ -432,6 +432,9 @@ if args.test:
     anno_id = model_idx_to_anno_id[model_idx]
     model_id = misc.anno_id_to_model_id(partnet_index_path)[anno_id]
     print(f"anno id: {anno_id}, model id: {model_id}")
+    results_dir = os.path.join(results_dir, anno_id)
+    misc.check_dir(results_dir)
+    print("results dir: ", results_dir)
 
     # ------------ loading model, embedding, and data ------------
     checkpoint = torch.load(os.path.join(ckpt_dir, f'model_{it}.pt'))

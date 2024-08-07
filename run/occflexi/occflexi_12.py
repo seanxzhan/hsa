@@ -118,6 +118,7 @@ fc = FlexiCubes(device)
 x_nx3, cube_fx8 = fc.construct_voxel_grid(fc_res)
 x_nx3 *= 1.15
 flexi_verts: torch.Tensor = x_nx3.to(device).unsqueeze(0).expand(batch_size, -1, -1)
+# flexi_verts = pt_sample_res * flexi_verts + pt_sample_res / 2
 def get_center_boundary_index(grid_res, device):
     v = torch.zeros((grid_res + 1, grid_res + 1, grid_res + 1),
                     dtype=torch.bool, device=device)
@@ -276,6 +277,10 @@ def run_flexi(sdf, gt_mesh, pred_occ):
                      target['mask'])**2).sum(-1)+1e-8)).sqrt().mean() * 10
     return mask_loss+depth_loss, vertices, faces
 
+query_points = reconstruct.make_query_points(32)
+query_points = torch.from_numpy(query_points).to(device, torch.float32)
+query_points = query_points.unsqueeze(0).expand(batch_size, -1, -1)
+
 # ------------ training ------------
 if args.train:
     for it in range(iterations):
@@ -355,21 +360,32 @@ if args.train:
         loss2 = loss_f(pred_values2, batch_values)
 
         # ------------ flexi ------------
-        transformed_flexi_verts = flexi_verts.unsqueeze(1).expand(-1, num_parts, -1, -1) +\
+        transformed_query_points = query_points.unsqueeze(1).expand(-1, num_parts, -1, -1) +\
             learned_xforms.unsqueeze(2)
-        # transformed_flexi_verts = flexi_verts.unsqueeze(1).expand(-1, num_parts, -1, -1) +\
-        #     batch_xforms.unsqueeze(2)
+        query_occ, _ = torch.max(occ_model.forward(
+            transformed_query_points, batch_embed), dim=-1, keepdim=True)
+        query_sdf: torch.Tensor = ops.bin2sdf_torch_3(
+            query_occ.view(-1, 32, 32, 32))
+        query_sdf = torch.permute(query_sdf, (0, 3, 1, 2))
+        query_sdf = query_sdf.unsqueeze(1)
+        comp_sdf = ops.vectorized_trilinear_interpolate(
+            query_sdf, 32 * flexi_verts + 32 / 2, 32)
 
-        pred_verts_occ, _ = torch.max(occ_model.forward(
-            transformed_flexi_verts, batch_embed), dim=-1, keepdim=True)
-        comp_sdf = ops.bin2sdf_torch_3(
-            pred_verts_occ.view(-1, fc_res+1, fc_res+1, fc_res+1))
+        # transformed_flexi_verts = flexi_verts.unsqueeze(1).expand(-1, num_parts, -1, -1) +\
+        #     learned_xforms.unsqueeze(2)
+        # # transformed_flexi_verts = flexi_verts.unsqueeze(1).expand(-1, num_parts, -1, -1) +\
+        # #     batch_xforms.unsqueeze(2)
+
+        # pred_verts_occ, _ = torch.max(occ_model.forward(
+        #     transformed_flexi_verts, batch_embed), dim=-1, keepdim=True)
+        # comp_sdf = ops.bin2sdf_torch_3(
+        #     pred_verts_occ.view(-1, fc_res+1, fc_res+1, fc_res+1))
 
         mesh_loss = 0
         for s in range(batch_size):
             one_mesh_loss, vertices, faces = run_flexi(
                 torch.flatten(comp_sdf[s]).unsqueeze(0), batch_gt_meshes[s],
-                pred_verts_occ[s])
+                comp_sdf[s])
             mesh_loss += one_mesh_loss
 
         loss_bbox_geom = loss_f(
