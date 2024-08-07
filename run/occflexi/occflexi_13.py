@@ -46,7 +46,7 @@ batch_size = 8
 each_part_feat = 32
 embed_dim = 128
 dataset_id = 19
-expt_id = 11
+expt_id = 13
 anchor_idx = -1
 num_batches = num_shapes // batch_size
 
@@ -66,9 +66,10 @@ results_dir = os.path.join('results', 'occflexi', f'occflexi_{expt_id}')
 timelapse_dir = os.path.join(results_dir, 'training_timelapse')
 print("timelapse dir: ", timelapse_dir)
 timelapse = kaolin.visualize.Timelapse(timelapse_dir)
-logs_path = os.path.join('logs', 'occflexi', f'occflexi_{expt_id}')
-ckpt_dir = os.path.join(logs_path, 'ckpt'); misc.check_dir(ckpt_dir)
-writer = SummaryWriter(os.path.join(logs_path, 'summary'))
+logs_dir = os.path.join('logs', 'occflexi', f'occflexi_{expt_id}')
+print("logs dir: ", logs_dir)
+ckpt_dir = os.path.join(logs_dir, 'ckpt'); misc.check_dir(ckpt_dir)
+writer = SummaryWriter(os.path.join(logs_dir, 'summary'))
 
 # ------------ data loading ------------
 train_data_path = \
@@ -114,7 +115,8 @@ for i in range(num_shapes):
 fc = FlexiCubes(device)
 x_nx3, cube_fx8 = fc.construct_voxel_grid(fc_res)
 x_nx3 *= 1.15
-flexi_verts: torch.Tensor = x_nx3.to(device).unsqueeze(0).expand(batch_size, -1, -1)
+x_nx3 = x_nx3.to(device)
+# flexi_verts: torch.Tensor = x_nx3.to(device).unsqueeze(0).expand(batch_size, -1, -1)
 def get_center_boundary_index(grid_res, device):
     v = torch.zeros((grid_res + 1, grid_res + 1, grid_res + 1),
                     dtype=torch.bool, device=device)
@@ -285,7 +287,7 @@ def run_occ(batch_size, masked_indices, batch_points, batch_embed,
 
     # ------------ flexi ------------
     transformed_flexi_verts =\
-        flexi_verts[0:batch_size].unsqueeze(1).expand(-1, num_parts, -1, -1) +\
+        x_nx3.unsqueeze(0).unsqueeze(1).expand(batch_size, num_parts, -1, -1) +\
         learned_xforms.unsqueeze(2)
 
     if not mask_flexi:
@@ -305,6 +307,8 @@ def run_occ(batch_size, masked_indices, batch_points, batch_embed,
     return learned_xforms, learned_geom, learned_relations,\
            pred_values1, pred_values2, pred_verts_occ, comp_sdf
 
+all_indices = torch.arange(0, num_parts).to(device, torch.long)
+
 # ------------ training ------------
 if args.train:
     for it in range(iterations):
@@ -320,10 +324,8 @@ if args.train:
             batch_gt_meshes = load_meshes(b, batch_size)
 
             # ------------ random masking ------------
-            num_parts_to_mask = np.random.randint(1, num_parts)
-            rand_indices = np.random.choice(num_parts, num_parts_to_mask,
-                                            replace=False)
-            masked_indices = torch.from_numpy(rand_indices).to(device, torch.long)
+            n = (it * num_batches + b) % num_parts
+            masked_indices = all_indices[list(set(range(0, num_parts))-set([n]))]
 
             # ------------ gt value mask ------------
             val_mask = torch.ones_like(batch_values).to(device, torch.float32)
