@@ -38,8 +38,8 @@ lr = 0.001
 iterations = 10000; iterations += 1
 train_res = [512, 512]
 fc_res = 31
-num_shapes = 500
-batch_size = 25
+num_shapes = 496
+batch_size = 8
 embed_dim = 128
 dataset_id = 19
 expt_id = 10
@@ -100,7 +100,7 @@ def my_load_mesh_part(model_idx, part_verts, part_faces, part):
 # ------------ init flexicubes ------------
 fc = FlexiCubes(device)
 x_nx3, cube_fx8 = fc.construct_voxel_grid(fc_res)
-x_nx3 *= 1.1
+x_nx3 *= 1.15
 flexi_verts = x_nx3.to(device).unsqueeze(0).expand(batch_size, -1, -1)
 def get_center_boundary_index(grid_res, device):
     v = torch.zeros((grid_res + 1, grid_res + 1, grid_res + 1),
