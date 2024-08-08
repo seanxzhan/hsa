@@ -203,7 +203,7 @@ def load_meshes(batch_idx, batch_size):
     return [gt_meshes[i] for i in range(start, end)]
 
 # ------------ flexicubes ------------
-def run_flexi(sdf, gt_mesh, pred_occ):
+def run_flexi(sdf, gt_mesh=None, pred_occ=None):
     # NOTE: this chunk is crucial to keep training upon flexi injection!
     sdf_bxnxnxn = sdf.reshape((sdf.shape[0], fc_res+1, fc_res+1, fc_res+1))
     sdf_less_boundary = sdf_bxnxnxn[:, 1:-1, 1:-1, 1:-1].reshape(sdf.shape[0], -1)
@@ -227,30 +227,33 @@ def run_flexi(sdf, gt_mesh, pred_occ):
         x_nx3, sdf[0], cube_fx8, fc_res, training=True)
     flexicubes_mesh = util.Mesh(vertices, faces)
 
-    mv, mvp = render.get_random_camera_batch(
-        8, iter_res=train_res, device=device, use_kaolin=False)
-    target = render.render_mesh_paper(gt_mesh, mv, mvp, train_res)
-    try: 
-        buffers = render.render_mesh_paper(flexicubes_mesh, mv, mvp, train_res)
-    except Exception as e:
-        import logging, traceback
-        logging.error(traceback.format_exc())
-        print(torch.min(sdf))
-        print(torch.max(sdf))
-        np.save(os.path.join(results_dir, 'badsdfout.npy'),
-                sdf.detach().cpu().numpy())
-        np.save(os.path.join(results_dir, 'badoccout.npy'),
-                pred_occ.detach().cpu().numpy())
-        exit(0)
-
-    mask_loss = (buffers['mask'] - target['mask']).abs().mean()
-    depth_loss = (((((buffers['depth'] - (target['depth']))*
-                     target['mask'])**2).sum(-1)+1e-8)).sqrt().mean() * 10
-    return mask_loss+depth_loss, vertices, faces
+    if gt_mesh is not None:
+        mv, mvp = render.get_random_camera_batch(
+            8, iter_res=train_res, device=device, use_kaolin=False)
+        target = render.render_mesh_paper(gt_mesh, mv, mvp, train_res)
+        try: 
+            buffers = render.render_mesh_paper(flexicubes_mesh, mv, mvp, train_res)
+        except Exception as e:
+            import logging, traceback
+            logging.error(traceback.format_exc())
+            print(torch.min(sdf))
+            print(torch.max(sdf))
+            np.save(os.path.join(results_dir, 'badsdfout.npy'),
+                    sdf.detach().cpu().numpy())
+            np.save(os.path.join(results_dir, 'badoccout.npy'),
+                    pred_occ.detach().cpu().numpy())
+            exit(0)
+        mask_loss = (buffers['mask'] - target['mask']).abs().mean()
+        depth_loss = (((((buffers['depth'] - (target['depth']))*
+                        target['mask'])**2).sum(-1)+1e-8)).sqrt().mean() * 10
+        return mask_loss+depth_loss, vertices, faces
+    else:
+        return None, vertices, faces
 
 # ------------ occupancy ------------
 def run_occ(batch_size, masked_indices, batch_points, batch_embed,
-            batch_node_feat, batch_adj, batch_part_nodes, mask_flexi=False):
+            batch_node_feat, batch_adj, batch_part_nodes,
+            mask_flexi=False, custom_xforms=None):
     # ------------ parts, points, occ masks ------------
     parts_mask = torch.zeros((batch_embed.shape[0], num_parts)).to(device, torch.float32)
     parts_mask[:, masked_indices] = 1
@@ -270,6 +273,9 @@ def run_occ(batch_size, masked_indices, batch_points, batch_embed,
                                                               batch_vec)
     pairwise_xforms = learned_xforms[:, connectivity]
     learned_relations = pairwise_xforms[:, :, 1] - pairwise_xforms[:, :, 0]
+
+    if custom_xforms is not None:
+        learned_xforms = custom_xforms
 
     # ------------ occ ------------
     transformed_points =\
@@ -443,7 +449,6 @@ if args.test:
     occ_embeddings.load_state_dict(checkpoint['embeddings_state_dict'])
     _, _, _, batch_embed, batch_node_feat, batch_adj, batch_part_nodes, _, _ =\
         load_batch(0, 0, model_idx, model_idx+1)
-    batch_gt_meshes = [my_load_mesh(model_idx)]
 
     # ------------ gt bboxes ------------
     unique_part_names, name_to_ori_ids_and_objs,\
@@ -462,13 +467,14 @@ if args.test:
 
     # ------------ img paths ------------
     gt_color = [31, 119, 180, 255]
-    mesh_pred_path = os.path.join(results_dir, 'mesh_occ.png')
+    mesh_occ_path = os.path.join(results_dir, 'mesh_occ.png')
     mesh_gt_path = os.path.join(results_dir, 'mesh_gt.png')
     learned_obbs_path = os.path.join(results_dir, 'obbs_pred.png')
     obbs_path = os.path.join(results_dir, 'obbs_gt.png')
     mesh_flexi_path = os.path.join(results_dir, 'mesh_flexi.png')
     lst_paths = [
-        obbs_path, mesh_gt_path, learned_obbs_path, mesh_pred_path, mesh_flexi_path]
+        obbs_path, mesh_gt_path,
+        learned_obbs_path, mesh_occ_path, mesh_flexi_path]
 
     # ------------ making query points ------------
     query_points = reconstruct.make_query_points(pt_sample_res)
@@ -476,6 +482,7 @@ if args.test:
     query_points = query_points.unsqueeze(0)
     bs, num_points, _ = query_points.shape
 
+    # ------------ run inference ------------
     with torch.no_grad():
         # ------------ dealing with masking indices ------------
         if args.mask:
@@ -494,23 +501,24 @@ if args.test:
             print("reconstructing...")
 
         learned_xforms, learned_geom, learned_relations,\
-            pred_values1, pred_values2, pred_verts_occ, comp_sdf =\
+            pred_values1, _, pred_verts_occ, comp_sdf =\
             run_occ(1, masked_indices, query_points, batch_embed,
                     batch_node_feat, batch_adj, batch_part_nodes, mask_flexi=True)
 
-        one_mesh_loss, flexi_vertices, flexi_faces =\
-            run_flexi(torch.flatten(comp_sdf[0]).unsqueeze(0),
-                      batch_gt_meshes[0], pred_verts_occ[0])
+        _, flexi_vertices, flexi_faces =\
+            run_flexi(torch.flatten(comp_sdf[0]).unsqueeze(0))
 
     # ------------ pred bboxes ------------
-    # NOTE: this is using gt bbox geom atm
     learned_xforms = learned_xforms[0].cpu().numpy()
+    learned_geom = learned_geom[0].cpu().numpy()
     learned_obbs_of_interest = [[]] * num_parts
     for i in range(num_parts):
-        ext = extents[model_idx, i]
+        # ext = extents[model_idx, i]
+        learned_ext = learned_geom[i]
         learned_xform = np.eye(4)
         learned_xform[:3, 3] = -learned_xforms[i]
-        ext_xform = (ext, learned_xform)
+        # ext_xform = (ext, learned_xform)
+        ext_xform = (learned_ext, learned_xform)
         learned_obbs_of_interest[i] = [ext_xform]
 
     mag = 0.8
@@ -525,7 +533,7 @@ if args.test:
         kaolin.ops.conversions.voxelgrids_to_trianglemeshes(sdf_grid)
     mesh_occ = ops.export_mesh_norm(occ_vertices[0].cpu(), occ_faces[0].cpu(),
                                     os.path.join(results_dir, 'mesh_occ.obj'))
-    visualize.save_mesh_vis(mesh_occ, mesh_pred_path,
+    visualize.save_mesh_vis(mesh_occ, mesh_occ_path,
                             mag=mag, white_bg=white_bg)
     
     # ------------ mesh from flexicubes ------------
@@ -534,12 +542,13 @@ if args.test:
     flexi_faces = flexi_faces.detach().cpu()
     mesh_flexi = ops.export_mesh_norm(flexi_vertices, flexi_faces,
                                       os.path.join(results_dir, 'mesh_flexi.obj'))
-    flexi_mesh_vis = visualize.save_mesh_vis(mesh_flexi, mesh_flexi_path,
-                                             mag=mag, white_bg=white_bg)
+    visualize.save_mesh_vis(mesh_flexi, mesh_flexi_path,
+                            mag=mag, white_bg=white_bg)
     print("saving flexi sdf")
     np.save(os.path.join(results_dir, f'flexi_sdf.npy'),
             comp_sdf[0].detach().cpu().numpy())
 
+    # ------------ masked and unmasked indices ------------
     masked_indices = masked_indices.cpu().numpy().tolist()
     unmasked_indices = list(set(range(num_parts)) - set(masked_indices))
 

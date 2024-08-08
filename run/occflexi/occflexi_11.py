@@ -511,7 +511,6 @@ if args.test:
             run_flexi(torch.flatten(comp_sdf[0]).unsqueeze(0))
 
     # ------------ pred bboxes ------------
-    # NOTE: this is using gt bbox geom atm
     learned_xforms = learned_xforms[0].cpu().numpy()
     learned_geom = learned_geom[0].cpu().numpy()
     learned_obbs_of_interest = [[]] * num_parts
