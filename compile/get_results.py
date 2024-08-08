@@ -23,8 +23,8 @@ disentang_pattern3 = mode + "/{shape_idx}/{shape_idx}_results_mask_0-1-2.png"
 # disentang_pattern0 = "{shape_idx}/{shape_idx}_results_mask_1-2.png"
 # disentang_pattern1 = "{shape_idx}/{shape_idx}_results_mask_0-2.png"
 # disentang_pattern2 = "{shape_idx}/{shape_idx}_results_mask_0-1.png"
-# placeholder_path = "none.png"
-placeholder_path = "/projects/hsa/compile/none.png"
+placeholder_path = "none.png"
+# placeholder_path = "/projects/hsa/compile/none.png"
 
 # Function to generate HTML content
 def generate_html(image_indices,

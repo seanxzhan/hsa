@@ -145,6 +145,11 @@ occ_model = SmallMLPs(feature_dims=embed_dim,
 occ_model_params = [p for _, p in occ_model.named_parameters()]
 # occ_model.pre_train_sphere(1000)
 
+checkpoint = torch.load(os.path.join(ckpt_dir, f'model_{2500}.pt'))
+occ_model.load_state_dict(checkpoint['model_state_dict'])
+occ_embeddings = torch.nn.Embedding(num_shapes, embed_dim).to(device)
+occ_embeddings.load_state_dict(checkpoint['embeddings_state_dict'])
+
 # ------------ optimizer ------------
 optimizer = torch.optim.Adam([{"params": occ_model_params, "lr": lr},
                               {"params": occ_embeddings.parameters(), "lr": lr}])
@@ -254,7 +259,7 @@ def run_flexi(sdf, gt_mesh, pred_occ):
 
 # ------------ training ------------
 if args.train:
-    for it in range(iterations):
+    for it in range(2500, iterations):
         itr_loss = 0
 
         for b in range(num_batches):
