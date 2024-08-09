@@ -44,13 +44,13 @@ lr = 0.001
 iterations = 10000; iterations += 1
 train_res = [512, 512]
 fc_res = 31
-num_shapes = 496
+num_shapes = 8
 batch_size = 8
 each_part_feat = 32
 embed_dim = 128
 ds_id = 19
 ds_start, ds_end = 0, 508
-expt_id = 11
+expt_id = 14
 anchor_idx = -1
 num_batches = num_shapes // batch_size
 
@@ -372,12 +372,14 @@ if args.train:
             batch_geom = torch.einsum('ijk, ikm -> ijm',
                                       batch_part_nodes.to(torch.float32),
                                       batch_node_feat)
+            print(batch_geom.shape)
+            exit(0)
 
             # ------------ occflexi prediction ------------
             learned_xforms, learned_geom, learned_relations,\
             pred_values1, pred_values2, pred_verts_occ, comp_sdf =\
                 run_occ(batch_size, masked_indices, batch_points, batch_embed,
-                        batch_node_feat, batch_adj, batch_part_nodes)
+                        batch_adj, batch_part_nodes)
 
             # ------------ flexi loss ------------
             mesh_loss = 0
