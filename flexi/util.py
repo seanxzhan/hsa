@@ -37,15 +37,31 @@ def translate(x, y, z, device=None):
                          [0, 0, 1, z], 
                          [0, 0, 0, 1]], dtype=torch.float32, device=device)
 
+from scipy.spatial.transform import Rotation as R
+rotx = R.from_euler('x', 15, degrees=True).as_matrix()
+roty = R.from_euler('y', 120, degrees=True).as_matrix()
+rotz = R.from_euler('z', 180, degrees=True).as_matrix()
+rot = rotx @ roty @ rotz
+m = np.zeros((3, 3))
+m[:3, :3] = rot
+m[1] = np.cross(m[0], m[2])
+m[2] = np.cross(m[0], m[1])
+m = m / np.linalg.norm(m, axis=1, keepdims=True)
+m = np.pad(m, [[0, 1], [0, 1]], mode='constant')
+m[3, 3] = 1.0
+m[:3, 3] = 0
+
 @torch.no_grad()
 def random_rotation_translation(t, device=None):
-    m = np.random.normal(size=[3, 3])
-    m[1] = np.cross(m[0], m[2])
-    m[2] = np.cross(m[0], m[1])
-    m = m / np.linalg.norm(m, axis=1, keepdims=True)
-    m = np.pad(m, [[0, 1], [0, 1]], mode='constant')
-    m[3, 3] = 1.0
-    m[:3, 3] = np.random.uniform(-t, t, size=[3])
+    # np.random.seed(0)
+    # m = np.random.normal(size=[3, 3])
+    # m[1] = np.cross(m[0], m[2])
+    # m[2] = np.cross(m[0], m[1])
+    # m = m / np.linalg.norm(m, axis=1, keepdims=True)
+    # m = np.pad(m, [[0, 1], [0, 1]], mode='constant')
+    # m[3, 3] = 1.0
+    # m[:3, 3] = np.random.uniform(-t, t, size=[3])
+    # return torch.tensor(m, dtype=torch.float32, device=device)
     return torch.tensor(m, dtype=torch.float32, device=device)
 
 def rotate_x(a, device=None):
