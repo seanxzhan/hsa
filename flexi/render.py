@@ -20,7 +20,7 @@ import flexi.util as util
 # Functions adapted from https://github.com/NVlabs/nvdiffrec
 ###############################################################################
 
-def get_random_camera_batch(batch_size, fovy = np.deg2rad(45), iter_res=[512,512], cam_near_far=[0.1, 1000.0], cam_radius=3.0, device="cuda", use_kaolin=True):
+def get_random_camera_batch(batch_size, fovy = np.deg2rad(45), iter_res=[512,512], cam_near_far=[0.1, 1000.0], cam_radius=3.0, device="cuda", use_kaolin=True, one_img=False):
     if use_kaolin:
         camera_pos = torch.stack(kal.ops.coords.spherical2cartesian(
             *kal.ops.random.sample_spherical_coords((batch_size,), azimuth_low=0., azimuth_high=math.pi * 2,
@@ -39,7 +39,7 @@ def get_random_camera_batch(batch_size, fovy = np.deg2rad(45), iter_res=[512,512
     else:
         def get_random_camera():
             proj_mtx = util.perspective(fovy, iter_res[1] / iter_res[0], cam_near_far[0], cam_near_far[1])
-            mv     = util.translate(0, 0, -cam_radius) @ util.random_rotation_translation(0.25)
+            mv     = util.translate(0, 0, -cam_radius) @ util.random_rotation_translation(0.25, one_img)
             mvp    = proj_mtx @ mv
             return mv, mvp
         mv_batch = []
@@ -205,7 +205,7 @@ class SplitVisualizer():
         )
         
         full_output = VBox([visualizer.canvas, interactive_slider])
-        display(full_output, visualizer.out)
+        # display(full_output, visualizer.out)
 
 class TimelineVisualizer():
     def __init__(self, meshes, height, width):
@@ -266,4 +266,4 @@ class TimelineVisualizer():
             new_idx=idx_slider
         )
         full_output = HBox([visualizer.canvas, interactive_slider])
-        display(full_output, visualizer.out)
+        # display(full_output, visualizer.out)

@@ -2,7 +2,7 @@ import os
 import importlib
 
 rep = 'occflexi'
-expt = 11
+expt = 14
 mode = 'recon'
 start = 0
 end = 50

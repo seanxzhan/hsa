@@ -12,7 +12,7 @@ from tqdm import tqdm
 from torch.utils.tensorboard import SummaryWriter
 from flexi.flexicubes import FlexiCubes
 from flexi import render, util
-from occ_networks.occflexi_network_9 import SDFDecoder, get_embedder
+from occ_networks.occflexi_network_14 import SDFDecoder, get_embedder
 from utils import misc, ops, reconstruct, tree
 from anytree.exporter import UniqueDotExporter
 from data_prep import preprocess_data_19
@@ -44,7 +44,7 @@ lr = 0.001
 iterations = 10000; iterations += 1
 train_res = [512, 512]
 fc_res = 31
-num_shapes = 8
+num_shapes = 496
 batch_size = 8
 each_part_feat = 32
 embed_dim = 128
@@ -234,14 +234,6 @@ def run_flexi(sdf, gt_mesh=None, pred_occ=None):
             8, iter_res=train_res, device=device, use_kaolin=False)
         target = render.render_mesh_paper(gt_mesh, mv, mvp, train_res)
 
-        # import imageio
-        # gt_mesh.auto_normals()
-        # gt_buffers = render.render_mesh_paper(gt_mesh, mv[:1], mvp[:1],
-        #                                       train_res, return_types=["normal"], white_bg=True)
-        # gt_image = ((gt_buffers["normal"][0].detach().cpu().numpy()+1)/2*255).astype(np.uint8)
-        # imageio.imwrite(os.path.join(results_dir, 'gt.png'), gt_image)
-        # exit(0)
-
         try: 
             buffers = render.render_mesh_paper(flexicubes_mesh, mv, mvp, train_res)
         except Exception as e:
@@ -372,14 +364,16 @@ if args.train:
             batch_geom = torch.einsum('ijk, ikm -> ijm',
                                       batch_part_nodes.to(torch.float32),
                                       batch_node_feat)
-            print(batch_geom.shape)
-            exit(0)
+            
+            bnf = torch.einsum('ijk, ikm -> ijm',
+                               batch_part_nodes.to(torch.float32).swapaxes(1, 2), # 1 7 4 
+                               batch_embed.view(batch_size, num_parts, 32)) # 1 4 32
 
             # ------------ occflexi prediction ------------
             learned_xforms, learned_geom, learned_relations,\
             pred_values1, pred_values2, pred_verts_occ, comp_sdf =\
                 run_occ(batch_size, masked_indices, batch_points, batch_embed,
-                        batch_adj, batch_part_nodes)
+                        bnf, batch_adj, batch_part_nodes)
 
             # ------------ flexi loss ------------
             mesh_loss = 0
@@ -555,9 +549,13 @@ if args.test:
             masked_indices = torch.Tensor([]).to(device, torch.long)
             print("reconstructing...")
 
+        bnf = torch.einsum('ijk, ikm -> ijm',
+                            batch_part_nodes.to(torch.float32).swapaxes(1, 2), # 1 7 4 
+                            batch_embed.view(1, num_parts, 32)) # 1 4 32
+
         learned_xforms, learned_geom, _, pred_values1, _, _, comp_sdf =\
             run_occ(1, masked_indices, query_points, batch_embed,
-                    batch_node_feat, batch_adj, batch_part_nodes, mask_flexi=True)
+                    bnf, batch_adj, batch_part_nodes, mask_flexi=True)
 
         _, flexi_vertices, flexi_faces =\
             run_flexi(torch.flatten(comp_sdf[0]).unsqueeze(0))
