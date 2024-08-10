@@ -31,6 +31,8 @@ parser.add_argument('--asb', action="store_true")
 parser.add_argument('--asb_scaling', action="store_true")
 parser.add_argument('--inv', action="store_true")
 parser.add_argument('--samp', action="store_true")
+parser.add_argument('--comp', action="store_true")
+parser.add_argument('--fixed_indices', '--fi', nargs='+')
 args = parser.parse_args()
 
 # ------------ hyper params ------------
@@ -1399,7 +1401,8 @@ if args.inv:
 
 # ------------ sampling ------------
 if args.samp:
-    # ------------ given structure (bbox xforms), sample geometry ------------
+    # ------------ given bbox geom, sample geometry ------------
+    # NOTE: batch_node_feat has bbox sizes from model_id
     from utils import visualize
     white_bg = True
     it = args.it
@@ -1447,4 +1450,102 @@ if args.samp:
                         eval=False)
     exit(0)
 
+# ------------ shape completion given part ------------
+if args.comp:
+    # ------------ given bbox geom, complete shape ------------
+    # NOTE: batch_node_feat has bbox sizes from model_id
+    from utils import visualize
+    white_bg = True
+    it = args.it
+    model_idx = args.test_idx
+    fixed_parts = args.fixed_indices
+    fixed_parts = [int(x) for x in fixed_parts]
+    unfixed_parts = list(set(range(num_parts)) - set(fixed_parts))
+    anno_id = model_idx_to_anno_id[model_idx]
+    model_id = misc.anno_id_to_model_id(partnet_index_path)[anno_id]
+    print(f"anno id: {anno_id}, model id: {model_id}")
+    parts_str = '-'.join([str(x) for x in fixed_parts])
+    results_dir = os.path.join(results_dir, 'comp', anno_id, parts_str)
+    misc.check_dir(results_dir)
+    print("results dir: ", results_dir)
+
+    # ------------ loading model, embedding, and data ------------
+    checkpoint = torch.load(os.path.join(ckpt_dir, f'model_{it}.pt'))
+    occ_model.load_state_dict(checkpoint['model_state_dict'])
+    occ_embeddings = torch.nn.Embedding(num_shapes, num_parts*each_part_feat).to(device)
+    occ_embeddings.load_state_dict(checkpoint['embeddings_state_dict'])
+    _, _, _, _, batch_node_feat, batch_adj, batch_part_nodes, _, _ =\
+        load_batch(0, 0, model_idx, model_idx+1)
     
+    # ------------ create fixed and unfixed embeddings ------------
+    dim_fixed = len(fixed_parts) * each_part_feat
+    dim_unfixed = num_parts * each_part_feat - dim_fixed
+    fixed_embed = np.zeros((num_shapes, dim_fixed), np.float32)
+    unfixed_embed = np.zeros((num_shapes, dim_unfixed), np.float32)
+    for i, idx in enumerate(fixed_parts):
+        fixed_embed[:num_shapes, i*each_part_feat:(i+1)*each_part_feat] =\
+            occ_embeddings.weight.data.cpu().numpy()[:num_shapes, idx*each_part_feat:(idx+1)*each_part_feat]
+    for i, idx in enumerate(unfixed_parts):
+        unfixed_embed[:num_shapes, i*each_part_feat:(i+1)*each_part_feat] =\
+            occ_embeddings.weight.data.cpu().numpy()[:num_shapes, idx*each_part_feat:(idx+1)*each_part_feat]
+
+    # ------------ fit fixed part embeddings to nearest neighbors ------------
+    from sklearn.decomposition import PCA
+    from sklearn.neighbors import NearestNeighbors
+    num_neighbors = 50
+    num_samples = 10
+    nn_model = NearestNeighbors(n_neighbors=num_neighbors)
+    nn_model.fit(fixed_embed)
+
+    # ------------ sampling functions ------------
+    def sample_conditional(nn_model: NearestNeighbors, fixed_vector, unfixed_part,
+                           num_samples=1):
+        """given fixed_vector, find the n nearest neighbors who have similar 
+           fixed part embeddings. given these neighbors, sample from unfixed PCA
+        """
+        _, indices = nn_model.kneighbors(fixed_vector)
+        nn_unfixed_embed = unfixed_part[indices[0]]
+
+        # gmm = GaussianMixture(n_components=5, covariance_type='full')
+        # gmm.fit(nn_unfixed_embed)
+        # sampled_variance_parts = gmm.sample(num_samples)[0]
+        # return sampled_variance_parts
+
+        pca = PCA(n_components=4)  # Number of components should be <= embedding_dim
+        pca.fit(nn_unfixed_embed)
+        embedddings_pca = pca.transform(nn_unfixed_embed)
+        sampled_pca_embeddings = sample_pca_space(embedddings_pca, num_samples)
+        sampled_lat_embeddings = pca.inverse_transform(sampled_pca_embeddings)
+        sampled_lat_embeddings = torch.from_numpy(sampled_lat_embeddings)
+        return sampled_lat_embeddings
+    def sample_pca_space(xformed_pca, num_samples=10, scale=1.0):
+        mean = np.mean(xformed_pca, axis=0)
+        std_dev = np.std(xformed_pca, axis=0)
+        samples = np.random.normal(mean, std_dev * scale, size=(num_samples, xformed_pca.shape[1]))
+        return samples
+
+    # ------------ shape completion sampling ------------
+    np.random.seed(319)
+    test_embed = occ_embeddings.weight.data.cpu().numpy()[model_idx]
+    fixed_test_embed = np.concatenate([test_embed[i*each_part_feat:(i+1)*each_part_feat] for i in fixed_parts])[None, :]
+    sampled_unfixed_parts = sample_conditional(nn_model, fixed_test_embed , unfixed_embed, num_samples)
+    complete_embed = np.zeros((num_samples, num_parts*each_part_feat), np.float32)
+    for i, idx in enumerate(fixed_parts):
+        complete_embed[:, idx*each_part_feat:(idx+1)*each_part_feat] =\
+            fixed_test_embed[:, i*each_part_feat:(i+1)*each_part_feat]
+    for i, idx in enumerate(unfixed_parts):
+        complete_embed[:, idx*each_part_feat:(idx+1)*each_part_feat] =\
+            sampled_unfixed_parts[:, i*each_part_feat:(i+1)*each_part_feat]
+    complete_embed = torch.from_numpy(complete_embed).to(device)
+
+    # ------------ reconstruct given a sampled geometry embedding ------------
+    for sample_idx in range(num_samples):
+        print(f"sampling {sample_idx+1}/{num_samples}")
+        samp_results_dir = os.path.join(results_dir, str(sample_idx))
+        misc.check_dir(samp_results_dir)
+        batch_embed = complete_embed[sample_idx].unsqueeze(0)
+        recon_one_shape(anno_id, samp_results_dir, args,
+                        batch_embed, batch_node_feat, batch_adj, batch_part_nodes,
+                        eval=False)
+    exit(0)
+
