@@ -1129,8 +1129,8 @@ def get_info_from_voxels(anno_id, res, entire_mesh):
     entire_mesh.export(gt_mesh_path)
     vox_path = os.path.join(obj_dir, f'{anno_id}_{res}.binvox')
     vox_c_path = os.path.join(obj_dir, f'{anno_id}_{res}_c.binvox')
-    if not os.path.exists(vox_c_path):
-    # if True:
+    # if not os.path.exists(vox_c_path):
+    if True:
         ops.setup_vox(obj_dir)
         ops.voxelize_obj(
             obj_dir,
@@ -1237,10 +1237,10 @@ if __name__ == "__main__":
     # exit(0)
     
     # pass two to create the four_parts dataset
-    # good_indices = np.load('data/chair_am_four_parts_16_0_4489.npy')
-    # data_pt = 'data/Chair_train_new_ids_to_objs_16_0_4489.json'
-    good_indices = np.load('data/chair_four_parts_8_0_2000.npy')
-    data_pt = 'data/Chair_train_new_ids_to_objs_8_0_2000.json'
+    good_indices = np.load('data/chair_am_four_parts_16_0_4489.npy')
+    data_pt = 'data/Chair_train_new_ids_to_objs_16_0_4489.json'
+    # good_indices = np.load('data/chair_four_parts_8_0_2000.npy')
+    # data_pt = 'data/Chair_train_new_ids_to_objs_8_0_2000.json'
     # good_indices = np.load('data/lamp_am_five_parts_17_0_1554.npy')
     # data_pt = 'data/Lamp_train_new_ids_to_objs_17_0_1554.json'
     # good_indices = np.load('data/table_am_three_parts_17_0_5707.npy')
@@ -1255,6 +1255,9 @@ if __name__ == "__main__":
         if x['anno_id'] in all_ids:
             ids_w_four_parts.append(x)
     ids_w_four_parts = [ids_w_four_parts[x] for x in good_indices]
+
+    print(len(ids_w_four_parts))
+    exit(0)
 
     export_data(ids_w_four_parts, save_data=True,
                 start=0, end=len(ids_w_four_parts))
