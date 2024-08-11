@@ -12,7 +12,7 @@ from tqdm import tqdm
 from torch.utils.tensorboard import SummaryWriter
 from flexi.flexicubes import FlexiCubes
 from flexi import render, util
-from occ_networks.occflexi_network_14 import SDFDecoder, get_embedder
+from occ_networks.occflexi_network_15 import SDFDecoder, get_embedder
 from utils import misc, ops, reconstruct, tree
 from anytree.exporter import UniqueDotExporter
 from data_prep import preprocess_data_19
@@ -51,6 +51,7 @@ fc_res = 31
 num_shapes = 496
 batch_size = 8
 each_part_feat = 32
+each_box_feat = 8
 embed_dim = 128
 ds_id = 19
 ds_start, ds_end = 0, 508
@@ -76,6 +77,11 @@ print("timelapse dir: ", timelapse_dir)
 timelapse = kaolin.visualize.Timelapse(timelapse_dir)
 logs_path = os.path.join('logs', 'occflexi', f'occflexi_{expt_id}')
 ckpt_dir = os.path.join(logs_path, 'ckpt'); misc.check_dir(ckpt_dir)
+best_ckpt_path = os.path.join(ckpt_dir, 'best_ckpt.pth')
+best_loss_path = os.path.join(ckpt_dir, 'best_loss.txt')
+if os.path.exists(best_loss_path):
+    with open(best_loss_path, 'r') as f: best_loss = float(f.read().strip())
+else: best_loss = float('inf')
 writer = SummaryWriter(os.path.join(logs_path, 'summary'))
 
 # ------------ data loading ------------
@@ -156,7 +162,11 @@ if args.train:
 occ_embeddings = torch.nn.Embedding(num_shapes,
                                     num_parts*each_part_feat).to(device)
 torch.nn.init.normal_(occ_embeddings.weight.data, 0.0,
-                        1 / math.sqrt(num_parts*each_part_feat))
+                      1 / math.sqrt(num_parts*each_part_feat))
+box_embeddings = torch.nn.Embedding(num_shapes,
+                                    num_parts*each_box_feat).to(device)
+torch.nn.init.normal_(box_embeddings.weight.data, 0.0,
+                      1 / math.sqrt(num_parts*each_box_feat))
 
 # ------------ network ------------
 occ_model = SDFDecoder(num_parts=num_parts,
@@ -177,7 +187,8 @@ if args.restart:
 # ------------ optimizer ------------
 # if args.train:
 optimizer = torch.optim.Adam([{"params": occ_model_params, "lr": lr},
-                              {"params": occ_embeddings.parameters(), "lr": lr}])
+                              {"params": occ_embeddings.parameters(), "lr": lr},
+                              {"params": box_embeddings.parameters(), "lr": lr}])
 # def lr_schedule(iter):
 #     return max(0.0, 10**(-(iter)*0.0002)) # Exponential falloff from [1.0, 0.1] over 5k epochs.    
 # def lr_schedule(iter):
@@ -207,6 +218,7 @@ def load_batch(batch_idx, batch_size, start=None, end=None):
         torch.from_numpy(normalized_points[start:end]).to(device, torch.float32),\
         torch.from_numpy(values[start:end]).to(device, torch.float32),\
         occ_embeddings(torch.arange(start, end).to(device)),\
+        box_embeddings(torch.arange(start, end).to(device)),\
         torch.from_numpy(node_features[start:end, :, :3]).to(device, torch.float32),\
         torch.from_numpy(adj[start:end]).to(device, torch.long),\
         torch.from_numpy(part_nodes[start:end]).to(device, torch.long),\
@@ -282,7 +294,8 @@ def run_flexi(sdf, x_nx3, cube_fx8, fc_res, gt_mesh=None, pred_occ=None, one_img
         return None, vertices, faces
 
 # ------------ occupancy ------------
-def run_occ(batch_size, masked_indices, batch_points, batch_embed,
+def run_occ(batch_size, masked_indices, batch_points,
+            batch_occ_embed, batch_box_embed,
             batch_adj, batch_part_nodes,
             flexi_verts, fc_res,
             mask_flexi=False, custom_xforms=None,
@@ -290,7 +303,7 @@ def run_occ(batch_size, masked_indices, batch_points, batch_embed,
             custom_xformed_flexi_verts=None,
             just_bbox_info=False):
     # ------------ parts, points, occ masks ------------
-    parts_mask = torch.zeros((batch_embed.shape[0], num_parts)).to(device, torch.float32)
+    parts_mask = torch.zeros((batch_occ_embed.shape[0], num_parts)).to(device, torch.float32)
     parts_mask[:, masked_indices] = 1
     parts_mask = torch.repeat_interleave(parts_mask, each_part_feat, dim=-1)
     points_mask = torch.zeros((batch_size, num_parts, 1, 1)).to(device, torch.float32)
@@ -298,11 +311,11 @@ def run_occ(batch_size, masked_indices, batch_points, batch_embed,
     occ_mask = torch.zeros((batch_size, 1, num_parts)).to(device, torch.float32)
     occ_mask[:, :, masked_indices] = 1
     
-    # ------------ batch node features (from embedding) ------------
+    # ------------ batch node features (from box embedding) ------------
     batch_node_feat = torch.einsum(
         'ijk, ikm -> ijm',
         batch_part_nodes.to(torch.float32).swapaxes(1, 2), # 1 7 4 
-        batch_embed.view(batch_size, num_parts, 32)) # 1 4 32
+        batch_box_embed.view(batch_size, num_parts, each_box_feat)) # 1 4 32
 
     # ------------ learning bbox & xforms ------------
     batch_vec = torch.arange(start=0, end=batch_size).to(device)
@@ -331,12 +344,12 @@ def run_occ(batch_size, masked_indices, batch_points, batch_embed,
 
     occs1 = occ_model.forward(
         transformed_points.masked_fill(points_mask==1,torch.tensor(0)),
-        batch_embed.masked_fill(parts_mask==1, torch.tensor(0)))
+        batch_occ_embed.masked_fill(parts_mask==1, torch.tensor(0)))
     occs1 = occs1.masked_fill(occ_mask==1,torch.tensor(float('-inf')))
     pred_values1, _ = torch.max(occs1, dim=-1, keepdim=True)
 
     pred_values2, _ = torch.max(occ_model.forward(
-        transformed_points, batch_embed), dim=-1, keepdim=True)
+        transformed_points, batch_occ_embed), dim=-1, keepdim=True)
 
     # ------------ flexi ------------
     if custom_xformed_flexi_verts is None:
@@ -348,12 +361,12 @@ def run_occ(batch_size, masked_indices, batch_points, batch_embed,
 
     if not mask_flexi:
         pred_verts_occ, _ = torch.max(occ_model.forward(
-            transformed_flexi_verts, batch_embed), dim=-1, keepdim=True)
+            transformed_flexi_verts, batch_occ_embed), dim=-1, keepdim=True)
     else:
         pred_verts_occ, _ = torch.max(
             occ_model.forward(
                 transformed_flexi_verts.masked_fill(points_mask==1,torch.tensor(0)),
-                batch_embed.masked_fill(parts_mask==1, torch.tensor(0))
+                batch_occ_embed.masked_fill(parts_mask==1, torch.tensor(0))
                 ).masked_fill(occ_mask==1,torch.tensor(float('-inf'))),
             dim=-1, keepdim=True)
 
@@ -373,7 +386,8 @@ if args.train:
 
             # ------------ loading batch ------------        
             batch_fg_part_indices, batch_points, batch_values,\
-                batch_embed, batch_node_feat, batch_adj, batch_part_nodes,\
+                batch_occ_embed, batch_box_embed,\
+                batch_node_feat, batch_adj, batch_part_nodes,\
                 batch_xforms, batch_relations =\
                 load_batch(b, batch_size)
             batch_gt_meshes = load_meshes(b, batch_size)
@@ -404,7 +418,8 @@ if args.train:
             # ------------ occflexi prediction ------------
             learned_xforms, learned_geom, learned_relations,\
             pred_values1, pred_values2, pred_verts_occ, comp_sdf =\
-                run_occ(batch_size, masked_indices, batch_points, batch_embed,
+                run_occ(batch_size, masked_indices, batch_points,
+                        batch_occ_embed, batch_box_embed,
                         batch_adj, batch_part_nodes,
                         flexi_verts, fc_res)
 
@@ -442,6 +457,7 @@ if args.train:
 
         # ------------ logging ------------
         writer.add_scalar('iteration loss', total_loss, it)
+        writer.add_scalar('avg loss', itr_loss, it)
         writer.add_scalar('loss1', loss1, it)
         writer.add_scalar('loss2', loss2, it)
         writer.add_scalar('mesh', mesh_loss, it)
@@ -456,7 +472,7 @@ if args.train:
                     x_nx3, torch.flatten(comp_sdf[-1]), cube_fx8,
                     fc_res, training=False)
             print('Iteration {} - loss: {:.5f}, '.format(it, total_loss)+
-                  '# of mesh vertices: {}, # of mesh faces: {}'.format(
+                  'vertices #: {}, faces #: {}'.format(
                     vertices.shape[0], faces.shape[0]))
             # print('Iteration {} - loss: {:.5f}, '.format(it, total_loss))
             timelapse.add_mesh_batch(
@@ -478,13 +494,23 @@ if args.train:
             torch.save({
                 'epoch': it,
                 'model_state_dict': occ_model.state_dict(),
-                'embeddings_state_dict': occ_embeddings.state_dict(),
+                'occ_embeddings_state_dict': occ_embeddings.state_dict(),
+                'box_embeddings_state_dict': box_embeddings.state_dict(),
                 'total_loss': total_loss,
                 }, os.path.join(ckpt_dir, f'model_{it}.pt'))
+        if itr_loss < best_loss:
+            best_loss = itr_loss
+            with open(best_loss_path, 'w') as f: f.write(f'{best_loss:.8f}')
+            torch.save({
+                'epoch': it,
+                'model_state_dict': occ_model.state_dict(),
+                'occ_embeddings_state_dict': occ_embeddings.state_dict(),
+                'box_embeddings_state_dict': box_embeddings.state_dict(),
+                'itr_loss': itr_loss,
+            }, best_ckpt_path)
     writer.close()
 
 # ------------ one shape bbox info ------------
-# def infer_bbox_info(args, batch_embed=None):
 def infer_bbox_info(args):
     """returns: learned xforms, learned bbox geoms
     """
@@ -496,7 +522,7 @@ def infer_bbox_info(args):
     # occ_model.load_state_dict(checkpoint['model_state_dict'])
     # occ_embeddings = torch.nn.Embedding(num_shapes, num_parts*each_part_feat).to(device)
     # occ_embeddings.load_state_dict(checkpoint['embeddings_state_dict'])
-    _, _, _, batch_embed, _, batch_adj, batch_part_nodes, _, _ =\
+    _, _, _, batch_occ_embed, batch_box_embed, _, batch_adj, batch_part_nodes, _, _ =\
         load_batch(0, 0, model_idx, model_idx+1)
 
     # ------------ run inference ------------
@@ -504,7 +530,7 @@ def infer_bbox_info(args):
         masked_indices = torch.Tensor([]).to(device, torch.long)
 
         learned_xforms, learned_geom =\
-            run_occ(1, masked_indices, None, batch_embed,
+            run_occ(1, masked_indices, None, batch_occ_embed, batch_box_embed,
                     batch_adj, batch_part_nodes,
                     flexi_verts, fc_res,
                     just_bbox_info=True)
@@ -513,7 +539,7 @@ def infer_bbox_info(args):
 
 # ------------ reconstruct one shape ------------
 def recon_one_shape(anno_id, results_dir, args,
-                    batch_embed, batch_node_feat, batch_adj, batch_part_nodes,
+                    batch_occ_embed, batch_box_embed, batch_adj, batch_part_nodes,
                     eval=True):
     # ------------ gt bboxes ------------
     _, _, _, _, name_to_obbs, _, _, _, _, _ =\
@@ -570,7 +596,8 @@ def recon_one_shape(anno_id, results_dir, args,
             print("reconstructing...")
 
         learned_xforms, learned_geom, _, pred_values1, _, _, comp_sdf =\
-            run_occ(1, masked_indices, query_points, batch_embed,
+            run_occ(1, masked_indices, query_points,
+                    batch_occ_embed, batch_box_embed,
                     batch_adj, batch_part_nodes,
                     flexi_verts, fc_res,
                     mask_flexi=True)
@@ -719,15 +746,21 @@ if args.test:
     print("results dir: ", results_dir)
 
     # ------------ loading model, embedding, and data ------------
-    checkpoint = torch.load(os.path.join(ckpt_dir, f'model_{it}.pt'))
+    if it is None:
+        checkpoint = torch.load(best_ckpt_path)
+        print(f"best checkpoint occurred at iteration {checkpoint['epoch']}")
+    else:
+        checkpoint = torch.load(os.path.join(ckpt_dir, f'model_{it}.pt'))
     occ_model.load_state_dict(checkpoint['model_state_dict'])
     occ_embeddings = torch.nn.Embedding(num_shapes, num_parts*each_part_feat).to(device)
-    occ_embeddings.load_state_dict(checkpoint['embeddings_state_dict'])
-    _, _, _, batch_embed, batch_node_feat, batch_adj, batch_part_nodes, _, _ =\
+    occ_embeddings.load_state_dict(checkpoint['occ_embeddings_state_dict'])
+    box_embeddings = torch.nn.Embedding(num_shapes, num_parts*each_box_feat).to(device)
+    box_embeddings.load_state_dict(checkpoint['box_embeddings_state_dict'])
+    _, _, _, batch_occ_embed, batch_box_embed, _, batch_adj, batch_part_nodes, _, _ =\
         load_batch(0, 0, model_idx, model_idx+1)
 
     recon_one_shape(anno_id, results_dir, args,
-                    batch_embed, batch_node_feat, batch_adj, batch_part_nodes)
+                    batch_occ_embed, batch_box_embed, batch_adj, batch_part_nodes)
     exit(0)
 
 # ------------ assembly ------------
@@ -871,7 +904,8 @@ if args.asb:
         # ------------ using learned xforms ------------
         learned_xforms, learned_geom, learned_relations,\
             pred_values1, _, pred_verts_occ, comp_sdf =\
-            run_occ(1, masked_indices, query_points, batch_embed,
+            run_occ(1, masked_indices, query_points, 
+                    batch_occ_embed, batch_box_embed,
                     batch_adj, batch_part_nodes,
                     flexi_verts, fc_res,
                     mask_flexi=True)
@@ -881,7 +915,8 @@ if args.asb:
         
         # ------------ using gt xforms ------------
         _, _, _, prex_pred_values1, _, prex_pred_verts_occ, prex_comp_sdf =\
-            run_occ(1, masked_indices, query_points, batch_embed,
+            run_occ(1, masked_indices, query_points, 
+                    batch_occ_embed, batch_box_embed,
                     batch_adj, batch_part_nodes, 
                     flexi_verts, fc_res,
                     mask_flexi=True,
@@ -1139,7 +1174,8 @@ if args.asb_scaling:
 
         # ------------ using learned xforms ------------
         learned_xforms, learned_geom, _, _, _, _, _ =\
-            run_occ(1, masked_indices, query_points, batch_embed,
+            run_occ(1, masked_indices, query_points,
+                    batch_occ_embed, batch_box_embed,
                     batch_adj, batch_part_nodes, 
                     flexi_verts, fc_res,
                     mask_flexi=True)
@@ -1148,7 +1184,8 @@ if args.asb_scaling:
         
         # ------------ using gt xforms ------------
         _, _, _, prex_pred_values1, _, prex_pred_verts_occ, prex_comp_sdf =\
-            run_occ(1, masked_indices, query_points, batch_embed,
+            run_occ(1, masked_indices, query_points, 
+                    batch_occ_embed, batch_box_embed,
                     batch_adj, batch_part_nodes,
                     flexi_verts, fc_res,
                     mask_flexi=True, custom_xforms=gt_xforms)
@@ -1203,7 +1240,8 @@ if args.asb_scaling:
     with torch.no_grad():
         # ------------ using learned xforms ------------
         _, _, _, pred_values1, _, pred_verts_occ, comp_sdf =\
-            run_occ(1, masked_indices, None, batch_embed,
+            run_occ(1, masked_indices, None, 
+                    batch_occ_embed, batch_box_embed,
                     batch_adj, batch_part_nodes, 
                     flexi_verts, fc_res,
                     mask_flexi=True,
@@ -1318,8 +1356,6 @@ if args.inv:
     checkpoint = torch.load(os.path.join(ckpt_dir, f'model_{it}.pt'))
     occ_model.load_state_dict(checkpoint['model_state_dict'])
     occ_model.eval()
-    # _, batch_points, batch_values, _, batch_node_feat, batch_adj, batch_part_nodes, _, _ =\
-    #     load_batch(0, 0, model_idx, model_idx+1)
     batch_gt_meshes = [my_load_mesh(model_idx)]
     batch_points = torch.from_numpy(normalized_points[model_idx:model_idx+1]).to(device, torch.float32)
     batch_values = torch.from_numpy(values[model_idx:model_idx+1]).to(device, torch.float32)
@@ -1364,7 +1400,7 @@ if args.inv:
             batch_node_feat = torch.einsum(
                 'ijk, ikm -> ijm',
                 batch_part_nodes.to(torch.float32).swapaxes(1, 2), # 1 7 4 
-                batch_embed.view(1, num_parts, 32)) # 1 4 32
+                batch_embed.view(1, num_parts, each_box_feat)) # 1 4 32
             
             # ------------ learning bbox & xforms ------------
             batch_vec = torch.arange(start=0, end=1).to(device)
@@ -1415,10 +1451,10 @@ if args.inv:
     batch_node_feat = torch.einsum(
         'ijk, ikm -> ijm',
         batch_part_nodes.to(torch.float32).swapaxes(1, 2), # 1 7 4 
-        batch_embed.view(1, num_parts, 32)) # 1 4 32
+        batch_embed.view(1, num_parts, each_box_feat)) # 1 4 32
 
     recon_one_shape(anno_id, results_dir, args,
-                    batch_embed, batch_node_feat, batch_adj, batch_part_nodes)
+                    batch_occ_embed, batch_box_embed, batch_adj, batch_part_nodes)
     exit(0)
 
 # ------------ sampling ------------
@@ -1441,7 +1477,7 @@ if args.samp:
     occ_model.load_state_dict(checkpoint['model_state_dict'])
     occ_embeddings = torch.nn.Embedding(num_shapes, num_parts*each_part_feat).to(device)
     occ_embeddings.load_state_dict(checkpoint['embeddings_state_dict'])
-    _, _, _, _, batch_node_feat, batch_adj, batch_part_nodes, _, _ =\
+    _, _, _, _, _, batch_node_feat, batch_adj, batch_part_nodes, _, _ =\
         load_batch(0, 0, model_idx, model_idx+1)
     
     # ------------ sample a geometry embedding ------------
@@ -1468,7 +1504,7 @@ if args.samp:
         misc.check_dir(samp_results_dir)
         batch_embed = samp_lat_embeddings[sample_idx].to(device, torch.float32).unsqueeze(0)
         recon_one_shape(anno_id, samp_results_dir, args,
-                        batch_embed, batch_node_feat, batch_adj, batch_part_nodes,
+                        batch_occ_embed, batch_box_embed, batch_adj, batch_part_nodes,
                         eval=False)
     exit(0)
 
@@ -1496,7 +1532,7 @@ if args.comp:
     occ_model.load_state_dict(checkpoint['model_state_dict'])
     occ_embeddings = torch.nn.Embedding(num_shapes, num_parts*each_part_feat).to(device)
     occ_embeddings.load_state_dict(checkpoint['embeddings_state_dict'])
-    _, _, _, _, batch_node_feat, batch_adj, batch_part_nodes, _, _ =\
+    _, _, _, _, _, batch_node_feat, batch_adj, batch_part_nodes, _, _ =\
         load_batch(0, 0, model_idx, model_idx+1)
     
     # ------------ create fixed and unfixed embeddings ------------
@@ -1567,7 +1603,7 @@ if args.comp:
         misc.check_dir(samp_results_dir)
         batch_embed = complete_embed[sample_idx].unsqueeze(0)
         recon_one_shape(anno_id, samp_results_dir, args,
-                        batch_embed, batch_node_feat, batch_adj, batch_part_nodes,
+                        batch_occ_embed, batch_box_embed, batch_adj, batch_part_nodes,
                         eval=False)
     exit(0)
 
