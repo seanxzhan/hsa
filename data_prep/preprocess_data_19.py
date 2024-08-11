@@ -212,7 +212,14 @@ def build_obbs(anno_id, part_info: Dict):
     
     entire_mesh_orig = trimesh.util.concatenate(all_mesh_parts)
 
-    return obbs, entire_mesh_orig, name_to_obbs, concat_part_meshes
+    norm_verts = torch.from_numpy(entire_mesh_orig.vertices).to(torch.float32)
+    norm_verts = norm_verts.unsqueeze(0)
+    norm_verts = kaolin.ops.pointcloud.center_points(norm_verts,
+                                                     normalize=True)
+    norm_verts = norm_verts.numpy()[0]
+    norm_mesh = trimesh.Trimesh(norm_verts, entire_mesh_orig.faces)
+
+    return obbs, entire_mesh_orig, name_to_obbs, concat_part_meshes, norm_mesh
 
 
 def condense_obbs(obbs):
@@ -544,7 +551,7 @@ def merge_partnet_after_merging(anno_id, info=False):
         return None, None, None, None, None, None, anno_id, valid
 
     # -------- build bounding boxes --------
-    obbs, entire_mesh, name_to_obbs, part_meshes = build_obbs(anno_id, merged_parts_info)
+    obbs, entire_mesh, name_to_obbs, part_meshes, norm_mesh = build_obbs(anno_id, merged_parts_info)
 
     def complete_hier_to_part_class_hier(new_root_node, node_to_add):
         """only add to new node if the name is new in new_root_node
@@ -599,7 +606,7 @@ def merge_partnet_after_merging(anno_id, info=False):
 
     valid = True
     return unique_part_names, name_to_ori_ids_and_objs,\
-        obbs, entire_mesh, name_to_obbs, part_meshes, new_root_node,\
+        obbs, entire_mesh, name_to_obbs, part_meshes, norm_mesh, new_root_node,\
         anno_id, valid
 
 
@@ -626,6 +633,7 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
     dict_all_obbs = {}
     dict_all_entire_meshes = {}
     dict_all_part_meshes = {}
+    dict_all_norm_meshes = {}
     dict_all_name_to_obbs = {}
     dict_all_root_nodes = {}
     dict_all_valid_anno_ids = {}
@@ -640,6 +648,7 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
     set_dict(dict_all_obbs, split_ids[start:end])
     set_dict(dict_all_entire_meshes, split_ids[start:end])
     set_dict(dict_all_part_meshes, split_ids[start:end])
+    set_dict(dict_all_norm_meshes, split_ids[start:end])
     set_dict(dict_all_name_to_obbs, split_ids[start:end])
     set_dict(dict_all_root_nodes, split_ids[start:end])
     set_dict(dict_all_valid_anno_ids, split_ids[start:end])
@@ -656,7 +665,7 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
     while True:
         flag = True
         try:
-            unique_names, part_map, obbs, entire_mesh, name_to_obbs, part_meshes, \
+            unique_names, part_map, obbs, entire_mesh, name_to_obbs, part_meshes, norm_mesh, \
                 root_node, anno_id, valid = q.get(True, 1.0)
         except queue.Empty:
             flag = False
@@ -668,6 +677,7 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
                 dict_all_obbs[anno_id] = obbs
                 dict_all_entire_meshes[anno_id] = entire_mesh
                 dict_all_part_meshes[anno_id] = part_meshes
+                dict_all_norm_meshes[anno_id] = norm_mesh
                 dict_all_name_to_obbs[anno_id] = name_to_obbs
                 dict_all_root_nodes[anno_id] = root_node
                 dict_all_valid_anno_ids[anno_id] = True
@@ -693,6 +703,7 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
     all_obbs = []
     all_entire_meshes = []
     all_part_meshes = []
+    all_norm_meshes = []
     all_name_to_obbs = []
     all_root_nodes = []
     all_valid_anno_ids = []
@@ -704,6 +715,7 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
             all_obbs.append(dict_all_obbs[k])
             all_entire_meshes.append(dict_all_entire_meshes[k])
             all_part_meshes.append(dict_all_part_meshes[k])
+            all_norm_meshes.append(dict_all_norm_meshes[k])
             all_name_to_obbs.append(dict_all_name_to_obbs[k])
             all_root_nodes.append(dict_all_root_nodes[k])
             all_valid_anno_ids.append(k)
@@ -866,40 +878,46 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
     hdf5_file.create_dataset(
         'extents', [num_shapes, num_parts, 3],
         dtype=np.float32)
-    hdf5_file.create_dataset(
-        'transformed_points', [num_shapes, num_parts, (pt_sample_res/2)**3, 3],
-        dtype=np.float32)
-    hdf5_file.create_dataset(
-        'empty_parts', [num_shapes, (pt_sample_res/2)**3, num_parts],
-        dtype=np.uint8)
+    # hdf5_file.create_dataset(
+    #     'transformed_points', [num_shapes, num_parts, (pt_sample_res/2)**3, 3],
+    #     dtype=np.float32)
+    # hdf5_file.create_dataset(
+    #     'empty_parts', [num_shapes, (pt_sample_res/2)**3, num_parts],
+    #     dtype=np.uint8)
     hdf5_file.create_dataset(
         'relations', [num_shapes, 4, 4, 4],
         # 'relations', [num_shapes, 3, 4, 4],
         dtype=np.float32)
+    # hdf5_file.create_dataset(
+    #     'part_verts_0', [num_shapes, ],
+    #     dtype=h5py.vlen_dtype(np.float32))
+    # hdf5_file.create_dataset(
+    #     'part_faces_0', [num_shapes, ],
+    #     dtype=h5py.vlen_dtype(np.float32))
+    # hdf5_file.create_dataset(
+    #     'part_verts_1', [num_shapes, ],
+    #     dtype=h5py.vlen_dtype(np.float32))
+    # hdf5_file.create_dataset(
+    #     'part_faces_1', [num_shapes, ],
+    #     dtype=h5py.vlen_dtype(np.float32))
+    # hdf5_file.create_dataset(
+    #     'part_verts_2', [num_shapes, ],
+    #     dtype=h5py.vlen_dtype(np.float32))
+    # hdf5_file.create_dataset(
+    #     'part_faces_2', [num_shapes, ],
+    #     dtype=h5py.vlen_dtype(np.float32))
+    # hdf5_file.create_dataset(
+    #     'part_verts_3', [num_shapes, ],
+    #     dtype=h5py.vlen_dtype(np.float32))
+    # hdf5_file.create_dataset(
+    #     'part_faces_3', [num_shapes, ],
+    #     dtype=h5py.vlen_dtype(np.float32))
     hdf5_file.create_dataset(
-        'part_verts_0', [num_shapes, ],
+        'verts', [num_shapes, ],
         dtype=h5py.vlen_dtype(np.float32))
     hdf5_file.create_dataset(
-        'part_faces_0', [num_shapes, ],
-        dtype=h5py.vlen_dtype(np.float32))
-    hdf5_file.create_dataset(
-        'part_verts_1', [num_shapes, ],
-        dtype=h5py.vlen_dtype(np.float32))
-    hdf5_file.create_dataset(
-        'part_faces_1', [num_shapes, ],
-        dtype=h5py.vlen_dtype(np.float32))
-    hdf5_file.create_dataset(
-        'part_verts_2', [num_shapes, ],
-        dtype=h5py.vlen_dtype(np.float32))
-    hdf5_file.create_dataset(
-        'part_faces_2', [num_shapes, ],
-        dtype=h5py.vlen_dtype(np.float32))
-    hdf5_file.create_dataset(
-        'part_verts_3', [num_shapes, ],
-        dtype=h5py.vlen_dtype(np.float32))
-    hdf5_file.create_dataset(
-        'part_faces_3', [num_shapes, ],
-        dtype=h5py.vlen_dtype(np.float32))
+        'faces', [num_shapes, ],
+        dtype=h5py.vlen_dtype(np.int64))
 
     # all_pts_data = []
     # all_pts_whole_data = []
@@ -922,25 +940,27 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
         hdf5_file['xforms'][i] = all_xforms[i]
         hdf5_file['extents'][i] = all_extents[i]
         hdf5_file['relations'][i] = all_relations[i]
-        hdf5_file['part_verts_0'][i] = all_part_meshes[i][0].vertices.flatten()
-        hdf5_file['part_verts_1'][i] = all_part_meshes[i][1].vertices.flatten()
-        hdf5_file['part_verts_2'][i] = all_part_meshes[i][2].vertices.flatten()
-        hdf5_file['part_verts_3'][i] = all_part_meshes[i][3].vertices.flatten()
-        hdf5_file['part_faces_0'][i] = all_part_meshes[i][0].faces.flatten()
-        hdf5_file['part_faces_1'][i] = all_part_meshes[i][1].faces.flatten()
-        hdf5_file['part_faces_2'][i] = all_part_meshes[i][2].faces.flatten()
-        hdf5_file['part_faces_3'][i] = all_part_meshes[i][3].faces.flatten()
+        hdf5_file['verts'][i] = all_norm_meshes[i].vertices.flatten()
+        hdf5_file['faces'][i] = all_norm_meshes[i].faces.flatten()
+        # hdf5_file['part_verts_0'][i] = all_part_meshes[i][0].vertices.flatten()
+        # hdf5_file['part_verts_1'][i] = all_part_meshes[i][1].vertices.flatten()
+        # hdf5_file['part_verts_2'][i] = all_part_meshes[i][2].vertices.flatten()
+        # hdf5_file['part_verts_3'][i] = all_part_meshes[i][3].vertices.flatten()
+        # hdf5_file['part_faces_0'][i] = all_part_meshes[i][0].faces.flatten()
+        # hdf5_file['part_faces_1'][i] = all_part_meshes[i][1].faces.flatten()
+        # hdf5_file['part_faces_2'][i] = all_part_meshes[i][2].faces.flatten()
+        # hdf5_file['part_faces_3'][i] = all_part_meshes[i][3].faces.flatten()
         # all_pts_data.append(out['pts_data'])
         # all_pts_whole_data.append(out['pts_whole_data'])
 
-        for p in range(num_parts):
-            xform = all_xforms[i][p]
-            pts = out['normalized_points'][0]
-            hdf5_file['transformed_points'][i, p] =\
-                transform.transform_points(pts, xform)
-        hdf5_file['empty_parts'][i] = 1-torch.from_numpy(
-            all_part_nodes[i][0]).sum(1).unsqueeze(1).expand(
-                -1, len(pts)).transpose(0, 1).numpy()
+        # for p in range(num_parts):
+        #     xform = all_xforms[i][p]
+        #     pts = out['normalized_points'][0]
+        #     hdf5_file['transformed_points'][i, p] =\
+        #         transform.transform_points(pts, xform)
+        # hdf5_file['empty_parts'][i] = 1-torch.from_numpy(
+        #     all_part_nodes[i][0]).sum(1).unsqueeze(1).expand(
+        #         -1, len(pts)).transpose(0, 1).numpy()
 
     hdf5_file.close()
 
@@ -1021,16 +1041,16 @@ def make_data_for_one(anno_id,
     partnet_pcd_part_points = np.concatenate(partnet_pcd_part_points, axis=0)
     partnet_pcd_part_labels = np.concatenate(partnet_pcd_part_labels, axis=0)
     
-    pts_data = Data(pos=partnet_pcd_part_points,
-                    part_label=partnet_pcd_part_labels)
+    # pts_data = Data(pos=partnet_pcd_part_points,
+    #                 part_label=partnet_pcd_part_labels)
 
-    partnet_pcd_norm = kaolin.ops.pointcloud.center_points(
-            torch.from_numpy(partnet_pcd_in_fg_vox_grid).unsqueeze(0),
-            normalize=True)
-    partnet_pcd_norm = partnet_pcd_norm[0].to(torch.float32)
+    # partnet_pcd_norm = kaolin.ops.pointcloud.center_points(
+    #         torch.from_numpy(partnet_pcd_in_fg_vox_grid).unsqueeze(0),
+    #         normalize=True)
+    # partnet_pcd_norm = partnet_pcd_norm[0].to(torch.float32)
 
-    pts_data_whole = Data(pos=partnet_pcd_norm,
-                          part_label=torch.from_numpy(new_labels).to(torch.int64))
+    # pts_data_whole = Data(pos=partnet_pcd_norm,
+    #                       part_label=torch.from_numpy(new_labels).to(torch.int64))
 
     sdf_grid = ops.bin2sdf(input=fg_voxels)
     sdf_grid = np.swapaxes(sdf_grid, 0, 2)
@@ -1114,8 +1134,8 @@ def make_data_for_one(anno_id,
         'normalized_points': normalized_points,     # 1, num_points, 3
         'values': values,                           # 1, num_points, 1
         'occ': occ,                           # 1, num_points, 1
-        'pts_data': pts_data,
-        'pts_whole_data': pts_data_whole
+        # 'pts_data': pts_data,
+        # 'pts_whole_data': pts_data_whole
     }
 
 
@@ -1256,13 +1276,10 @@ if __name__ == "__main__":
             ids_w_four_parts.append(x)
     ids_w_four_parts = [ids_w_four_parts[x] for x in good_indices]
 
-    print(len(ids_w_four_parts))
-    exit(0)
-
     export_data(ids_w_four_parts, save_data=True,
                 start=0, end=len(ids_w_four_parts))
     # export_data(ids_w_four_parts, save_data=True,
-    #             start=0, end=10)
+    #             start=0, end=3)
     # print(ids_w_four_parts[:50])
     exit(0)
 

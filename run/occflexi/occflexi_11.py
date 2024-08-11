@@ -498,7 +498,7 @@ def recon_one_shape(anno_id, results_dir, args,
                     batch_embed, batch_node_feat, batch_adj, batch_part_nodes,
                     eval=True):
     # ------------ gt bboxes ------------
-    _, _, _, _, name_to_obbs, _, _, _, _ =\
+    _, _, _, _, name_to_obbs, _, _, _, _, _ =\
         preprocess_data_19.merge_partnet_after_merging(anno_id)
     with open(f'data/{cat_name}_part_name_to_new_id_19_{ds_start}_{ds_end}.json', 'r') as f:
         unique_name_to_new_id = json.load(f)
@@ -1329,7 +1329,7 @@ if args.inv:
 
     # ------------ optimize for embedding ------------
     # ['just_occ', 'just_flexi', 'one_img']
-    inv_mode = 'one_img'
+    inv_mode = 'just_occ'
     if inv_mode == 'just_occ':    
         optimizer = torch.optim.Adam(
             [{"params": occ_embeddings.parameters(), "lr": 0.01}])
@@ -1384,7 +1384,8 @@ if args.inv:
                 total_loss = one_mesh_loss
 
             if (i+1) % 100 == 0:  # Print loss every 100 iterations
-                print(f'Iteration {i+1}/{num_iterations}, Loss: {total_loss.item()}')
+                print('Iteration {}/{}, Loss: {:.4f}'.format(
+                    i+1, num_iterations, total_loss.item()))
 
             total_loss.backward()
             optimizer.step()

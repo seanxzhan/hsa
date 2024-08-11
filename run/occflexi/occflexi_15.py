@@ -20,6 +20,7 @@ from data_prep import preprocess_data_19
 parser = argparse.ArgumentParser()
 parser.add_argument('--id', type=str)
 parser.add_argument('--train', action="store_true")
+parser.add_argument('--restart', action="store_true")
 parser.add_argument('--it', type=int)
 parser.add_argument('--test', action="store_true")
 parser.add_argument('--test_idx', '--ti', type=int)
@@ -53,7 +54,7 @@ each_part_feat = 32
 embed_dim = 128
 ds_id = 19
 ds_start, ds_end = 0, 508
-expt_id = 14
+expt_id = 15
 anchor_idx = -1
 num_batches = num_shapes // batch_size
 
@@ -166,10 +167,12 @@ occ_model = SDFDecoder(num_parts=num_parts,
 occ_model_params = [p for _, p in occ_model.named_parameters()]
 embed_fn, _ = get_embedder(2)
 
-checkpoint = torch.load(os.path.join(ckpt_dir, f'model_{7000}.pt'))
-occ_model.load_state_dict(checkpoint['model_state_dict'])
-occ_embeddings = torch.nn.Embedding(num_shapes, embed_dim).to(device)
-occ_embeddings.load_state_dict(checkpoint['embeddings_state_dict'])
+# ------------ restarting from another checkpoint ------------
+if args.restart:
+    checkpoint = torch.load(os.path.join(ckpt_dir, f'model_{args.it}.pt'))
+    occ_model.load_state_dict(checkpoint['model_state_dict'])
+    occ_embeddings = torch.nn.Embedding(num_shapes, embed_dim).to(device)
+    occ_embeddings.load_state_dict(checkpoint['embeddings_state_dict'])
 
 # ------------ optimizer ------------
 # if args.train:
@@ -362,8 +365,8 @@ def run_occ(batch_size, masked_indices, batch_points, batch_embed,
 
 # ------------ training ------------
 if args.train:
-    # for it in range(iterations):
-    for it in range(7000, iterations):
+    starting_it = 0 if not args.restart else args.it
+    for it in range(starting_it, iterations):
         itr_loss = 0
         for b in range(num_batches):
             optimizer.zero_grad()
