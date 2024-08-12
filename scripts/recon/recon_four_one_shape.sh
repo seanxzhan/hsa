@@ -5,8 +5,7 @@ expt=$2
 it=$3
 ti=$4
 
-
-echo "Running ${rep}_${expt} on idx ${ti}"
+echo "Running reconstruction on ${rep}_${expt} with idx ${ti}"
 
 python run/${rep}/${rep}_$expt.py --test --it $it --ti $ti
 python run/${rep}/${rep}_$expt.py --test --it $it --ti $ti --mask --ro --parts 0

@@ -55,7 +55,7 @@ each_box_feat = 8
 embed_dim = 128
 ds_id = 19
 ds_start, ds_end = 0, 508
-expt_id = 15
+expt_id = 16
 anchor_idx = -1
 num_batches = num_shapes // batch_size
 
@@ -188,7 +188,7 @@ if args.restart:
 # if args.train:
 optimizer = torch.optim.Adam([{"params": occ_model_params, "lr": lr},
                               {"params": occ_embeddings.parameters(), "lr": lr},
-                              {"params": box_embeddings.parameters(), "lr": lr}])
+                              {"params": box_embeddings.parameters(), "lr": 5*lr}])
 # def lr_schedule(iter):
 #     return max(0.0, 10**(-(iter)*0.0002)) # Exponential falloff from [1.0, 0.1] over 5k epochs.    
 # def lr_schedule(iter):

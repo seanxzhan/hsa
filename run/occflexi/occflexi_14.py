@@ -1341,7 +1341,7 @@ if args.inv:
     inv_mode = 'just_occ'
     if inv_mode == 'just_occ':    
         optimizer = torch.optim.Adam(
-            [{"params": occ_embeddings.parameters(), "lr": 0.01}])
+            [{"params": occ_embeddings.parameters(), "lr": 0.0075}])
     if inv_mode == 'just_flexi':
         # for just mesh
         optimizer = torch.optim.Adam(
@@ -1398,7 +1398,7 @@ if args.inv:
                 total_loss = one_mesh_loss
 
             if (i+1) % 100 == 0:  # Print loss every 100 iterations
-                print('Iteration {}/{}, Loss: {:.4f}'.format(
+                print('Iteration {}/{}, Loss: {:.8f}'.format(
                     i+1, num_iterations, total_loss.item()))
 
             total_loss.backward()
