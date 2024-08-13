@@ -3,7 +3,8 @@ import importlib
 
 rep = 'occflexi'
 expt = 15
-mode = 'asb_scaling'
+mode = 'samp'
+types = ['occ', 'bbox', 'both']
 
 module = importlib.import_module(f"run.{rep}.{rep}_{expt}")
 model_idx_to_anno_id = getattr(module, "model_idx_to_anno_id")
@@ -11,11 +12,11 @@ model_idx_to_anno_id = getattr(module, "model_idx_to_anno_id")
 
 # Path pattern for the images
 base_path = f"/projects/hsa/results/{rep}/{rep}_{expt}/"
-image_pattern = mode + "/{anno_str}/{parts_str}/assembly_results.png"
+image_pattern = mode + "/{shape_idx}/{type}/{samp_idx}/{shape_idx}_results.png"
 placeholder_path = "none.png"
 
 # Function to generate HTML content
-def generate_html(anno_strs,
+def generate_html(shape_indices,
                   output_file=os.path.join(
                       base_path,
                       f"results_{mode}.html")):
@@ -23,7 +24,7 @@ def generate_html(anno_strs,
     <!DOCTYPE html>
     <html>
     <head>
-        <title>Shape Assembly (Scaled) Results</title>
+        <title>Shape Sampling Results</title>
         <style>
             .anno-header {
                 width: 100%;
@@ -39,12 +40,18 @@ def generate_html(anno_strs,
             }
             .container {
                 display: none; /* Initially hide all containers */
-                flex-wrap: wrap;
-                justify-content: space-around;
+                width: 100%;
+                box-sizing: border-box;
+            }
+            .column {
+                display: flex;
+                flex-direction: column;
                 align-items: center;
+                width: calc(100% / 3);
+                box-sizing: border-box;
+                padding: 5px;
             }
             .item {
-                width: 45%;
                 margin: 10px;
                 text-align: center;
                 border: 1px solid black;
@@ -72,26 +79,35 @@ def generate_html(anno_strs,
         </script>
     </head>
     <body>
-        <h2>Shape Assembly (Scaled) Results</h2>
+        <h2>Shape Sampling Results</h2>
     """
 
-    for idx, anno_str in enumerate(anno_strs):
+    for idx, shape_idx in enumerate(shape_indices):
         html_content += f"""
         <div class="anno-header" onclick="toggleVisibility('container-{idx}')">
-            {anno_str}
+            {shape_idx}
         </div>
         <div class="container" id="container-{idx}">
         """
-        parts_strs = os.listdir(os.path.join(base_path, mode, anno_str))
-        for parts_str in parts_strs:
-            image_path = image_pattern.format(anno_str=anno_str, parts_str=parts_str)
-            if not os.path.exists(os.path.join(base_path, image_path)):
-                image_path = placeholder_path
+        for t in types:
             html_content += f"""
-                <div class="item">
-                    <h3>{anno_str}_{parts_str}</h3>
-                    <img src="{image_path}" alt="Shape {anno_str}_{parts_str} results">
-                </div>
+            <div class="column">
+                <h3>{t}</h3>
+            """
+            samp_indices = sorted(os.listdir(os.path.join(base_path, mode, shape_idx, t)), key=int)
+            for samp_idx in samp_indices:
+                image_path = image_pattern.format(
+                    shape_idx=shape_idx, type=t, samp_idx=samp_idx)
+                if not os.path.exists(os.path.join(base_path, image_path)):
+                    image_path = placeholder_path
+                html_content += f"""
+                    <div class="item">
+                        <h4>{shape_idx}_{t}_{samp_idx}</h4>
+                        <img src="{image_path}" alt="Shape {shape_idx}_{t}_{samp_idx} results">
+                    </div>
+                """
+            html_content += """
+            </div>
             """
         html_content += """
         </div>
@@ -108,5 +124,5 @@ def generate_html(anno_strs,
     print(f"HTML file '{output_file}' generated successfully.")
 
 # Generate the HTML file
-anno_strs = os.listdir(os.path.join(base_path, mode))
-generate_html(anno_strs)
+shape_indices = os.listdir(os.path.join(base_path, mode))
+generate_html(shape_indices)

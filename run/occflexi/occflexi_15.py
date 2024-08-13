@@ -1531,11 +1531,17 @@ if args.samp:
     print("results dir: ", results_dir)
 
     # ------------ loading model, embedding, and data ------------
-    checkpoint = torch.load(os.path.join(ckpt_dir, f'model_{it}.pt'))
+    if it is None or it == -1:
+        checkpoint = torch.load(best_ckpt_path)
+        print(f"best checkpoint occurred at iteration {checkpoint['epoch']}")
+    else:
+        checkpoint = torch.load(os.path.join(ckpt_dir, f'model_{it}.pt'))
     occ_model.load_state_dict(checkpoint['model_state_dict'])
     occ_embeddings = torch.nn.Embedding(num_shapes, num_parts*each_part_feat).to(device)
-    occ_embeddings.load_state_dict(checkpoint['embeddings_state_dict'])
-    _, _, _, _, _, batch_node_feat, batch_adj, batch_part_nodes, _, _ =\
+    occ_embeddings.load_state_dict(checkpoint['occ_embeddings_state_dict'])
+    box_embeddings = torch.nn.Embedding(num_shapes, num_parts*each_box_feat).to(device)
+    box_embeddings.load_state_dict(checkpoint['box_embeddings_state_dict'])
+    _, _, _, batch_occ_embed, batch_box_embed, _, batch_adj, batch_part_nodes, _, _ =\
         load_batch(0, 0, model_idx, model_idx+1)
     
     # ------------ sample a geometry embedding ------------
@@ -1550,19 +1556,38 @@ if args.samp:
     scale = 1.0  # Adjust scale to control the diversity of generated shapes
     pca = PCA(n_components=4)  # Number of components should be <= embedding_dim
     pca.fit(occ_embeddings.weight.data.cpu().numpy()[:num_shapes])
-    embedddings_pca = pca.transform(occ_embeddings.weight.data.cpu().numpy()[:num_shapes])
-    samp_pca_embeddings = sample_pca_space(embedddings_pca, num_samples, scale)
-    samp_lat_embeddings = pca.inverse_transform(samp_pca_embeddings)
-    samp_lat_embeddings = torch.from_numpy(samp_lat_embeddings)
+    occ_embedddings_pca = pca.transform(occ_embeddings.weight.data.cpu().numpy()[:num_shapes])
+    samp_pca_occ_embeddings = sample_pca_space(occ_embedddings_pca, num_samples, scale)
+    samp_lat_occ_embeddings = pca.inverse_transform(samp_pca_occ_embeddings)
+    samp_lat_occ_embeddings = torch.from_numpy(samp_lat_occ_embeddings)
+    pca = PCA(n_components=4)  # Number of components should be <= embedding_dim
+    pca.fit(box_embeddings.weight.data.cpu().numpy()[:num_shapes])
+    box_embedddings_pca = pca.transform(box_embeddings.weight.data.cpu().numpy()[:num_shapes])
+    samp_pca_box_embeddings = sample_pca_space(box_embedddings_pca, num_samples, scale)
+    samp_lat_box_embeddings = pca.inverse_transform(samp_pca_box_embeddings)
+    samp_lat_box_embeddings = torch.from_numpy(samp_lat_box_embeddings)
     
     # ------------ reconstruct given a sampled geometry embedding ------------
     for sample_idx in range(num_samples):
-        print(f"sampling {sample_idx+1}/{num_samples}")
-        samp_results_dir = os.path.join(results_dir, str(sample_idx))
+        samp_batch_occ_embed = samp_lat_occ_embeddings[sample_idx].to(device, torch.float32).unsqueeze(0)
+        samp_batch_box_embed = samp_lat_box_embeddings[sample_idx].to(device, torch.float32).unsqueeze(0)
+        print(f"sampling {sample_idx+1}/{num_samples} geom, keeping bbox")
+        samp_results_dir = os.path.join(results_dir, 'occ', str(sample_idx))
         misc.check_dir(samp_results_dir)
-        batch_embed = samp_lat_embeddings[sample_idx].to(device, torch.float32).unsqueeze(0)
         recon_one_shape(anno_id, samp_results_dir, args,
-                        batch_occ_embed, batch_box_embed, batch_adj, batch_part_nodes,
+                        samp_batch_occ_embed, batch_box_embed, batch_adj, batch_part_nodes,
+                        eval=False)
+        print(f"sampling {sample_idx+1}/{num_samples} bbox, keeping geom")
+        samp_results_dir = os.path.join(results_dir, 'bbox', str(sample_idx))
+        misc.check_dir(samp_results_dir)
+        recon_one_shape(anno_id, samp_results_dir, args,
+                        batch_occ_embed, samp_batch_box_embed, batch_adj, batch_part_nodes,
+                        eval=False)
+        print(f"sampling {sample_idx+1}/{num_samples} geom and bbox")
+        samp_results_dir = os.path.join(results_dir, 'both', str(sample_idx))
+        misc.check_dir(samp_results_dir)
+        recon_one_shape(anno_id, samp_results_dir, args,
+                        samp_batch_occ_embed, samp_batch_box_embed, batch_adj, batch_part_nodes,
                         eval=False)
     exit(0)
 
@@ -1589,8 +1614,8 @@ if args.comp:
     checkpoint = torch.load(os.path.join(ckpt_dir, f'model_{it}.pt'))
     occ_model.load_state_dict(checkpoint['model_state_dict'])
     occ_embeddings = torch.nn.Embedding(num_shapes, num_parts*each_part_feat).to(device)
-    occ_embeddings.load_state_dict(checkpoint['embeddings_state_dict'])
-    _, _, _, _, _, batch_node_feat, batch_adj, batch_part_nodes, _, _ =\
+    occ_embeddings.load_state_dict(checkpoint['occ_embeddings_state_dict'])
+    _, _, _, batch_occ_embed, batch_box_embed, _, batch_adj, batch_part_nodes, _, _ =\
         load_batch(0, 0, model_idx, model_idx+1)
     
     # ------------ create fixed and unfixed embeddings ------------

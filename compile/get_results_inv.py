@@ -24,7 +24,7 @@ def generate_html(image_indices,
     <!DOCTYPE html>
     <html>
     <head>
-        <title>Shape Reconstruction Results</title>
+        <title>Shape Inversion Results</title>
         <style>
             table {
                 width: 100%;
@@ -49,7 +49,7 @@ def generate_html(image_indices,
         </style>
     </head>
     <body>
-        <h2>Shape Reconstruction Results</h2>
+        <h2>Shape Inversion Results</h2>
         <table>
             <tr>
                 <th class="fixed-width">Shape Index</th>
