@@ -2,28 +2,27 @@ import os
 import importlib
 
 rep = 'occflexi'
-expt = 10
-mode = 'recon'
-start = 0
-end = 50
-# batch_size = 10
+expt = 15
+mode = 'recon'; start = 0; end = 50
 
 module = importlib.import_module(f"run.{rep}.{rep}_{expt}")
 model_idx_to_anno_id = getattr(module, "model_idx_to_anno_id")
 shape_indices = [model_idx_to_anno_id[i] for i in range(start, end)]
 
 # Path pattern for the images
-# base_path = f"/projects/hsa/results/{rep}_{expt}-bs-{batch_size}/64/"
 base_path = f"/projects/hsa/results/{rep}/{rep}_{expt}/"
-image_pattern = "{shape_idx}/{shape_idx}_results_10.png"
+image_pattern = mode + "/{shape_idx}/{shape_idx}_results.png"
+disentang_pattern0 = mode + "/{shape_idx}/{shape_idx}_results_mask_1-2-3.png"
+disentang_pattern1 = mode + "/{shape_idx}/{shape_idx}_results_mask_0-2-3.png"
+disentang_pattern2 = mode + "/{shape_idx}/{shape_idx}_results_mask_0-1-3.png"
+disentang_pattern3 = mode + "/{shape_idx}/{shape_idx}_results_mask_0-1-2.png"
 placeholder_path = "none.png"
-# placeholder_path = "/projects/hsa/compile/none.png"
 
 # Function to generate HTML content
 def generate_html(image_indices,
                   output_file=os.path.join(
                       base_path,
-                      f"{mode}_results_{start}_{end}.html")):
+                      f"results_{mode}_{start}_{end}.html")):
     html_content = """
     <!DOCTYPE html>
     <html>
@@ -63,12 +62,25 @@ def generate_html(image_indices,
 
     for idx in image_indices:
         image_path = image_pattern.format(shape_idx=idx)
+        disentang_pattern0_path = disentang_pattern0.format(shape_idx=idx)
+        disentang_pattern1_path = disentang_pattern1.format(shape_idx=idx)
+        disentang_pattern2_path = disentang_pattern2.format(shape_idx=idx)
+        disentang_pattern3_path = disentang_pattern3.format(shape_idx=idx)
         if not os.path.exists(os.path.join(base_path, image_path)): image_path = placeholder_path
+        if not os.path.exists(os.path.join(base_path, disentang_pattern0_path)): disentang_pattern0_path = placeholder_path
+        if not os.path.exists(os.path.join(base_path, disentang_pattern1_path)): disentang_pattern1_path = placeholder_path
+        if not os.path.exists(os.path.join(base_path, disentang_pattern2_path)): disentang_pattern2_path = placeholder_path
+        if not os.path.exists(os.path.join(base_path, disentang_pattern3_path)): disentang_pattern3_path = placeholder_path
         html_content += f"""
             <tr>
                 <td class="fixed-width">{idx}</td>
                 <td>
                 <img src="{image_path}" alt="Shape {idx} results" width="200">
+                <br>
+                <img src="{disentang_pattern0_path}" alt="{idx} disentang 0" width="200">
+                <img src="{disentang_pattern1_path}" alt="{idx} disentang 1" width="200">
+                <img src="{disentang_pattern2_path}" alt="{idx} disentang 2" width="200">
+                <img src="{disentang_pattern3_path}" alt="{idx} disentang 3" width="200">
                 </td>
             </tr>
         """

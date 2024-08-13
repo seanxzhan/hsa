@@ -30,6 +30,8 @@ parser.add_argument('--recon_one_part', '--ro', action="store_true")
 parser.add_argument('--recon_the_rest', '--rt', action="store_true")
 parser.add_argument('--asb', action="store_true")
 parser.add_argument('--asb_scaling', action="store_true")
+parser.add_argument('--anno_ids', '--ai', nargs='+')
+parser.add_argument('--part_indices', '--pi', nargs='+')
 parser.add_argument('--inv', action="store_true")
 parser.add_argument('--samp', action="store_true")
 parser.add_argument('--comp', action="store_true")
@@ -181,8 +183,10 @@ embed_fn, _ = get_embedder(2)
 if args.restart:
     checkpoint = torch.load(os.path.join(ckpt_dir, f'model_{args.it}.pt'))
     occ_model.load_state_dict(checkpoint['model_state_dict'])
-    occ_embeddings = torch.nn.Embedding(num_shapes, embed_dim).to(device)
-    occ_embeddings.load_state_dict(checkpoint['embeddings_state_dict'])
+    occ_embeddings = torch.nn.Embedding(num_shapes, num_parts*each_part_feat).to(device)
+    occ_embeddings.load_state_dict(checkpoint['occ_embeddings_state_dict'])
+    box_embeddings = torch.nn.Embedding(num_shapes, num_parts*each_box_feat).to(device)
+    box_embeddings.load_state_dict(checkpoint['box_embeddings_state_dict'])
 
 # ------------ optimizer ------------
 # if args.train:
@@ -1047,13 +1051,15 @@ if args.asb_scaling:
     from utils import visualize
     white_bg = True
     it = args.it
+    anno_ids = args.anno_ids
+    part_indices = args.part_indices; part_indices = [int(i) for i in part_indices]
 
     # anno_ids = ['2787', '41264', '39704', '43005']
     # anno_ids = ['41378', '40825', '42312', '3144']
     # anno_ids = ['38208', '3366', '49530', '37454']
     # anno_ids = ['40825', '42312', '3144', '41378']
-    anno_ids = ['42312', '3144', '41378', '40825']
-    part_indices = [0, 1, 2, 3]
+    # anno_ids = ['42312', '3144', '41378', '40825']
+    # part_indices = [0, 1, 2, 3]
 
     # ------------ loading model, embedding, and data ------------
     if it is None or it == -1:
@@ -1084,8 +1090,10 @@ if args.asb_scaling:
         source_exts.append(ext)
 
     # ------------ anno ids and model indices mapping ------------
-    asb_str = '-'.join([str(x) for x in anno_ids+part_indices])
-    results_dir = os.path.join(results_dir, 'asb_scaling', asb_str)
+    # asb_str = '-'.join([str(x) for x in anno_ids+part_indices])
+    anno_str = '-'.join([str(x) for x in anno_ids])
+    parts_str = '-'.join([str(x) for x in part_indices])
+    results_dir = os.path.join(results_dir, 'asb_scaling', anno_str, parts_str)
     misc.check_dir(results_dir)
     print("results dir: ", results_dir)
     with open(os.path.join(results_dir, 'ids.txt'), 'w') as f:
@@ -1410,9 +1418,12 @@ if args.inv:
     # ['both', 'just_occ', 'just_flexi', 'one_img']
     inv_mode = 'both'
     if inv_mode == 'both':
+        # optimizer = torch.optim.Adam(
+        #     [{"params": occ_embeddings.parameters(), "lr": 0.0075},
+        #      {"params": box_embeddings.parameters(), "lr": 0.0075}])
         optimizer = torch.optim.Adam(
-            [{"params": occ_embeddings.parameters(), "lr": 0.0075},
-             {"params": box_embeddings.parameters(), "lr": 0.0075}])
+            [{"params": occ_embeddings.parameters(), "lr": 0.001},
+             {"params": box_embeddings.parameters(), "lr": 0.001}])
     if inv_mode == 'just_occ':
         optimizer = torch.optim.Adam(
             [{"params": occ_embeddings.parameters(), "lr": 0.0075},
@@ -1427,7 +1438,7 @@ if args.inv:
         optimizer = torch.optim.Adam(
             [{"params": occ_embeddings.parameters(), "lr": 0.075},
              {"params": box_embeddings.parameters(), "lr": 0.075}])
-    num_iterations = 3001
+    num_iterations = 10001
     if not os.path.exists(occ_embedding_fp):
         print("optimizing for embedding...")
         pbar = tqdm(range(num_iterations), desc='Loss: -', miniters=100)

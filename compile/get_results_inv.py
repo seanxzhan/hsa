@@ -1,24 +1,25 @@
 import os
 import importlib
 
-expt = 83
-module = importlib.import_module(f"run.local.local_{expt}")
-model_idx_to_anno_id = getattr(module, "model_idx_to_anno_id")
-# from run.local.local_77 import model_idx_to_anno_id
+rep = 'occflexi'
+expt = 15
+mode = 'inv'; start = 496; end = 508
+# batch_size = 10
 
-start = 0
-end = 100
+module = importlib.import_module(f"run.{rep}.{rep}_{expt}")
+model_idx_to_anno_id = getattr(module, "model_idx_to_anno_id")
 shape_indices = [model_idx_to_anno_id[i] for i in range(start, end)]
 
 # Path pattern for the images
-base_path = f"/projects/hsa/results/local_{expt}-bs-10/64/"
-image_pattern = "{shape_idx}/{shape_idx}_results.png"
+base_path = f"/projects/hsa/results/{rep}/{rep}_{expt}/"
+image_pattern = mode + "/{shape_idx}/{shape_idx}_results.png"
 placeholder_path = "none.png"
 
 # Function to generate HTML content
 def generate_html(image_indices,
-                  output_file=os.path.join(base_path,
-                                           f"shape_reconstruction_results_{start}_{end}.html")):
+                  output_file=os.path.join(
+                      base_path,
+                      f"results_{mode}_{start}_{end}.html")):
     html_content = """
     <!DOCTYPE html>
     <html>

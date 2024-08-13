@@ -1,2 +1,4 @@
-nohup python -u scripts/tests/py_run_test.py &> tmp/run_test.out < /dev/null &
-echo $! > tmp/run_test.txt
+mode=$1
+
+nohup python -u scripts/tests/py_run_${mode}.py &> tmp/run_${mode}.out < /dev/null &
+echo $! > tmp/run_${mode}.txt

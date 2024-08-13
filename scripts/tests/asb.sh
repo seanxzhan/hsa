@@ -1,7 +1,10 @@
 #!/bin/bash
 
-expt=$1
-it=$2
+rep=$1
+expt=$2
+it=$3
+ti=$4
 
-python run/local/local_${expt}.py --asb --it ${it} --anno_ids $3 $4 $5 $6
+echo "Running inversion on ${rep}_${expt} with idx ${ti}"
 
+python run/${rep}/${rep}_$expt.py --inv --it $it --ti $ti
