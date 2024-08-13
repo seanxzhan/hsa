@@ -4,7 +4,7 @@ import subprocess
 devnull = open(os.devnull, 'w')
 
 rep = 'occflexi'
-test = 'samp'; r = range(0, 10)
+test = 'samp'; r = range(0, 20)
 expt = 15; it = -1
 
 for i in r:

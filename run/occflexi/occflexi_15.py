@@ -34,6 +34,7 @@ parser.add_argument('--anno_ids', '--ai', nargs='+')
 parser.add_argument('--part_indices', '--pi', nargs='+')
 parser.add_argument('--inv', action="store_true")
 parser.add_argument('--samp', action="store_true")
+parser.add_argument('--samp_both', '--sb', action="store_true")
 parser.add_argument('--comp', action="store_true")
 parser.add_argument('--fixed_indices', '--fi', nargs='+')
 args = parser.parse_args()
@@ -544,10 +545,13 @@ def infer_bbox_info(args):
 # ------------ reconstruct one shape ------------
 def recon_one_shape(anno_id, results_dir, args,
                     batch_occ_embed, batch_box_embed, batch_adj, batch_part_nodes,
-                    eval=True):
+                    eval=True, custom_name_to_obbs=None, recon_gt=True):
     # ------------ gt bboxes ------------
-    _, _, _, _, name_to_obbs, _, _, _, _, _ =\
-        preprocess_data_19.merge_partnet_after_merging(anno_id)
+    if custom_name_to_obbs is None:
+        _, _, _, _, name_to_obbs, _, _, _, _, _ =\
+            preprocess_data_19.merge_partnet_after_merging(anno_id)
+    else:
+        name_to_obbs = custom_name_to_obbs
     with open(f'data/{cat_name}_part_name_to_new_id_19_{ds_start}_{ds_end}.json', 'r') as f:
         unique_name_to_new_id = json.load(f)
     part_obbs = []
@@ -566,9 +570,13 @@ def recon_one_shape(anno_id, results_dir, args,
     learned_obbs_path = os.path.join(results_dir, 'obbs_pred.png')
     obbs_path = os.path.join(results_dir, 'obbs_gt.png')
     mesh_flexi_path = os.path.join(results_dir, 'mesh_flexi.png')
-    lst_paths = [
-        obbs_path, mesh_gt_path,
-        learned_obbs_path, mesh_occ_path, mesh_flexi_path]
+    if recon_gt:
+        lst_paths = [
+            obbs_path, mesh_gt_path,
+            learned_obbs_path, mesh_occ_path, mesh_flexi_path]
+    else:
+        lst_paths = [
+            learned_obbs_path, mesh_occ_path, mesh_flexi_path]
 
     # ------------ making query points ------------
     query_points = reconstruct.make_query_points(pt_sample_res)
@@ -655,12 +663,12 @@ def recon_one_shape(anno_id, results_dir, args,
     unmasked_indices = list(set(range(num_parts)) - set(masked_indices))
 
     # ------------ gt mesh ------------
-    if not args.mask:
+    if recon_gt and not args.mask:
         obj_dir = os.path.join(partnet_dir, anno_id, 'vox_models')
         assert os.path.exists(obj_dir)
         gt_mesh_path = os.path.join(obj_dir, f'{anno_id}.obj')
         gt_mesh = trimesh.load(gt_mesh_path, file_type='obj', force='mesh')
-    else:
+    elif recon_gt and args.mask:
         partnet_objs_dir = os.path.join(partnet_dir, anno_id, 'objs')
         lst_of_part_meshes = []
         model_new_ids_to_obj_names: Dict = train_new_ids_to_objs[anno_id]
@@ -684,12 +692,13 @@ def recon_one_shape(anno_id, results_dir, args,
             # don't show stuff in masked_indices
             gt_mesh = trimesh.util.concatenate(
                 [lst_of_part_meshes[x] for x in unmasked_indices])
-    mesh_gt = ops.export_mesh_norm(torch.from_numpy(gt_mesh.vertices),
-                                   torch.from_numpy(gt_mesh.faces),
-                                   os.path.join(results_dir, 'mesh_gt.obj'))
-    mesh_gt.visual.vertex_colors = gt_color
-    visualize.save_mesh_vis(mesh_gt, mesh_gt_path,
-                            mag=mag, white_bg=white_bg)
+    if recon_gt:
+        mesh_gt = ops.export_mesh_norm(torch.from_numpy(gt_mesh.vertices),
+                                    torch.from_numpy(gt_mesh.faces),
+                                    os.path.join(results_dir, 'mesh_gt.obj'))
+        mesh_gt.visual.vertex_colors = gt_color
+        visualize.save_mesh_vis(mesh_gt, mesh_gt_path,
+                                mag=mag, white_bg=white_bg)
 
     if eval:
         # ------------ evaluation ------------
@@ -713,7 +722,7 @@ def recon_one_shape(anno_id, results_dir, args,
     obbs_of_interest = list(itertools.chain(*obbs_of_interest))
     visualize.save_obbs_vis(obbs_of_interest,
                             obbs_path, mag=mag, white_bg=white_bg,
-                            unmasked_indices=unmasked_indices)
+                            unmasked_indices=unmasked_indices) if recon_gt else None
     
     learned_obbs_of_interest = [learned_obbs_of_interest[x] for x in unmasked_indices]
     learned_obbs_of_interest = list(itertools.chain(*learned_obbs_of_interest))
@@ -1526,6 +1535,7 @@ if args.samp:
     anno_id = model_idx_to_anno_id[model_idx]
     model_id = misc.anno_id_to_model_id(partnet_index_path)[anno_id]
     print(f"anno id: {anno_id}, model id: {model_id}")
+    top_level_results_dir = results_dir
     results_dir = os.path.join(results_dir, 'samp', anno_id)
     misc.check_dir(results_dir)
     print("results dir: ", results_dir)
@@ -1567,28 +1577,41 @@ if args.samp:
     samp_lat_box_embeddings = pca.inverse_transform(samp_pca_box_embeddings)
     samp_lat_box_embeddings = torch.from_numpy(samp_lat_box_embeddings)
     
+    _, _, _, _, name_to_obbs, _, _, _, _, _ =\
+        preprocess_data_19.merge_partnet_after_merging(anno_id)
+
+    if args.samp_both:
+        for sample_idx in range(num_samples):
+            samp_batch_occ_embed = samp_lat_occ_embeddings[sample_idx].to(device, torch.float32).unsqueeze(0)
+            samp_batch_box_embed = samp_lat_box_embeddings[sample_idx].to(device, torch.float32).unsqueeze(0)
+            print(f"sampling {sample_idx+1}/{num_samples} geom and bbox")
+            samp_results_dir = os.path.join(
+                os.path.join(top_level_results_dir, 'samp', 'both'), str(sample_idx))
+            misc.check_dir(samp_results_dir)
+            recon_one_shape('both', samp_results_dir, args,
+                            samp_batch_occ_embed, samp_batch_box_embed, batch_adj, batch_part_nodes,
+                            eval=False, custom_name_to_obbs=name_to_obbs,
+                            recon_gt=False)
+        exit(0)
+
     # ------------ reconstruct given a sampled geometry embedding ------------
     for sample_idx in range(num_samples):
         samp_batch_occ_embed = samp_lat_occ_embeddings[sample_idx].to(device, torch.float32).unsqueeze(0)
         samp_batch_box_embed = samp_lat_box_embeddings[sample_idx].to(device, torch.float32).unsqueeze(0)
         print(f"sampling {sample_idx+1}/{num_samples} geom, keeping bbox")
-        samp_results_dir = os.path.join(results_dir, 'occ', str(sample_idx))
+        samp_results_dir = os.path.join(results_dir, str(sample_idx))
         misc.check_dir(samp_results_dir)
         recon_one_shape(anno_id, samp_results_dir, args,
                         samp_batch_occ_embed, batch_box_embed, batch_adj, batch_part_nodes,
                         eval=False)
-        print(f"sampling {sample_idx+1}/{num_samples} bbox, keeping geom")
-        samp_results_dir = os.path.join(results_dir, 'bbox', str(sample_idx))
-        misc.check_dir(samp_results_dir)
-        recon_one_shape(anno_id, samp_results_dir, args,
-                        batch_occ_embed, samp_batch_box_embed, batch_adj, batch_part_nodes,
-                        eval=False)
-        print(f"sampling {sample_idx+1}/{num_samples} geom and bbox")
-        samp_results_dir = os.path.join(results_dir, 'both', str(sample_idx))
-        misc.check_dir(samp_results_dir)
-        recon_one_shape(anno_id, samp_results_dir, args,
-                        samp_batch_occ_embed, samp_batch_box_embed, batch_adj, batch_part_nodes,
-                        eval=False)
+        # # This experiment doesn't make too much sense, bbox would be about the same
+        # print(f"sampling {sample_idx+1}/{num_samples} bbox, keeping geom")
+        # samp_results_dir = os.path.join(results_dir, 'bbox', str(sample_idx))
+        # misc.check_dir(samp_results_dir)
+        # recon_one_shape(anno_id, samp_results_dir, args,
+        #                 batch_occ_embed, samp_batch_box_embed, batch_adj, batch_part_nodes,
+        #                 eval=False)
+
     exit(0)
 
 # ------------ shape completion given part ------------

@@ -3,7 +3,7 @@ import importlib
 
 rep = 'occflexi'
 expt = 15
-mode = 'inv'; start = 496; end = 508
+mode = 'inv_j_occ'; start = 496; end = 508
 # batch_size = 10
 
 module = importlib.import_module(f"run.{rep}.{rep}_{expt}")
