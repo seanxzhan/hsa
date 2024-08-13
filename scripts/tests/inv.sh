@@ -8,3 +8,7 @@ ti=$4
 echo "Running inversion on ${rep}_${expt} with idx ${ti}"
 
 python run/${rep}/${rep}_$expt.py --inv --it $it --ti $ti
+python run/${rep}/${rep}_$expt.py --inv --it $it --ti $ti --mask --ro --parts 0
+python run/${rep}/${rep}_$expt.py --inv --it $it --ti $ti --mask --ro --parts 1
+python run/${rep}/${rep}_$expt.py --inv --it $it --ti $ti --mask --ro --parts 2
+python run/${rep}/${rep}_$expt.py --inv --it $it --ti $ti --mask --ro --parts 3

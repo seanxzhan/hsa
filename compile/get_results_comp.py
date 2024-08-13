@@ -3,16 +3,18 @@ import importlib
 
 rep = 'occflexi'
 expt = 15
-mode = 'samp'
-types = ['occ', 'bbox', 'both']
+mode = 'comp'
+types = ['geom', 'both']
+start = 0
+end = 20
 
 module = importlib.import_module(f"run.{rep}.{rep}_{expt}")
 model_idx_to_anno_id = getattr(module, "model_idx_to_anno_id")
-# shape_indices = [model_idx_to_anno_id[i] for i in range(start, end)]
+shape_indices = [model_idx_to_anno_id[i] for i in range(start, end)]
 
 # Path pattern for the images
 base_path = f"/projects/hsa/results/{rep}/{rep}_{expt}/"
-image_pattern = mode + "/{shape_idx}/{type}/{samp_idx}/{shape_idx}_results.png"
+image_pattern = mode + "/{shape_idx}/{type}/{fixed_indices}/{samp_idx}/{shape_idx}_results.png"
 placeholder_path = "none.png"
 
 # Function to generate HTML content
@@ -24,7 +26,7 @@ def generate_html(shape_indices,
     <!DOCTYPE html>
     <html>
     <head>
-        <title>Shape Sampling Results</title>
+        <title>Shape Completion Results</title>
         <style>
             .anno-header {
                 width: 100%;
@@ -33,8 +35,7 @@ def generate_html(shape_indices,
                 font-weight: bold;
                 padding: 10px;
                 border: 2px solid black;
-                margin-top: 20px;
-                margin-bottom: 10px;
+                margin: 20px auto;
                 box-sizing: border-box;
                 cursor: pointer;
             }
@@ -47,7 +48,7 @@ def generate_html(shape_indices,
                 display: flex;
                 flex-direction: column;
                 align-items: center;
-                width: calc(100% / 3);
+                width: calc(100% / 2);
                 box-sizing: border-box;
                 padding: 5px;
             }
@@ -57,6 +58,7 @@ def generate_html(shape_indices,
                 border: 1px solid black;
                 padding: 10px;
                 box-sizing: border-box;
+                cursor: pointer;
             }
             img {
                 height: 100px;
@@ -65,6 +67,18 @@ def generate_html(shape_indices,
             h3 {
                 margin: 0;
                 padding-bottom: 5px;
+                text-align: center;
+            }
+            h4 {
+                margin: 5px 0;
+                cursor: pointer;
+                color: blue;
+                text-decoration: underline;
+            }
+            .images {
+                display: none;
+                flex-direction: column;
+                align-items: center;
             }
         </style>
         <script>
@@ -76,10 +90,19 @@ def generate_html(shape_indices,
                     container.style.display = "none";
                 }
             }
+
+            function toggleImages(id) {
+                var images = document.getElementById(id);
+                if (images.style.display === "none" || images.style.display === "") {
+                    images.style.display = "flex";
+                } else {
+                    images.style.display = "none";
+                }
+            }
         </script>
     </head>
     <body>
-        <h2>Shape Sampling Results</h2>
+        <h2 style="text-align: center;">Shape Completion Results</h2>
     """
 
     for idx, shape_idx in enumerate(shape_indices):
@@ -94,17 +117,27 @@ def generate_html(shape_indices,
             <div class="column">
                 <h3>{t}</h3>
             """
-            samp_indices = sorted(os.listdir(os.path.join(base_path, mode, shape_idx, t)), key=int)
-            for samp_idx in samp_indices:
-                image_path = image_pattern.format(
-                    shape_idx=shape_idx, type=t, samp_idx=samp_idx)
-                if not os.path.exists(os.path.join(base_path, image_path)):
-                    image_path = placeholder_path
+            lst_fixed_indices = sorted(
+                os.listdir(os.path.join(base_path, mode, shape_idx, t)), key=str)
+            for fixed_idx, fixed_indices in enumerate(lst_fixed_indices):
                 html_content += f"""
-                    <div class="item">
-                        <h4>{shape_idx}_{t}_{samp_idx}</h4>
-                        <img src="{image_path}" alt="Shape {shape_idx}_{t}_{samp_idx} results">
-                    </div>
+                <h4 onclick="toggleImages('images-{idx}-{t}-{fixed_idx}')">{fixed_indices}</h4>
+                <div class="images" id="images-{idx}-{t}-{fixed_idx}">
+                """
+                samp_indices = sorted(
+                    os.listdir(os.path.join(base_path, mode, shape_idx, t, fixed_indices)), key=int)
+                for samp_idx in samp_indices:
+                    image_path = image_pattern.format(
+                        shape_idx=shape_idx, type=t, fixed_indices=fixed_indices, samp_idx=samp_idx)
+                    if not os.path.exists(os.path.join(base_path, image_path)):
+                        image_path = placeholder_path
+                    html_content += f"""
+                        <div class="item">
+                            <img src="{image_path}" alt="Shape {shape_idx}_{t}_{samp_idx} results">
+                        </div>
+                    """
+                html_content += """
+                </div>
                 """
             html_content += """
             </div>
@@ -124,5 +157,4 @@ def generate_html(shape_indices,
     print(f"HTML file '{output_file}' generated successfully.")
 
 # Generate the HTML file
-shape_indices = os.listdir(os.path.join(base_path, mode))
 generate_html(shape_indices)

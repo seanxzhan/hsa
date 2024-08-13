@@ -545,7 +545,8 @@ def infer_bbox_info(args):
 # ------------ reconstruct one shape ------------
 def recon_one_shape(anno_id, results_dir, args,
                     batch_occ_embed, batch_box_embed, batch_adj, batch_part_nodes,
-                    eval=True, custom_name_to_obbs=None, recon_gt=True):
+                    eval=True, custom_name_to_obbs=None,
+                    recon_gt=True, mask_gt=False):
     # ------------ gt bboxes ------------
     if custom_name_to_obbs is None:
         _, _, _, _, name_to_obbs, _, _, _, _, _ =\
@@ -571,9 +572,15 @@ def recon_one_shape(anno_id, results_dir, args,
     obbs_path = os.path.join(results_dir, 'obbs_gt.png')
     mesh_flexi_path = os.path.join(results_dir, 'mesh_flexi.png')
     if recon_gt:
-        lst_paths = [
-            obbs_path, mesh_gt_path,
-            learned_obbs_path, mesh_occ_path, mesh_flexi_path]
+        if not mask_gt:
+            lst_paths = [
+                obbs_path, mesh_gt_path,
+                learned_obbs_path, mesh_occ_path, mesh_flexi_path]
+        else:
+            mask_mesh_gt_path = os.path.join(results_dir, 'mask_mesh_gt.png')
+            lst_paths = [
+                obbs_path, mesh_gt_path, mask_mesh_gt_path,
+                learned_obbs_path, mesh_occ_path, mesh_flexi_path]
     else:
         lst_paths = [
             learned_obbs_path, mesh_occ_path, mesh_flexi_path]
@@ -663,12 +670,22 @@ def recon_one_shape(anno_id, results_dir, args,
     unmasked_indices = list(set(range(num_parts)) - set(masked_indices))
 
     # ------------ gt mesh ------------
+    if mask_gt:
+        parts = args.parts
+        parts = [int(x) for x in parts]
     if recon_gt and not args.mask:
         obj_dir = os.path.join(partnet_dir, anno_id, 'vox_models')
         assert os.path.exists(obj_dir)
         gt_mesh_path = os.path.join(obj_dir, f'{anno_id}.obj')
         gt_mesh = trimesh.load(gt_mesh_path, file_type='obj', force='mesh')
-    elif recon_gt and args.mask:
+        if mask_gt:
+            mesh_gt = ops.export_mesh_norm(torch.from_numpy(gt_mesh.vertices),
+                                           torch.from_numpy(gt_mesh.faces),
+                                           os.path.join(results_dir, 'mesh_gt.obj'))
+            mesh_gt.visual.vertex_colors = gt_color
+            visualize.save_mesh_vis(mesh_gt, mesh_gt_path,
+                                    mag=mag, white_bg=white_bg)
+    if recon_gt and (args.mask or mask_gt):
         partnet_objs_dir = os.path.join(partnet_dir, anno_id, 'objs')
         lst_of_part_meshes = []
         model_new_ids_to_obj_names: Dict = train_new_ids_to_objs[anno_id]
@@ -692,10 +709,17 @@ def recon_one_shape(anno_id, results_dir, args,
             # don't show stuff in masked_indices
             gt_mesh = trimesh.util.concatenate(
                 [lst_of_part_meshes[x] for x in unmasked_indices])
-    if recon_gt:
+        if mask_gt:
+            mesh_gt = ops.export_mesh_norm(torch.from_numpy(gt_mesh.vertices),
+                                           torch.from_numpy(gt_mesh.faces),
+                                           os.path.join(results_dir, 'mesh_gt.obj'))
+            mesh_gt.visual.vertex_colors = gt_color
+            visualize.save_mesh_vis(mesh_gt, mask_mesh_gt_path,
+                                    mag=mag, white_bg=white_bg)
+    if recon_gt and not mask_gt:
         mesh_gt = ops.export_mesh_norm(torch.from_numpy(gt_mesh.vertices),
-                                    torch.from_numpy(gt_mesh.faces),
-                                    os.path.join(results_dir, 'mesh_gt.obj'))
+                                       torch.from_numpy(gt_mesh.faces),
+                                       os.path.join(results_dir, 'mesh_gt.obj'))
         mesh_gt.visual.vertex_colors = gt_color
         visualize.save_mesh_vis(mesh_gt, mesh_gt_path,
                                 mag=mag, white_bg=white_bg)
@@ -1418,7 +1442,7 @@ if args.inv:
             box_embeddings.weight.data, 0.0, 1 / math.sqrt(num_parts*each_box_feat),)
 
     # ------------ make flexi verts higher resolution ------------
-    fc_res = 47
+    fc_res = 31
     x_nx3, cube_fx8 = fc.construct_voxel_grid(fc_res)
     x_nx3 *= 1.15
     flexi_verts: torch.Tensor = x_nx3.to(device).unsqueeze(0).expand(1, -1, -1)
@@ -1427,12 +1451,9 @@ if args.inv:
     # ['both', 'just_occ', 'just_flexi', 'one_img']
     inv_mode = 'both'
     if inv_mode == 'both':
-        # optimizer = torch.optim.Adam(
-        #     [{"params": occ_embeddings.parameters(), "lr": 0.0075},
-        #      {"params": box_embeddings.parameters(), "lr": 0.0075}])
         optimizer = torch.optim.Adam(
-            [{"params": occ_embeddings.parameters(), "lr": 0.001},
-             {"params": box_embeddings.parameters(), "lr": 0.001}])
+            [{"params": occ_embeddings.parameters(), "lr": 0.0075},
+             {"params": box_embeddings.parameters(), "lr": 0.0075}])
     if inv_mode == 'just_occ':
         optimizer = torch.optim.Adam(
             [{"params": occ_embeddings.parameters(), "lr": 0.0075},
@@ -1447,10 +1468,10 @@ if args.inv:
         optimizer = torch.optim.Adam(
             [{"params": occ_embeddings.parameters(), "lr": 0.075},
              {"params": box_embeddings.parameters(), "lr": 0.075}])
-    num_iterations = 10001
+    num_iterations = 5001
     if not os.path.exists(occ_embedding_fp):
         print("optimizing for embedding...")
-        pbar = tqdm(range(num_iterations), desc='Loss: -', miniters=100)
+        pbar = tqdm(range(num_iterations), desc='Loss: -', miniters=1000)
         for i in pbar:
             optimizer.zero_grad()
             
@@ -1501,7 +1522,7 @@ if args.inv:
             if inv_mode == 'both':
                 total_loss = loss2 + one_mesh_loss
 
-            if i % 100 == 0:  # Print loss every 100 iterations
+            if i % 1000 == 0:  # Print loss every 100 iterations
                 # print('Iteration {}/{}, Loss: {:.8f}'.format(
                 #     i+1, num_iterations, total_loss.item()))
                 pbar.set_description('Loss: {:.8f}'.format(total_loss.item()))
@@ -1629,40 +1650,58 @@ if args.comp:
     model_id = misc.anno_id_to_model_id(partnet_index_path)[anno_id]
     print(f"anno id: {anno_id}, model id: {model_id}")
     parts_str = '-'.join([str(x) for x in fixed_parts])
-    results_dir = os.path.join(results_dir, 'comp', anno_id, parts_str)
+    results_dir = os.path.join(results_dir, 'comp', anno_id)
     misc.check_dir(results_dir)
     print("results dir: ", results_dir)
 
     # ------------ loading model, embedding, and data ------------
-    checkpoint = torch.load(os.path.join(ckpt_dir, f'model_{it}.pt'))
+    if it is None or it == -1:
+        checkpoint = torch.load(best_ckpt_path)
+        print(f"best checkpoint occurred at iteration {checkpoint['epoch']}")
+    else:
+        checkpoint = torch.load(os.path.join(ckpt_dir, f'model_{it}.pt'))
     occ_model.load_state_dict(checkpoint['model_state_dict'])
     occ_embeddings = torch.nn.Embedding(num_shapes, num_parts*each_part_feat).to(device)
     occ_embeddings.load_state_dict(checkpoint['occ_embeddings_state_dict'])
+    box_embeddings = torch.nn.Embedding(num_shapes, num_parts*each_box_feat).to(device)
+    box_embeddings.load_state_dict(checkpoint['box_embeddings_state_dict'])
     _, _, _, batch_occ_embed, batch_box_embed, _, batch_adj, batch_part_nodes, _, _ =\
         load_batch(0, 0, model_idx, model_idx+1)
     
     # ------------ create fixed and unfixed embeddings ------------
-    dim_fixed = len(fixed_parts) * each_part_feat
-    dim_unfixed = num_parts * each_part_feat - dim_fixed
-    fixed_embed = np.zeros((num_shapes, dim_fixed), np.float32)
-    unfixed_embed = np.zeros((num_shapes, dim_unfixed), np.float32)
+    dim_occ_fixed = len(fixed_parts) * each_part_feat
+    dim_occ_unfixed = num_parts * each_part_feat - dim_occ_fixed
+    fixed_occ_embed = np.zeros((num_shapes, dim_occ_fixed), np.float32)
+    unfixed_occ_embed = np.zeros((num_shapes, dim_occ_unfixed), np.float32)
     for i, idx in enumerate(fixed_parts):
-        fixed_embed[:num_shapes, i*each_part_feat:(i+1)*each_part_feat] =\
+        fixed_occ_embed[:num_shapes, i*each_part_feat:(i+1)*each_part_feat] =\
             occ_embeddings.weight.data.cpu().numpy()[:num_shapes, idx*each_part_feat:(idx+1)*each_part_feat]
     for i, idx in enumerate(unfixed_parts):
-        unfixed_embed[:num_shapes, i*each_part_feat:(i+1)*each_part_feat] =\
+        unfixed_occ_embed[:num_shapes, i*each_part_feat:(i+1)*each_part_feat] =\
             occ_embeddings.weight.data.cpu().numpy()[:num_shapes, idx*each_part_feat:(idx+1)*each_part_feat]
+    dim_box_fixed = len(fixed_parts) * each_box_feat
+    dim_box_unfixed = num_parts * each_box_feat - dim_box_fixed
+    fixed_box_embed = np.zeros((num_shapes, dim_box_fixed), np.float32)
+    unfixed_box_embed = np.zeros((num_shapes, dim_box_unfixed), np.float32)
+    for i, idx in enumerate(fixed_parts):
+        fixed_box_embed[:num_shapes, i*each_box_feat:(i+1)*each_box_feat] =\
+            box_embeddings.weight.data.cpu().numpy()[:num_shapes, idx*each_box_feat:(idx+1)*each_box_feat]
+    for i, idx in enumerate(unfixed_parts):
+        unfixed_box_embed[:num_shapes, i*each_box_feat:(i+1)*each_box_feat] =\
+            box_embeddings.weight.data.cpu().numpy()[:num_shapes, idx*each_box_feat:(idx+1)*each_box_feat]
 
     # ------------ fit fixed part embeddings to nearest neighbors ------------
     from sklearn.decomposition import PCA
     from sklearn.neighbors import NearestNeighbors
     num_neighbors = 50
     num_samples = 10
-    nn_model = NearestNeighbors(n_neighbors=num_neighbors)
-    nn_model.fit(fixed_embed)
+    occ_nn_model = NearestNeighbors(n_neighbors=num_neighbors)
+    occ_nn_model.fit(fixed_occ_embed)
+    box_nn_model = NearestNeighbors(n_neighbors=num_neighbors)
+    box_nn_model.fit(fixed_box_embed)
 
     # ------------ sampling functions ------------
-    def sample_conditional(nn_model: NearestNeighbors, fixed_vector, unfixed_part,
+    def sample_conditional(nn_model, fixed_vector, unfixed_part,
                            num_samples=1):
         """given fixed_vector, find the n nearest neighbors who have similar 
            fixed part embeddings. given these neighbors, sample from unfixed PCA
@@ -1690,26 +1729,49 @@ if args.comp:
 
     # ------------ shape completion sampling ------------
     np.random.seed(319)
-    test_embed = occ_embeddings.weight.data.cpu().numpy()[model_idx]
-    fixed_test_embed = np.concatenate([test_embed[i*each_part_feat:(i+1)*each_part_feat] for i in fixed_parts])[None, :]
-    sampled_unfixed_parts = sample_conditional(nn_model, fixed_test_embed , unfixed_embed, num_samples)
-    complete_embed = np.zeros((num_samples, num_parts*each_part_feat), np.float32)
+    test_occ_embed = occ_embeddings.weight.data.cpu().numpy()[model_idx]
+    fixed_test_occ_embed = np.concatenate([test_occ_embed[i*each_part_feat:(i+1)*each_part_feat] for i in fixed_parts])[None, :]
+    sampled_unfixed_occ_parts = sample_conditional(occ_nn_model, fixed_test_occ_embed , unfixed_occ_embed, num_samples)
+    complete_occ_embed = np.zeros((num_samples, num_parts*each_part_feat), np.float32)
     for i, idx in enumerate(fixed_parts):
-        complete_embed[:, idx*each_part_feat:(idx+1)*each_part_feat] =\
-            fixed_test_embed[:, i*each_part_feat:(i+1)*each_part_feat]
+        complete_occ_embed[:, idx*each_part_feat:(idx+1)*each_part_feat] =\
+            fixed_test_occ_embed[:, i*each_part_feat:(i+1)*each_part_feat]
     for i, idx in enumerate(unfixed_parts):
-        complete_embed[:, idx*each_part_feat:(idx+1)*each_part_feat] =\
-            sampled_unfixed_parts[:, i*each_part_feat:(i+1)*each_part_feat]
-    complete_embed = torch.from_numpy(complete_embed).to(device)
+        complete_occ_embed[:, idx*each_part_feat:(idx+1)*each_part_feat] =\
+            sampled_unfixed_occ_parts[:, i*each_part_feat:(i+1)*each_part_feat]
+    complete_occ_embed = torch.from_numpy(complete_occ_embed).to(device)
+    # ------------------------
+    test_box_embed = box_embeddings.weight.data.cpu().numpy()[model_idx]
+    fixed_test_box_embed = np.concatenate([test_box_embed[i*each_box_feat:(i+1)*each_box_feat] for i in fixed_parts])[None, :]
+    sampled_unfixed_box_parts = sample_conditional(box_nn_model, fixed_test_box_embed , unfixed_box_embed, num_samples)
+    complete_box_embed = np.zeros((num_samples, num_parts*each_box_feat), np.float32)
+    for i, idx in enumerate(fixed_parts):
+        complete_box_embed[:, idx*each_box_feat:(idx+1)*each_box_feat] =\
+            fixed_test_box_embed[:, i*each_box_feat:(i+1)*each_box_feat]
+    for i, idx in enumerate(unfixed_parts):
+        complete_box_embed[:, idx*each_box_feat:(idx+1)*each_box_feat] =\
+            sampled_unfixed_box_parts[:, i*each_box_feat:(i+1)*each_box_feat]
+    complete_box_embed = torch.from_numpy(complete_box_embed).to(device)
 
-    # ------------ reconstruct given a sampled geometry embedding ------------
+    # ------------ reconstruct given sampled geometry, fix box embedding ------------
     for sample_idx in range(num_samples):
         print(f"sampling {sample_idx+1}/{num_samples}")
-        samp_results_dir = os.path.join(results_dir, str(sample_idx))
+        samp_results_dir = os.path.join(results_dir, 'geom', parts_str, str(sample_idx))
         misc.check_dir(samp_results_dir)
-        batch_embed = complete_embed[sample_idx].unsqueeze(0)
+        samp_batch_occ_embed = complete_occ_embed[sample_idx].unsqueeze(0)
         recon_one_shape(anno_id, samp_results_dir, args,
-                        batch_occ_embed, batch_box_embed, batch_adj, batch_part_nodes,
-                        eval=False)
+                        samp_batch_occ_embed, batch_box_embed, batch_adj, batch_part_nodes,
+                        eval=False, mask_gt=True)
+
+    # ------------ reconstruct given sampled geometry + box embedding ------------
+    for sample_idx in range(num_samples):
+        print(f"sampling {sample_idx+1}/{num_samples}")
+        samp_results_dir = os.path.join(results_dir, 'both', parts_str, str(sample_idx))
+        misc.check_dir(samp_results_dir)
+        samp_batch_occ_embed = complete_occ_embed[sample_idx].unsqueeze(0)
+        samp_batch_box_embed = complete_box_embed[sample_idx].unsqueeze(0)
+        recon_one_shape(anno_id, samp_results_dir, args,
+                        samp_batch_occ_embed, samp_batch_box_embed, batch_adj, batch_part_nodes,
+                        eval=False, mask_gt=True)
     exit(0)
 
