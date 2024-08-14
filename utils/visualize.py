@@ -215,6 +215,8 @@ def save_obbs_vis(obbs, out_path, mesh_y_rot=-45, mag=1,
     for i, x in enumerate(obbs):
         # if i != 0:
         #     continue
+        if np.array_equal(x[0], np.array([0.0, 0.0, 0.0])):
+            continue
         edges, lengths, edge_xforms = compute_obb_edges(x[0], x[1])
         for i in range(len(edges)):
             edge_mesh = trimesh.creation.cylinder(

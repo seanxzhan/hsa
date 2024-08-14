@@ -2,8 +2,8 @@ import os
 import importlib
 
 rep = 'occflexi'
-expt = 15
-mode = 'recon'; start = 0; end = 50
+expt = 16
+mode = 'recon'; start = 0; end = 10
 
 module = importlib.import_module(f"run.{rep}.{rep}_{expt}")
 model_idx_to_anno_id = getattr(module, "model_idx_to_anno_id")
