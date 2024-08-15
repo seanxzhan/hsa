@@ -542,7 +542,7 @@ def infer_bbox_info(args, query_points, flexi_verts, fc_res, x_nx3, cube_fx8):
     # occ_model.load_state_dict(checkpoint['model_state_dict'])
     # occ_embeddings = torch.nn.Embedding(num_shapes, num_parts*each_part_feat).to(device)
     # occ_embeddings.load_state_dict(checkpoint['embeddings_state_dict'])
-    _, _, _, batch_occ_embed, batch_box_embed, _, batch_adj, batch_part_nodes, _, _ =\
+    _, _, _, batch_occ_embed, _, batch_adj, batch_part_nodes, _, _ =\
         load_batch(0, 0, model_idx, model_idx+1)
 
     learned_geom = []
@@ -550,7 +550,7 @@ def infer_bbox_info(args, query_points, flexi_verts, fc_res, x_nx3, cube_fx8):
         p_masked_indices = list(set(range(num_parts)) - set([p]))
         learned_xforms, _, _, part_flexi_vertices, part_flexi_faces =\
             inference_network(p_masked_indices, query_points,
-                              batch_occ_embed, batch_box_embed, 
+                              batch_occ_embed, 
                               batch_adj, batch_part_nodes,
                               flexi_verts, fc_res, x_nx3, cube_fx8)
         try:
@@ -1149,8 +1149,6 @@ if args.asb_scaling:
     occ_model.load_state_dict(checkpoint['model_state_dict'])
     occ_embeddings = torch.nn.Embedding(num_shapes, num_parts*each_part_feat).to(device)
     occ_embeddings.load_state_dict(checkpoint['occ_embeddings_state_dict'])
-    box_embeddings = torch.nn.Embedding(num_shapes, num_parts*each_box_feat).to(device)
-    box_embeddings.load_state_dict(checkpoint['box_embeddings_state_dict'])
 
     # ------------ making query points ------------
     query_points = reconstruct.make_query_points(pt_sample_res)
@@ -1184,7 +1182,7 @@ if args.asb_scaling:
     idx_anchor = part_indices.index(anchor_part)
     anchor_anno_id = anno_ids[idx_anchor]
     anchor_model_idx = model_indices[idx_anchor]
-    _, _, _, _, _, anchor_node_feat, _, anchor_part_nodes, _, _ =\
+    _, _, _, _, anchor_node_feat, _, anchor_part_nodes, _, _ =\
         load_batch(0, 0, anchor_model_idx, anchor_model_idx+1)
     anchor_bbox_geom = torch.einsum('ijk, ikm -> ijm',
                                     anchor_part_nodes.to(torch.float32),
@@ -1217,7 +1215,6 @@ if args.asb_scaling:
         adj_to_build[row, col] = 1
         build_adj_matrix(row, adj_to_build, adj_to_look_up)
     asb_occ_embed = torch.zeros(1, num_parts*each_part_feat).to(torch.float32)
-    asb_box_embed = torch.zeros(1, num_parts*each_box_feat).to(torch.float32)
     asb_node_feat = torch.zeros((num_union_nodes, 3)).to(torch.float32)
     asb_adj = torch.zeros((num_union_nodes, num_union_nodes)).to(torch.long)
     asb_part_nodes = torch.zeros((num_parts, num_union_nodes)).to(torch.long)
@@ -1241,8 +1238,6 @@ if args.asb_scaling:
             build_adj_matrix(uni, asb_adj, shape_adj)
         asb_occ_embed[:, part_idx*each_part_feat:(part_idx+1)*each_part_feat] =\
             occ_embeddings(torch.tensor(idx).to(device)).cpu()[part_idx*each_part_feat:(part_idx+1)*each_part_feat]
-        asb_box_embed[:, part_idx*each_box_feat:(part_idx+1)*each_box_feat] =\
-            box_embeddings(torch.tensor(idx).to(device)).cpu()[part_idx*each_box_feat:(part_idx+1)*each_box_feat]
         gt_xforms[:, part_idx] = shape_xform
         gt_exts[part_idx] = shape_ext
     node_names = np.load(
@@ -1253,7 +1248,6 @@ if args.asb_scaling:
                       nodeattrfunc=lambda _: "shape=box",).to_picture(
         os.path.join(results_dir, 'asb_tree.png'))
     batch_occ_embed = asb_occ_embed.to(device)
-    batch_box_embed = asb_box_embed.to(device)
     batch_node_feat = asb_node_feat.unsqueeze(0).to(device)
     batch_adj = asb_adj.unsqueeze(0).to(device)
     batch_part_nodes = asb_part_nodes.unsqueeze(0).to(device)
@@ -1290,14 +1284,14 @@ if args.asb_scaling:
     # ------------ using learned xforms ------------
     learned_xforms, _, _, _, _ =\
         inference_network(masked_indices, query_points,
-                          batch_occ_embed, batch_box_embed, 
+                          batch_occ_embed, 
                           batch_adj, batch_part_nodes,
                           flexi_verts, fc_res, x_nx3, cube_fx8,)
         
     # ------------ using gt xforms ------------
     _, prex_pred_values1, prex_comp_sdf, prex_flexi_vertices, prex_flexi_faces =\
         inference_network(masked_indices, query_points,
-                          batch_occ_embed, batch_box_embed, 
+                          batch_occ_embed, 
                           batch_adj, batch_part_nodes,
                           flexi_verts, fc_res, x_nx3, cube_fx8,
                           custom_xforms=gt_xforms)
@@ -1308,7 +1302,7 @@ if args.asb_scaling:
         p_masked_indices = list(set(range(num_parts)) - set([p]))
         _, _, _, part_flexi_vertices, part_flexi_faces =\
             inference_network(p_masked_indices, query_points,
-                              batch_occ_embed, batch_box_embed, 
+                              batch_occ_embed, 
                               batch_adj, batch_part_nodes,
                               flexi_verts, fc_res, x_nx3, cube_fx8,)
         try:
@@ -1322,6 +1316,11 @@ if args.asb_scaling:
         learned_geom.append(bbox_geom)
     learned_geom = np.concatenate(learned_geom, axis=0)
 
+    # ------------ scaling: compare to the shape w/ anchor part ------------
+    scales = anchor_bbox_geom / learned_geom
+    print(scales)
+    scales = np.clip(scales, 0.75, 1.25)
+
     # ------------ predicted and pre-xform obbs ------------
     learned_xforms_np = learned_xforms[0].cpu().numpy()
     gt_xforms = gt_xforms[0].cpu().numpy()
@@ -1334,16 +1333,11 @@ if args.asb_scaling:
         learned_xform[:3, 3] = -learned_xforms_np[i]
         gt_xform = np.eye(4)
         gt_xform[:3, 3] = -gt_xforms[i]
-        learned_ext = learned_geom[i]
+        learned_ext = learned_geom[i] * scales[i]
         ext_xform = (learned_ext, learned_xform)
         prex_ext_xform = (ext, gt_xform)
         obbs_of_interest[i] = [ext_xform]
         prex_obbs_of_interest[i] = [prex_ext_xform]
-
-    # ------------ scaling: compare to the shape w/ anchor part ------------
-    scales = learned_geom / anchor_bbox_geom
-    # print(scales)
-    scales = np.clip(scales, 0.8, 1.2)
 
     # ------------ make transformed scaled query points ------------
     query_points = torch.zeros((1, num_parts, pt_sample_res**3, 3)).to(torch.float32)
@@ -1368,7 +1362,7 @@ if args.asb_scaling:
         # ------------ using learned xforms ------------
         _, _, pred_values1, _, pred_verts_occ, comp_sdf =\
             run_occ(1, masked_indices, None, 
-                    batch_occ_embed, batch_box_embed,
+                    batch_occ_embed, 
                     batch_adj, batch_part_nodes, 
                     flexi_verts, fc_res,
                     mask_flexi=True,
@@ -1508,13 +1502,13 @@ if args.inv:
 
     # ------------ optimize for embedding ------------
     # ['both', 'just_occ', 'just_flexi', 'one_img']
-    inv_mode = 'both'
+    inv_mode = 'just_occ'
     if inv_mode == 'both':
         optimizer = torch.optim.Adam(
             [{"params": occ_embeddings.parameters(), "lr": 0.01}])
     if inv_mode == 'just_occ':
         optimizer = torch.optim.Adam(
-            [{"params": occ_embeddings.parameters(), "lr": 0.01}])
+            [{"params": occ_embeddings.parameters(), "lr": 0.025}])
     if inv_mode == 'just_flexi':
         # for just mesh
         optimizer = torch.optim.Adam(
@@ -1526,6 +1520,7 @@ if args.inv:
     num_iterations = 5001
     if not os.path.exists(occ_embedding_fp):
         print("optimizing for embedding...")
+        best_loss = float('inf')
         pbar = tqdm(range(num_iterations), desc='Loss: -', miniters=1000)
         for i in pbar:
             optimizer.zero_grad()
@@ -1535,7 +1530,7 @@ if args.inv:
             batch_node_feat = torch.einsum(
                 'ijk, ikm -> ijm',
                 batch_part_nodes.to(torch.float32).swapaxes(1, 2), # 1 7 4 
-                batch_occ_embed.view(1, num_parts, each_box_feat)) # 1 4 32
+                batch_occ_embed.detach().view(1, num_parts, each_box_feat)) # 1 4 32
             
             # ------------ learning bbox & xforms ------------
             batch_vec = torch.arange(start=0, end=1).to(device)
@@ -1583,16 +1578,23 @@ if args.inv:
 
             total_loss.backward()
             optimizer.step()
-        
+
+            if total_loss.detach().cpu().numpy() < best_loss:
+                best_loss = total_loss.detach().cpu().numpy()
+                torch.save(occ_embeddings, occ_embedding_fp)
+
         print(f'Loss: {total_loss.item()}')
-    if not os.path.exists(occ_embedding_fp):
-        torch.save(occ_embeddings, occ_embedding_fp)
+        print(f'Best Loss: {best_loss}')
+    # if not os.path.exists(occ_embedding_fp):
+    #     torch.save(occ_embeddings, occ_embedding_fp)
+
+    occ_embeddings = torch.load(occ_embedding_fp).to(device)
 
     batch_occ_embed = occ_embeddings(torch.arange(0, 1).to(device))
     batch_node_feat = torch.einsum(
         'ijk, ikm -> ijm',
         batch_part_nodes.to(torch.float32).swapaxes(1, 2), # 1 7 4 
-        batch_occ_embed.view(1, num_parts, each_box_feat)) # 1 4 32
+        batch_occ_embed.detach().view(1, num_parts, each_box_feat)) # 1 4 32
 
     recon_one_shape(anno_id, results_dir, args,
                     batch_occ_embed, batch_adj, batch_part_nodes)
