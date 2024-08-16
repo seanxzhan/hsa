@@ -1,11 +1,13 @@
-import os
 import subprocess
+import argparse
 
-devnull = open(os.devnull, 'w')
+parser = argparse.ArgumentParser()
+parser.add_argument('--expt', type=int, required=True)
+args = parser.parse_args()
 
 rep = 'occflexi'
-test = 'inv'; r = range(496, 508)
-expt = 21; it = -1
+test = 'inv'; r = range(475, 496)
+expt = args.expt; it = -1
 
 for i in r:
     subprocess.call(

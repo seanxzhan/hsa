@@ -1,12 +1,14 @@
-import os
 import subprocess
 import itertools
+import argparse
 
-devnull = open(os.devnull, 'w')
+parser = argparse.ArgumentParser()
+parser.add_argument('--expt', type=int, required=True)
+args = parser.parse_args()
 
 rep = 'occflexi'
 test = 'asb_scaling'
-expt = 15; it = -1
+expt = args.expt; it = -1
 
 lst_anno_ids = [
     ['43941', '42120', '39259', '39901'],

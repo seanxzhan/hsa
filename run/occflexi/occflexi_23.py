@@ -51,8 +51,8 @@ lr = 0.001
 iterations = 10000; iterations += 1
 train_res = [512, 512]
 fc_res = 31
-num_shapes = 475
-batch_size = 25
+num_shapes = 1
+batch_size = 1
 each_part_feat = 32
 each_box_feat = 32
 embed_dim = 128
@@ -232,8 +232,7 @@ def load_meshes(batch_idx, batch_size):
     end = start + batch_size
     return [gt_meshes[i] for i in range(start, end)]
 
-# ------------ flexicubes ------------
-def run_flexi(sdf, x_nx3, cube_fx8, fc_res, gt_mesh=None, pred_occ=None, one_img=False):
+def fix_sdf(sdf, fc_res):
     # NOTE: this chunk is crucial to keep training upon flexi injection!
     sdf_bxnxnxn = sdf.reshape((sdf.shape[0], fc_res+1, fc_res+1, fc_res+1))
     sdf_less_boundary = sdf_bxnxnxn[:, 1:-1, 1:-1, 1:-1].reshape(sdf.shape[0], -1)
@@ -252,10 +251,26 @@ def run_flexi(sdf, x_nx3, cube_fx8, fc_res, gt_mesh=None, pred_occ=None, one_img
                 new_sdf[i_batch:i_batch + 1] += update_sdf
         update_mask = (new_sdf == 0).float()
         sdf = sdf * update_mask + new_sdf * (1 - update_mask)
+    return sdf
 
+# ------------ flexicubes ------------
+def run_flexi(sdf, x_nx3, cube_fx8, fc_res,
+              gt_mesh=None, pred_occ=None, one_img=False):
+    # vertices, faces, L_dev = fc(
+    #     x_nx3.unsqueeze(0), fix_sdf(sdf), cube_fx8.unsqueeze(0), fc_res, training=True)
+    # exit(0)
     vertices, faces, L_dev = fc(
-        x_nx3, sdf[0], cube_fx8, fc_res, training=True)
+        x_nx3, fix_sdf(sdf, fc_res)[0], cube_fx8, fc_res, training=True)
+    # print(torch.min(vertices).detach().cpu().numpy(),
+    #       torch.max(vertices).detach().cpu().numpy())
+    # print(torch.min(gt_mesh.vertices).detach().cpu().numpy(),
+    #       torch.max(gt_mesh.vertices).detach().cpu().numpy())
     flexicubes_mesh = util.Mesh(vertices, faces)
+
+    scalex = (torch.max(vertices[:,0])-torch.min(vertices[:,0]))/(torch.max(vertices[:,0])-torch.min(vertices[:,0]))
+    scaley = (torch.max(vertices[:,1])-torch.min(vertices[:,1]))/(torch.max(vertices[:,1])-torch.min(vertices[:,1]))
+    scalez = (torch.max(vertices[:,2])-torch.min(vertices[:,2]))/(torch.max(vertices[:,2])-torch.min(vertices[:,2]))
+    scales = (scalex, scaley, scalez)
 
     if gt_mesh is not None:
         mv, mvp = render.get_random_camera_batch(
@@ -263,11 +278,11 @@ def run_flexi(sdf, x_nx3, cube_fx8, fc_res, gt_mesh=None, pred_occ=None, one_img
         target = render.render_mesh_paper(gt_mesh, mv, mvp, train_res)
 
         # import imageio
+        # # gt_mesh = flexicubes_mesh
         # gt_mesh.auto_normals()
         # gt_buffers = render.render_mesh_paper(gt_mesh, mv[:1], mvp[:1],
         #                                       train_res, return_types=["normal"], white_bg=True)
         # normal = gt_buffers["normal"][0].detach().cpu().numpy()
-        # print(np.min(normal), np.max(normal))
         # normal = ((normal+1)/2*255).astype(np.uint8)
         # imageio.imwrite(os.path.join(results_dir, 'render_normal.png'), normal)
         # depth = target["depth"][0].detach().cpu().numpy()
@@ -276,6 +291,22 @@ def run_flexi(sdf, x_nx3, cube_fx8, fc_res, gt_mesh=None, pred_occ=None, one_img
         # mask = target["mask"][0].detach().cpu().expand(-1, -1, 3).numpy()
         # mask = (mask * 255).astype(np.uint8)
         # imageio.imwrite(os.path.join(results_dir, 'render_mask.png'), mask)
+
+        # gt_mesh = flexicubes_mesh
+        # target = render.render_mesh_paper(gt_mesh, mv, mvp, train_res)
+        # gt_mesh.auto_normals()
+        # gt_buffers = render.render_mesh_paper(gt_mesh, mv[:1], mvp[:1],
+        #                                       train_res, return_types=["normal"], white_bg=True)
+        # normal = gt_buffers["normal"][0].detach().cpu().numpy()
+        # normal = ((normal+1)/2*255).astype(np.uint8)
+        # imageio.imwrite(os.path.join(results_dir, 'render_normal_flexi.png'), normal)
+        # depth = target["depth"][0].detach().cpu().numpy()
+        # depth_normalized = ((depth - depth.min()) / (depth.max() - depth.min()) * 255).astype(np.uint8)
+        # imageio.imwrite(os.path.join(results_dir, 'render_depth_flexi.png'), depth_normalized)
+        # mask = target["mask"][0].detach().cpu().expand(-1, -1, 3).numpy()
+        # mask = (mask * 255).astype(np.uint8)
+        # imageio.imwrite(os.path.join(results_dir, 'render_mask_flexi.png'), mask)
+        # exit(0)
 
         try: 
             buffers = render.render_mesh_paper(flexicubes_mesh, mv, mvp, train_res)
@@ -292,9 +323,9 @@ def run_flexi(sdf, x_nx3, cube_fx8, fc_res, gt_mesh=None, pred_occ=None, one_img
         mask_loss = (buffers['mask'] - target['mask']).abs().mean()
         depth_loss = (((((buffers['depth'] - (target['depth']))*
                         target['mask'])**2).sum(-1)+1e-8)).sqrt().mean() * 10
-        return mask_loss+depth_loss, vertices, faces
+        return mask_loss+depth_loss, vertices, faces, scales
     else:
-        return None, vertices, faces
+        return None, vertices, faces, scales
 
 # ------------ occupancy ------------
 def run_occ(batch_size, masked_indices, batch_points,
@@ -363,21 +394,24 @@ def run_occ(batch_size, masked_indices, batch_points,
         transformed_flexi_verts = custom_xformed_flexi_verts
 
     if not mask_flexi:
-        pred_verts_occ, _ = torch.max(occ_model.forward(
-            transformed_flexi_verts, batch_occ_embed), dim=-1, keepdim=True)
+        pred_verts_occ = occ_model.forward(
+            transformed_flexi_verts, batch_occ_embed)
+        entire_verts_values, _ = torch.max(pred_verts_occ, dim=-1, keepdim=True)
     else:
-        pred_verts_occ, _ = torch.max(
-            occ_model.forward(
-                transformed_flexi_verts.masked_fill(points_mask==1,torch.tensor(0)),
-                batch_occ_embed.masked_fill(parts_mask==1, torch.tensor(0))
-                ).masked_fill(occ_mask==1,torch.tensor(float('-inf'))),
-            dim=-1, keepdim=True)
+        pred_verts_occ = occ_model.forward(
+            transformed_flexi_verts.masked_fill(points_mask==1,torch.tensor(0)),
+            batch_occ_embed.masked_fill(parts_mask==1, torch.tensor(0))
+            ).masked_fill(occ_mask==1,torch.tensor(float('-inf')))
+        entire_verts_values, _ = torch.max(
+            pred_verts_occ, dim=-1, keepdim=True)
 
-    comp_sdf = ops.bin2sdf_torch_3(
-        pred_verts_occ.view(-1, fc_res+1, fc_res+1, fc_res+1))
+    entire_sdf = ops.bin2sdf_torch_3(
+        entire_verts_values.view(-1, fc_res+1, fc_res+1, fc_res+1))
+    part_sdf = ops.bin2sdf_torch_3(pred_verts_occ)
     
     return learned_xforms, learned_relations,\
-           pred_values1, pred_values2, pred_verts_occ, comp_sdf
+           pred_values1, pred_values2,\
+           entire_sdf, entire_verts_values, part_sdf, entire_verts_values
 
 # ------------ function to run inference ------------
 def inference_network(masked_indices, query_points,
@@ -389,7 +423,7 @@ def inference_network(masked_indices, query_points,
                       custom_xformed_flexi_verts=None,
                       just_bbox_info=False):
     with torch.no_grad():
-        learned_xforms, _, pred_values1, _, _, comp_sdf =\
+        learned_xforms, _, pred_values1, _, entire_sdf, _, _, _ =\
             run_occ(1, masked_indices, query_points,
                     batch_occ_embed, 
                     batch_adj, batch_part_nodes,
@@ -400,11 +434,11 @@ def inference_network(masked_indices, query_points,
                     custom_xformed_flexi_verts=custom_xformed_flexi_verts,
                     just_bbox_info=just_bbox_info)
 
-        _, flexi_vertices, flexi_faces =\
-            run_flexi(torch.flatten(comp_sdf[0]).unsqueeze(0),
+        _, flexi_vertices, flexi_faces, _ =\
+            run_flexi(torch.flatten(entire_sdf[0]).unsqueeze(0),
                       x_nx3, cube_fx8, fc_res)
         
-    return learned_xforms, pred_values1, comp_sdf, flexi_vertices, flexi_faces
+    return learned_xforms, pred_values1, entire_sdf, flexi_vertices, flexi_faces
 
 
 # ------------ training ------------
@@ -441,9 +475,14 @@ if args.train:
                 val_mask[i][fg_part_indices_masked] = 0
             modified_values = batch_values * val_mask
 
+            batch_geom = torch.einsum('ijk, ikm -> ijm',
+                                      batch_part_nodes.to(torch.float32),
+                                      batch_node_feat)
+
             # ------------ occflexi prediction ------------
             learned_xforms, learned_relations,\
-            pred_values1, pred_values2, pred_verts_occ, comp_sdf =\
+            pred_values1, pred_values2,\
+            entire_sdf, entire_verts_values, part_sdf, entire_verts_values =\
                 run_occ(batch_size, masked_indices, batch_points,
                         batch_occ_embed,
                         batch_adj, batch_part_nodes,
@@ -451,26 +490,79 @@ if args.train:
 
             # ------------ flexi loss ------------
             mesh_loss = 0
+            mesh_xforms = torch.zeros_like(batch_xforms).to(device)
+            mesh_geom = torch.zeros_like(batch_geom).to(device)
             for s in range(batch_size):
-                one_mesh_loss, vertices, faces = run_flexi(
-                    torch.flatten(comp_sdf[s]).unsqueeze(0),
+                one_mesh_loss, vertices, faces, scales = run_flexi(
+                    torch.flatten(entire_sdf[s]).unsqueeze(0),
                     x_nx3, cube_fx8, fc_res,
                     batch_gt_meshes[s],
-                    pred_verts_occ[s])
+                    entire_verts_values[s])
                 mesh_loss += one_mesh_loss
+                for p in range(num_parts):
+                    part_verts, part_faces, _ = fc(
+                        x_nx3, fix_sdf(part_sdf[s:s+1,:,p], fc_res)[0],
+                        cube_fx8, fc_res, training=True)
+                    # trimesh.Trimesh(part_verts.detach().cpu().numpy(),
+                    #                 part_faces.detach().cpu().numpy()).export(
+                    #                     os.path.join(results_dir, f'part_mesh_{p}.obj'))
+                    # print(-torch.mean(part_verts[:,0]*scales[0]).item(),
+                    #       -torch.mean(part_verts[:,1]*scales[1]).item(),
+                    #       -torch.mean(part_verts[:,2]*scales[2]).item())
+                    mesh_xforms[s,p,0] = -torch.mean(part_verts[:,0]*scales[0])
+                    mesh_xforms[s,p,1] = -torch.mean(part_verts[:,1]*scales[1])
+                    mesh_xforms[s,p,2] = -torch.mean(part_verts[:,2]*scales[2])
+                    mesh_geom[s,p,0] = torch.max(part_verts[:,0]*scales[0])-torch.min(part_verts[:,0]*scales[0])
+                    mesh_geom[s,p,1] = torch.max(part_verts[:,1]*scales[1])-torch.min(part_verts[:,1]*scales[1])
+                    mesh_geom[s,p,2] = torch.max(part_verts[:,2]*scales[2])-torch.min(part_verts[:,2]*scales[2])
+                # print(learned_xforms)
+                # print(batch_xforms)
+                # exit(0)
             mesh_loss /= batch_size
+
+            pairwise_xforms = mesh_xforms[:, connectivity]
+            mesh_relations = pairwise_xforms[:, :, 1] - pairwise_xforms[:, :, 0]
 
             # ------------ occ loss ------------
             loss1 = loss_f(pred_values1, modified_values)
             loss2 = loss_f(pred_values2, batch_values)
+            # loss_xform = loss_f(
+            #     embed_fn(learned_xforms.view(-1, 3)),
+            #     embed_fn(batch_xforms.view(-1, 3)))
+            # loss_relations = loss_f(
+            #     embed_fn(learned_relations.view(-1, 3)),
+            #     embed_fn(batch_relations.view(-1, 3)))
+            # total_loss = loss1 + loss2 + mesh_loss +\
+            #              10 * loss_xform + 10 * loss_relations
+            # loss_mesh_xform = loss_f(
+            #     embed_fn(mesh_xforms.view(-1, 3)),
+            #     embed_fn(batch_xforms.view(-1, 3)))
+            # loss_mesh_relations = loss_f(
+            #     embed_fn(mesh_relations.view(-1, 3)),
+            #     embed_fn(batch_relations.view(-1, 3)))
+            # loss_bbox_geom = loss_f(
+            #     embed_fn(mesh_geom.view(-1, 3)),
+            #     embed_fn(batch_geom.view(-1, 3)),)
             loss_xform = loss_f(
-                embed_fn(learned_xforms.view(-1, 3)),
-                embed_fn(batch_xforms.view(-1, 3)))
+                learned_xforms.view(-1, 3),
+                batch_xforms.view(-1, 3))
             loss_relations = loss_f(
-                embed_fn(learned_relations.view(-1, 3)),
-                embed_fn(batch_relations.view(-1, 3)))
-            total_loss = loss1 + loss2 + mesh_loss +\
-                         10 * loss_xform + 10 * loss_relations
+                learned_relations.view(-1, 3),
+                batch_relations.view(-1, 3))
+            loss_mesh_xform = loss_f(
+                mesh_xforms.view(-1, 3),
+                batch_xforms.view(-1, 3))
+            loss_mesh_relations = loss_f(
+                mesh_relations.view(-1, 3),
+                batch_relations.view(-1, 3))
+            loss_bbox_geom = loss_f(
+                mesh_geom.view(-1, 3),
+                batch_geom.view(-1, 3))
+            total_loss = loss1 + loss2 + mesh_loss + loss_xform + loss_relations +\
+                         1 * loss_mesh_xform + 1 * loss_mesh_relations + loss_bbox_geom
+            # total_loss = loss1 + loss2 + mesh_loss +\
+            #              1 * loss_xform + 1 * loss_relations +\
+            #              1 * loss_mesh_xform + 1 * loss_mesh_relations + loss_bbox_geom
 
             total_loss.backward()
             optimizer.step()
@@ -484,14 +576,15 @@ if args.train:
         writer.add_scalar('loss1', loss1, it)
         writer.add_scalar('loss2', loss2, it)
         writer.add_scalar('mesh', mesh_loss, it)
-        writer.add_scalar('xform', loss_xform, it)
-        writer.add_scalar('relations', loss_relations, it)
+        writer.add_scalar('xform', loss_mesh_xform, it)
+        writer.add_scalar('relations', loss_mesh_relations, it)
+        writer.add_scalar('geom', loss_bbox_geom, it)
 
         # ------------ print loss & saves occflexi ------------
         if (it) % 50 == 0 or it == (iterations - 1): 
             with torch.no_grad():
                 vertices, faces, L_dev = fc(
-                    x_nx3, torch.flatten(comp_sdf[-1]), cube_fx8,
+                    x_nx3, torch.flatten(entire_sdf[-1]), cube_fx8,
                     fc_res, training=False)
             print('Iteration {} - loss: {:.5f}, '.format(it, total_loss)+
                   'vertices #: {}, faces #: {}'.format(
@@ -502,7 +595,7 @@ if args.train:
                 category='pred_mesh',
                 vertices_list=[vertices.cpu()],
                 faces_list=[faces.cpu()])
-            grid = comp_sdf[-1].reshape(fc_res+1, fc_res+1, fc_res+1)
+            grid = entire_sdf[-1].reshape(fc_res+1, fc_res+1, fc_res+1)
             occ_pts = torch.from_numpy(torch.argwhere(grid <= 0.0).cpu().numpy())
             occ_pts = occ_pts/(fc_res+1) - 0.5
             if occ_pts.shape[0] != 0:
@@ -1371,7 +1464,7 @@ if args.asb_scaling:
                     mask_flexi=True,
                     custom_xformed_points=xformed_query_points,
                     custom_xformed_flexi_verts=xformed_flexi_verts)
-        _, flexi_vertices, flexi_faces =\
+        _, flexi_vertices, flexi_faces, _ =\
             run_flexi(torch.flatten(comp_sdf[0]).unsqueeze(0),
                       x_nx3, cube_fx8, fc_res)
 
@@ -1565,7 +1658,7 @@ if args.inv:
                     transformed_flexi_verts, batch_occ_embed), dim=-1, keepdim=True)
                 comp_sdf = ops.bin2sdf_torch_3( 
                     pred_verts_occ.view(-1, fc_res+1, fc_res+1, fc_res+1))
-                one_mesh_loss, _, _ = run_flexi(
+                one_mesh_loss, _, _, _ = run_flexi(
                     torch.flatten(comp_sdf[0]).unsqueeze(0),
                     x_nx3, cube_fx8, fc_res,
                     batch_gt_meshes[0], pred_verts_occ[0],

@@ -1,12 +1,13 @@
-import os
 import subprocess
-import itertools
+import argparse
 
-devnull = open(os.devnull, 'w')
+parser = argparse.ArgumentParser()
+parser.add_argument('--expt', type=int, required=True)
+args = parser.parse_args()
 
 rep = 'occflexi'
 test = 'comp'; r = range(4, 20)
-expt = 15; it = -1
+expt = args.expt; it = -1
 
 lst_fixed_indices = [0, 1, 2, 3]
 

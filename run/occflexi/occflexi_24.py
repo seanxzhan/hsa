@@ -51,14 +51,14 @@ lr = 0.001
 iterations = 10000; iterations += 1
 train_res = [512, 512]
 fc_res = 31
-num_shapes = 475
-batch_size = 25
+num_shapes = 8
+batch_size = 8
 each_part_feat = 32
 each_box_feat = 32
 embed_dim = 128
 ds_id = 19
-ds_start, ds_end = 0, 508
-expt_id = 19
+ds_start, ds_end = 0, 3272
+expt_id = 24
 anchor_idx = -1
 num_batches = num_shapes // batch_size
 
@@ -110,10 +110,6 @@ def my_load_mesh(model_idx):
     gt_mesh_path = os.path.join(obj_dir, f'{anno_id}.obj')
     gt_mesh = trimesh.load_mesh(gt_mesh_path)
     return util.load_mesh_vf_kaolin(gt_mesh.vertices, gt_mesh.faces, device)
-def my_load_mesh_part(model_idx, part_verts, part_faces, part):
-    verts = np.array(part_verts[part][model_idx]).reshape(-1, 3)
-    faces = np.array(part_faces[part][model_idx]).reshape(-1, 3)
-    return util.load_mesh_vf_kaolin(verts, faces, device)
 
 # ------------ part disentanglement info ------------
 connectivity = [[0, 1], [0, 2], [1, 2], [2, 3]]
