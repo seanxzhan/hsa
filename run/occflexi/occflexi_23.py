@@ -58,7 +58,7 @@ each_box_feat = 32
 embed_dim = 128
 ds_id = 19
 ds_start, ds_end = 0, 508
-expt_id = 19
+expt_id = 23
 anchor_idx = -1
 num_batches = num_shapes // batch_size
 

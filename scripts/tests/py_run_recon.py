@@ -5,7 +5,7 @@ devnull = open(os.devnull, 'w')
 
 rep = 'occflexi'
 test = 'recon'; r = range(0, 10)
-expt = 16; it = -1
+expt = 19; it = -1
 
 for i in r:
     subprocess.call(

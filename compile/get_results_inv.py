@@ -2,7 +2,7 @@ import os
 import importlib
 
 rep = 'occflexi'
-expt = 15
+expt = 21
 mode = 'inv'; start = 496; end = 508
 # batch_size = 10
 

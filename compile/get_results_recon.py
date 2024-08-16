@@ -2,7 +2,7 @@ import os
 import importlib
 
 rep = 'occflexi'
-expt = 16
+expt = 19
 mode = 'recon'; start = 0; end = 10
 
 module = importlib.import_module(f"run.{rep}.{rep}_{expt}")
