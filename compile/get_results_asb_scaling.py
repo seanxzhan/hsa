@@ -2,7 +2,7 @@ import os
 import importlib
 
 rep = 'occflexi'
-expt = 15
+expt = 19
 mode = 'asb_scaling'
 
 module = importlib.import_module(f"run.{rep}.{rep}_{expt}")

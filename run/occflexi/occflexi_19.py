@@ -1140,14 +1140,14 @@ if args.asb_scaling:
     white_bg = True
     it = args.it
     anno_ids = args.anno_ids
-    # part_indices = args.part_indices; part_indices = [int(i) for i in part_indices]
+    part_indices = args.part_indices; part_indices = [int(i) for i in part_indices]
 
     # anno_ids = ['2787', '41264', '39704', '43005']
     # anno_ids = ['41378', '40825', '42312', '3144']
     # anno_ids = ['38208', '3366', '49530', '37454']
     # anno_ids = ['40825', '42312', '3144', '41378']
-    anno_ids = ['42312', '3144', '41378', '40825']
-    part_indices = [0, 1, 2, 3]
+    # anno_ids = ['42312', '3144', '41378', '40825']
+    # part_indices = [0, 1, 2, 3]
 
     # ------------ loading model, embedding, and data ------------
     if it is None or it == -1:
@@ -1636,9 +1636,7 @@ if args.samp:
     occ_model.load_state_dict(checkpoint['model_state_dict'])
     occ_embeddings = torch.nn.Embedding(num_shapes, num_parts*each_part_feat).to(device)
     occ_embeddings.load_state_dict(checkpoint['occ_embeddings_state_dict'])
-    box_embeddings = torch.nn.Embedding(num_shapes, num_parts*each_box_feat).to(device)
-    box_embeddings.load_state_dict(checkpoint['box_embeddings_state_dict'])
-    _, _, _, batch_occ_embed, batch_box_embed, _, batch_adj, batch_part_nodes, _, _ =\
+    _, _, _, batch_occ_embed, _, batch_adj, batch_part_nodes, _, _ =\
         load_batch(0, 0, model_idx, model_idx+1)
     
     # ------------ sample a geometry embedding ------------
@@ -1657,39 +1655,19 @@ if args.samp:
     samp_pca_occ_embeddings = sample_pca_space(occ_embedddings_pca, num_samples, scale)
     samp_lat_occ_embeddings = pca.inverse_transform(samp_pca_occ_embeddings)
     samp_lat_occ_embeddings = torch.from_numpy(samp_lat_occ_embeddings)
-    pca = PCA(n_components=4)  # Number of components should be <= embedding_dim
-    pca.fit(box_embeddings.weight.data.cpu().numpy()[:num_shapes])
-    box_embedddings_pca = pca.transform(box_embeddings.weight.data.cpu().numpy()[:num_shapes])
-    samp_pca_box_embeddings = sample_pca_space(box_embedddings_pca, num_samples, scale)
-    samp_lat_box_embeddings = pca.inverse_transform(samp_pca_box_embeddings)
-    samp_lat_box_embeddings = torch.from_numpy(samp_lat_box_embeddings)
     
     _, _, _, _, name_to_obbs, _, _, _, _, _ =\
         preprocess_data_19.merge_partnet_after_merging(anno_id)
 
-    if args.samp_both:
-        for sample_idx in range(num_samples):
-            samp_batch_occ_embed = samp_lat_occ_embeddings[sample_idx].to(device, torch.float32).unsqueeze(0)
-            samp_batch_box_embed = samp_lat_box_embeddings[sample_idx].to(device, torch.float32).unsqueeze(0)
-            print(f"sampling {sample_idx+1}/{num_samples} geom and bbox")
-            samp_results_dir = os.path.join(
-                os.path.join(top_level_results_dir, 'samp', 'both'), str(sample_idx))
-            misc.check_dir(samp_results_dir)
-            recon_one_shape('both', samp_results_dir, args,
-                            samp_batch_occ_embed, samp_batch_box_embed, batch_adj, batch_part_nodes,
-                            eval=False, custom_name_to_obbs=name_to_obbs,
-                            recon_gt=False)
-        exit(0)
-
     # ------------ reconstruct given a sampled geometry embedding ------------
+    # given occ, network optimizes for bbox transformation given occ
     for sample_idx in range(num_samples):
         samp_batch_occ_embed = samp_lat_occ_embeddings[sample_idx].to(device, torch.float32).unsqueeze(0)
-        samp_batch_box_embed = samp_lat_box_embeddings[sample_idx].to(device, torch.float32).unsqueeze(0)
         print(f"sampling {sample_idx+1}/{num_samples} geom, keeping bbox")
         samp_results_dir = os.path.join(results_dir, str(sample_idx))
         misc.check_dir(samp_results_dir)
         recon_one_shape(anno_id, samp_results_dir, args,
-                        samp_batch_occ_embed, batch_box_embed, batch_adj, batch_part_nodes,
+                        samp_batch_occ_embed, batch_adj, batch_part_nodes,
                         eval=False)
         # # This experiment doesn't make too much sense, bbox would be about the same
         # print(f"sampling {sample_idx+1}/{num_samples} bbox, keeping geom")
@@ -1729,9 +1707,7 @@ if args.comp:
     occ_model.load_state_dict(checkpoint['model_state_dict'])
     occ_embeddings = torch.nn.Embedding(num_shapes, num_parts*each_part_feat).to(device)
     occ_embeddings.load_state_dict(checkpoint['occ_embeddings_state_dict'])
-    box_embeddings = torch.nn.Embedding(num_shapes, num_parts*each_box_feat).to(device)
-    box_embeddings.load_state_dict(checkpoint['box_embeddings_state_dict'])
-    _, _, _, batch_occ_embed, batch_box_embed, _, batch_adj, batch_part_nodes, _, _ =\
+    _, _, _, batch_occ_embed, _, batch_adj, batch_part_nodes, _, _ =\
         load_batch(0, 0, model_idx, model_idx+1)
     
     # ------------ create fixed and unfixed embeddings ------------
@@ -1745,16 +1721,6 @@ if args.comp:
     for i, idx in enumerate(unfixed_parts):
         unfixed_occ_embed[:num_shapes, i*each_part_feat:(i+1)*each_part_feat] =\
             occ_embeddings.weight.data.cpu().numpy()[:num_shapes, idx*each_part_feat:(idx+1)*each_part_feat]
-    dim_box_fixed = len(fixed_parts) * each_box_feat
-    dim_box_unfixed = num_parts * each_box_feat - dim_box_fixed
-    fixed_box_embed = np.zeros((num_shapes, dim_box_fixed), np.float32)
-    unfixed_box_embed = np.zeros((num_shapes, dim_box_unfixed), np.float32)
-    for i, idx in enumerate(fixed_parts):
-        fixed_box_embed[:num_shapes, i*each_box_feat:(i+1)*each_box_feat] =\
-            box_embeddings.weight.data.cpu().numpy()[:num_shapes, idx*each_box_feat:(idx+1)*each_box_feat]
-    for i, idx in enumerate(unfixed_parts):
-        unfixed_box_embed[:num_shapes, i*each_box_feat:(i+1)*each_box_feat] =\
-            box_embeddings.weight.data.cpu().numpy()[:num_shapes, idx*each_box_feat:(idx+1)*each_box_feat]
 
     # ------------ fit fixed part embeddings to nearest neighbors ------------
     from sklearn.decomposition import PCA
@@ -1763,8 +1729,6 @@ if args.comp:
     num_samples = 10
     occ_nn_model = NearestNeighbors(n_neighbors=num_neighbors)
     occ_nn_model.fit(fixed_occ_embed)
-    box_nn_model = NearestNeighbors(n_neighbors=num_neighbors)
-    box_nn_model.fit(fixed_box_embed)
 
     # ------------ sampling functions ------------
     def sample_conditional(nn_model, fixed_vector, unfixed_part,
@@ -1806,38 +1770,16 @@ if args.comp:
         complete_occ_embed[:, idx*each_part_feat:(idx+1)*each_part_feat] =\
             sampled_unfixed_occ_parts[:, i*each_part_feat:(i+1)*each_part_feat]
     complete_occ_embed = torch.from_numpy(complete_occ_embed).to(device)
-    # ------------------------
-    test_box_embed = box_embeddings.weight.data.cpu().numpy()[model_idx]
-    fixed_test_box_embed = np.concatenate([test_box_embed[i*each_box_feat:(i+1)*each_box_feat] for i in fixed_parts])[None, :]
-    sampled_unfixed_box_parts = sample_conditional(box_nn_model, fixed_test_box_embed , unfixed_box_embed, num_samples)
-    complete_box_embed = np.zeros((num_samples, num_parts*each_box_feat), np.float32)
-    for i, idx in enumerate(fixed_parts):
-        complete_box_embed[:, idx*each_box_feat:(idx+1)*each_box_feat] =\
-            fixed_test_box_embed[:, i*each_box_feat:(i+1)*each_box_feat]
-    for i, idx in enumerate(unfixed_parts):
-        complete_box_embed[:, idx*each_box_feat:(idx+1)*each_box_feat] =\
-            sampled_unfixed_box_parts[:, i*each_box_feat:(i+1)*each_box_feat]
-    complete_box_embed = torch.from_numpy(complete_box_embed).to(device)
 
-    # ------------ reconstruct given sampled geometry, fix box embedding ------------
+    # ------------ reconstruct given sampled geometry ------------
     for sample_idx in range(num_samples):
         print(f"sampling {sample_idx+1}/{num_samples}")
         samp_results_dir = os.path.join(results_dir, 'geom', parts_str, str(sample_idx))
         misc.check_dir(samp_results_dir)
         samp_batch_occ_embed = complete_occ_embed[sample_idx].unsqueeze(0)
         recon_one_shape(anno_id, samp_results_dir, args,
-                        samp_batch_occ_embed, batch_box_embed, batch_adj, batch_part_nodes,
+                        samp_batch_occ_embed, batch_adj, batch_part_nodes,
                         eval=False, mask_gt=True)
 
-    # ------------ reconstruct given sampled geometry + box embedding ------------
-    for sample_idx in range(num_samples):
-        print(f"sampling {sample_idx+1}/{num_samples}")
-        samp_results_dir = os.path.join(results_dir, 'both', parts_str, str(sample_idx))
-        misc.check_dir(samp_results_dir)
-        samp_batch_occ_embed = complete_occ_embed[sample_idx].unsqueeze(0)
-        samp_batch_box_embed = complete_box_embed[sample_idx].unsqueeze(0)
-        recon_one_shape(anno_id, samp_results_dir, args,
-                        samp_batch_occ_embed, samp_batch_box_embed, batch_adj, batch_part_nodes,
-                        eval=False, mask_gt=True)
     exit(0)
 

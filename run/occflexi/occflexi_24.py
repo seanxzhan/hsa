@@ -48,7 +48,7 @@ pt_sample_res = 64
 occ_res = int(pt_sample_res / 2)
 device = 'cuda'
 lr = 0.001
-iterations = 5000; iterations += 1
+iterations = 500; iterations += 1
 train_res = [512, 512]
 fc_res = 31
 num_shapes = 3000
@@ -448,6 +448,8 @@ if args.train and not os.path.exists(masks_path):
     
     hdf5_file.close()
 
+# exit(0)
+
 # ------------ load masks ------------
 masks = h5py.File(masks_path, 'r')
 all_masked_indices = masks['all_masked_indices']
@@ -471,8 +473,8 @@ if args.train:
             batch_gt_meshes = load_meshes(b, batch_size)
 
             # ------------ random masking & gt value mask ------------
-            masked_indices = torch.from_numpy(all_masked_indices[it*num_batches+b]).to(device, torch.long)
-            val_mask = torch.from_numpy(all_val_masks[it*num_batches+b]).to(device, torch.float32)
+            masked_indices = torch.from_numpy(all_masked_indices[(it%500)*num_batches+b]).to(device, torch.long)
+            val_mask = torch.from_numpy(all_val_masks[(it%500)*num_batches+b]).to(device, torch.float32)
             modified_values = batch_values * val_mask
 
             # ------------ occflexi prediction ------------
