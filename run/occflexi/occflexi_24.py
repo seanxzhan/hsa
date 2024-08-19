@@ -103,6 +103,8 @@ node_features = train_data['node_features']
 adj = train_data['adj']
 part_nodes = train_data['part_nodes']
 relations = train_data['relations']
+verts = train_data['verts']
+faces = train_data['faces']
 def my_load_mesh(model_idx):
     anno_id = model_idx_to_anno_id[model_idx]
     obj_dir = os.path.join(partnet_dir, anno_id, 'vox_models')
@@ -110,6 +112,10 @@ def my_load_mesh(model_idx):
     gt_mesh_path = os.path.join(obj_dir, f'{anno_id}.obj')
     gt_mesh = trimesh.load_mesh(gt_mesh_path)
     return util.load_mesh_vf_kaolin(gt_mesh.vertices, gt_mesh.faces, device)
+def my_load_mesh_vf(model_idx):
+    v = np.array(verts[model_idx]).reshape(-1, 3)
+    f = np.array(faces[model_idx]).reshape(-1, 3)
+    return util.load_mesh_vf_kaolin(v, f, device)
 
 # ------------ part disentanglement info ------------
 connectivity = [[0, 1], [0, 2], [1, 2], [2, 3]]
@@ -147,10 +153,11 @@ center_indices, boundary_indices = get_center_boundary_index(fc_res, device)
 # ------------ init gt meshes ------------
 if args.train:
     print("loading gt meshes")
-    gt_meshes = [my_load_mesh(s) for s in tqdm(range(0, num_shapes))]
+    # gt_meshes = [my_load_mesh(s) for s in tqdm(range(0, num_shapes))]
+    gt_mesh = my_load_mesh_vf(anchor_idx)
     timelapse.add_mesh_batch(category='gt_mesh',
-                             vertices_list=[gt_meshes[anchor_idx].vertices.cpu()],
-                             faces_list=[gt_meshes[anchor_idx].faces.cpu()])
+                             vertices_list=[gt_mesh.vertices.cpu()],
+                             faces_list=[gt_mesh.faces.cpu()])
     occ_pts = torch.argwhere(torch.from_numpy(
         occ[np.arange(0, num_shapes)[anchor_idx]]).reshape([fc_res+1]*3) == 1.0)
     occ_pts = occ_pts/(fc_res+1) - 0.5
@@ -226,7 +233,9 @@ def load_batch(batch_idx, batch_size, start=None, end=None):
 def load_meshes(batch_idx, batch_size):
     start = batch_idx*batch_size
     end = start + batch_size
-    return [gt_meshes[i] for i in range(start, end)]
+    # v = np.array(verts[start:end]).reshape(batch_size, -1, 3)
+    # f = np.array(faces[start:end]).reshape(batch_size, -1, 3)
+    return [[my_load_mesh_vf(i)] for i in range(start, end)]
 
 # ------------ flexicubes ------------
 def run_flexi(sdf, x_nx3, cube_fx8, fc_res, gt_mesh=None, pred_occ=None, one_img=False):
