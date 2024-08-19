@@ -1142,11 +1142,11 @@ if args.asb_scaling:
     anno_ids = args.anno_ids
     # part_indices = args.part_indices; part_indices = [int(i) for i in part_indices]
 
-    anno_ids = ['2787', '41264', '39704', '43005']
+    # anno_ids = ['2787', '41264', '39704', '43005']
     # anno_ids = ['41378', '40825', '42312', '3144']
     # anno_ids = ['38208', '3366', '49530', '37454']
     # anno_ids = ['40825', '42312', '3144', '41378']
-    # anno_ids = ['42312', '3144', '41378', '40825']
+    anno_ids = ['42312', '3144', '41378', '40825']
     part_indices = [0, 1, 2, 3]
 
     # ------------ loading model, embedding, and data ------------
@@ -1327,8 +1327,8 @@ if args.asb_scaling:
 
     # ------------ scaling: compare to the shape w/ anchor part ------------
     scales = anchor_bbox_geom / learned_geom
-    print(scales)
-    scales = np.clip(scales, 0.75, 1.25)
+    # print(scales)
+    scales = np.clip(scales, 0.8, 1.2)
 
     # ------------ predicted and pre-xform obbs ------------
     learned_xforms_np = learned_xforms[0].cpu().numpy()
@@ -1518,7 +1518,7 @@ if args.inv:
             [{"params": occ_embeddings.parameters(), "lr": 0.0075}])
     if inv_mode == 'just_occ':
         optimizer = torch.optim.Adam(
-            [{"params": occ_embeddings.parameters(), "lr": 0.01}])
+            [{"params": occ_embeddings.parameters(), "lr": 0.025}])
     if inv_mode == 'just_flexi':
         # for just mesh
         optimizer = torch.optim.Adam(
