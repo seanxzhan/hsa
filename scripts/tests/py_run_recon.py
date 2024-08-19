@@ -6,7 +6,7 @@ parser.add_argument('--expt', type=int, required=True)
 args = parser.parse_args()
 
 rep = 'occflexi'
-test = 'recon'; r = range(0, 10)
+test = 'recon'; r = range(0, 50)
 expt = args.expt; it = -1
 
 for i in r:

@@ -51,14 +51,14 @@ lr = 0.001
 iterations = 10000; iterations += 1
 train_res = [512, 512]
 fc_res = 31
-num_shapes = 8
-batch_size = 8
+num_shapes = 3000
+batch_size = 15
 each_part_feat = 32
 each_box_feat = 32
 embed_dim = 128
 ds_id = 19
 ds_start, ds_end = 0, 3272
-expt_id = 24
+expt_id = 25
 anchor_idx = -1
 num_batches = num_shapes // batch_size
 
