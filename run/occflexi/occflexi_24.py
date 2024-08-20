@@ -16,6 +16,7 @@ from occ_networks.occflexi_network_18 import SDFDecoder, get_embedder
 from utils import misc, ops, reconstruct, tree
 from anytree.exporter import UniqueDotExporter
 from data_prep import preprocess_data_19
+# from torchviz import make_dot
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--id', type=str)
@@ -51,8 +52,8 @@ lr = 0.001
 iterations = 500; iterations += 1
 train_res = [512, 512]
 fc_res = 31
-num_shapes = 3000
-batch_size = 25
+num_shapes = 16
+batch_size = 16
 each_part_feat = 32
 each_box_feat = 32
 embed_dim = 128
@@ -472,9 +473,27 @@ if args.train:
                 load_batch(b, batch_size)
             batch_gt_meshes = load_meshes(b, batch_size)
 
-            # ------------ random masking & gt value mask ------------
-            masked_indices = torch.from_numpy(all_masked_indices[(it%500)*num_batches+b]).to(device, torch.long)
-            val_mask = torch.from_numpy(all_val_masks[(it%500)*num_batches+b]).to(device, torch.float32)
+            # # ------------ random masking & gt value mask ------------
+            # masked_indices = torch.from_numpy(all_masked_indices[(it%500)*num_batches+b]).to(device, torch.long)
+            # val_mask = torch.from_numpy(all_val_masks[(it%500)*num_batches+b]).to(device, torch.float32)
+            # modified_values = batch_values * val_mask
+
+            # ------------ random masking ------------
+            num_parts_to_mask = np.random.randint(1, num_parts)
+            rand_indices = np.random.choice(num_parts, num_parts_to_mask,
+                                            replace=False)
+            masked_indices = torch.from_numpy(rand_indices).to(device, torch.long)
+
+            # ------------ gt value mask ------------
+            val_mask = torch.ones_like(batch_values).to(device, torch.float32)
+            for i in range(batch_size):
+                fg_part_indices = batch_fg_part_indices[i]
+                fg_part_indices_masked = fg_part_indices[masked_indices.cpu().numpy()]
+                if len(fg_part_indices_masked) != 0:
+                    fg_part_indices_masked = np.concatenate(fg_part_indices_masked, axis=0)
+                else:
+                    fg_part_indices_masked = np.array([])
+                val_mask[i][fg_part_indices_masked] = 0
             modified_values = batch_values * val_mask
 
             # ------------ occflexi prediction ------------
@@ -484,6 +503,11 @@ if args.train:
                         batch_occ_embed,
                         batch_adj, batch_part_nodes,
                         flexi_verts, fc_res)
+
+            # make_dot(pred_values2,
+            #          params=dict(occ_model.named_parameters())).render(
+            #              os.path.join(results_dir, "computation_graph"), format="png")
+            # exit(0)
 
             # ------------ flexi loss ------------
             mesh_loss = 0

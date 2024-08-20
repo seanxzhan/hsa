@@ -3,7 +3,7 @@ import importlib
 
 rep = 'occflexi'
 expt = 19
-mode = 'comp'
+mode = 'comp_scaling'
 types = ['geom']
 start = 0
 end = 50
@@ -26,7 +26,7 @@ def generate_html(shape_indices,
     <!DOCTYPE html>
     <html>
     <head>
-        <title>Shape Completion Results</title>
+        <title>Shape Completion (Scaled) Results</title>
         <style>
             .anno-header {
                 width: 100%;
@@ -102,7 +102,7 @@ def generate_html(shape_indices,
         </script>
     </head>
     <body>
-        <h2 style="text-align: center;">Shape Completion Results</h2>
+        <h2 style="text-align: center;">Shape Completion (Scaled) Results</h2>
     """
 
     for idx, shape_idx in enumerate(shape_indices):

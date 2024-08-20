@@ -16,6 +16,7 @@ from occ_networks.occflexi_network_18 import SDFDecoder, get_embedder
 from utils import misc, ops, reconstruct, tree
 from anytree.exporter import UniqueDotExporter
 from data_prep import preprocess_data_19
+# from torchviz import make_dot
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--id', type=str)
@@ -410,48 +411,50 @@ def inference_network(masked_indices, query_points,
         
     return learned_xforms, pred_values1, comp_sdf, flexi_vertices, flexi_faces
 
-# ------------ save masks ------------
-masks_path = f'{logs_path}/masks_{ds_start}_{ds_end}.hdf5'
-if args.train and not os.path.exists(masks_path):
-    hdf5_file = h5py.File(masks_path, 'w')
-    all_masked_indices = []
-    all_val_masks = []
-    hdf5_file.create_dataset(
-        'all_masked_indices', [iterations*num_batches, ],
-        dtype=h5py.vlen_dtype(np.int8))
-    hdf5_file.create_dataset(
-        'all_val_masks', [iterations*num_batches, batch_size, occ_res**3, 1],
-        dtype=np.int8)
+# # ------------ save masks ------------
+# masks_path = f'{logs_path}/masks_{ds_start}_{ds_end}.hdf5'
+# if args.train and not os.path.exists(masks_path):
+#     hdf5_file = h5py.File(masks_path, 'w')
+#     all_masked_indices = []
+#     all_val_masks = []
+#     hdf5_file.create_dataset(
+#         'all_masked_indices', [iterations*num_batches, ],
+#         dtype=h5py.vlen_dtype(np.int8))
+#     hdf5_file.create_dataset(
+#         'all_val_masks', [iterations*num_batches, batch_size, occ_res**3, 1],
+#         dtype=np.int8)
 
-    for i in tqdm(range(iterations)):
-        for b in range(num_batches):
-            # ------------ loading batch ------------        
-            batch_fg_part_indices, _, batch_values, _, _, _, _, _, _ =\
-                load_batch(b, batch_size)
-            num_parts_to_mask = np.random.randint(1, num_parts)
-            masked_indices = np.random.choice(num_parts, num_parts_to_mask,
-                                              replace=False)
-            # all_masked_indices.append(masked_indices)
-            hdf5_file['all_masked_indices'][i*num_batches+b] = masked_indices
+#     for i in tqdm(range(iterations)):
+#         for b in range(num_batches):
+#             # ------------ loading batch ------------        
+#             batch_fg_part_indices, _, batch_values, _, _, _, _, _, _ =\
+#                 load_batch(b, batch_size)
+#             num_parts_to_mask = np.random.randint(1, num_parts)
+#             masked_indices = np.random.choice(num_parts, num_parts_to_mask,
+#                                               replace=False)
+#             # all_masked_indices.append(masked_indices)
+#             hdf5_file['all_masked_indices'][i*num_batches+b] = masked_indices
 
-            val_mask = np.ones_like(batch_values.cpu().numpy())
-            for i in range(batch_size):
-                fg_part_indices = batch_fg_part_indices[i]
-                fg_part_indices_masked = fg_part_indices[masked_indices]
-                if len(fg_part_indices_masked) != 0:
-                    fg_part_indices_masked = np.concatenate(fg_part_indices_masked, axis=0)
-                else:
-                    fg_part_indices_masked = np.array([])
-                val_mask[i][fg_part_indices_masked] = 0
-            # all_val_masks.append(val_mask)
-            hdf5_file['all_val_masks'][i*num_batches+b] = val_mask
+#             val_mask = np.ones_like(batch_values.cpu().numpy())
+#             for i in range(batch_size):
+#                 fg_part_indices = batch_fg_part_indices[i]
+#                 fg_part_indices_masked = fg_part_indices[masked_indices]
+#                 if len(fg_part_indices_masked) != 0:
+#                     fg_part_indices_masked = np.concatenate(fg_part_indices_masked, axis=0)
+#                 else:
+#                     fg_part_indices_masked = np.array([])
+#                 val_mask[i][fg_part_indices_masked] = 0
+#             # all_val_masks.append(val_mask)
+#             hdf5_file['all_val_masks'][i*num_batches+b] = val_mask
     
-    hdf5_file.close()
+#     hdf5_file.close()
 
-# ------------ load masks ------------
-masks = h5py.File(masks_path, 'r')
-all_masked_indices = masks['all_masked_indices']
-all_val_masks = masks['all_val_masks']
+# exit(0)
+
+# # ------------ load masks ------------
+# masks = h5py.File(masks_path, 'r')
+# all_masked_indices = masks['all_masked_indices']
+# all_val_masks = masks['all_val_masks']
 
 # ------------ training ------------
 if args.train:
@@ -470,9 +473,27 @@ if args.train:
                 load_batch(b, batch_size)
             batch_gt_meshes = load_meshes(b, batch_size)
 
-            # ------------ random masking & gt value mask ------------
-            masked_indices = torch.from_numpy(all_masked_indices[it*num_batches+b]).to(device, torch.long)
-            val_mask = torch.from_numpy(all_val_masks[it*num_batches+b]).to(device, torch.float32)
+            # # ------------ random masking & gt value mask ------------
+            # masked_indices = torch.from_numpy(all_masked_indices[(it%500)*num_batches+b]).to(device, torch.long)
+            # val_mask = torch.from_numpy(all_val_masks[(it%500)*num_batches+b]).to(device, torch.float32)
+            # modified_values = batch_values * val_mask
+
+            # ------------ random masking ------------
+            num_parts_to_mask = np.random.randint(1, num_parts)
+            rand_indices = np.random.choice(num_parts, num_parts_to_mask,
+                                            replace=False)
+            masked_indices = torch.from_numpy(rand_indices).to(device, torch.long)
+
+            # ------------ gt value mask ------------
+            val_mask = torch.ones_like(batch_values).to(device, torch.float32)
+            for i in range(batch_size):
+                fg_part_indices = batch_fg_part_indices[i]
+                fg_part_indices_masked = fg_part_indices[masked_indices.cpu().numpy()]
+                if len(fg_part_indices_masked) != 0:
+                    fg_part_indices_masked = np.concatenate(fg_part_indices_masked, axis=0)
+                else:
+                    fg_part_indices_masked = np.array([])
+                val_mask[i][fg_part_indices_masked] = 0
             modified_values = batch_values * val_mask
 
             # ------------ occflexi prediction ------------
@@ -482,6 +503,11 @@ if args.train:
                         batch_occ_embed,
                         batch_adj, batch_part_nodes,
                         flexi_verts, fc_res)
+
+            # make_dot(pred_values2,
+            #          params=dict(occ_model.named_parameters())).render(
+            #              os.path.join(results_dir, "computation_graph"), format="png")
+            # exit(0)
 
             # ------------ flexi loss ------------
             mesh_loss = 0
