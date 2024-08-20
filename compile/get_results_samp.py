@@ -2,12 +2,13 @@ import os
 import importlib
 
 rep = 'occflexi'
-expt = 15
-mode = 'samp'; start = 0; end = 20
+expt = 19
+mode = 'samp'; start = 0; end = 1
 
 module = importlib.import_module(f"run.{rep}.{rep}_{expt}")
 model_idx_to_anno_id = getattr(module, "model_idx_to_anno_id")
-shape_indices = ['both'] + [model_idx_to_anno_id[i] for i in range(start, end)]
+# shape_indices = ['both'] + [model_idx_to_anno_id[i] for i in range(start, end)]
+shape_indices = [model_idx_to_anno_id[i] for i in range(start, end)]
 
 # Path pattern for the images
 base_path = f"/projects/hsa/results/{rep}/{rep}_{expt}/"

@@ -6,7 +6,7 @@ expt = 19
 mode = 'comp_scaling'
 types = ['geom']
 start = 0
-end = 50
+end = 24
 
 module = importlib.import_module(f"run.{rep}.{rep}_{expt}")
 model_idx_to_anno_id = getattr(module, "model_idx_to_anno_id")
