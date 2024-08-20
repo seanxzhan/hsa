@@ -6,7 +6,7 @@ parser.add_argument('--expt', type=int, required=True)
 args = parser.parse_args()
 
 rep = 'occflexi'
-test = 'comp_scaling'; r = range(0, 50)
+test = 'comp_scaling'; r = range(6, 50)
 expt = args.expt; it = -1
 
 # lst_fixed_indices = [0, 1, 2, 3]
