@@ -2013,7 +2013,7 @@ if args.interp:
 
     # ------------ reconstruct given sampled geometry ------------
     for interp_idx in range(num_interp+1):
-        print(f"interpolating {interp_idx}/{num_interp+1}")
+        print(f"interpolating {interp_idx+1}/{num_interp+1}")
         interp_results_dir = os.path.join(results_dir, str(interp_idx))
         misc.check_dir(interp_results_dir)
         # batch_occ_embed = complete_occ_embed[sample_idx].unsqueeze(0)
