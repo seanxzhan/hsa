@@ -44,7 +44,7 @@ def generate_html(anno_strs,
                 box-sizing: border-box;
             }
             img {
-                width: 100%;
+                width: 9%;
             }
         </style>
     </head>

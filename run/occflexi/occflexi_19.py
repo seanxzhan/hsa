@@ -306,12 +306,14 @@ def run_occ(batch_size, masked_indices, batch_points,
             batch_occ_embed,
             batch_adj, batch_part_nodes,
             flexi_verts, fc_res,
-            mask_flexi=False, custom_xforms=None,
+            mask_flexi=False,
+            custom_xforms=None,
             custom_points=None,
             custom_xformed_points=None,
             custom_flexi_verts=None,
             custom_xformed_flexi_verts=None,
-            just_bbox_info=False):
+            just_bbox_info=False,
+            fixed_indices=None):
     # ------------ parts, points, occ masks ------------
     parts_mask = torch.zeros((batch_occ_embed.shape[0], num_parts)).to(device, torch.float32)
     parts_mask[:, masked_indices] = 1
@@ -342,7 +344,10 @@ def run_occ(batch_size, masked_indices, batch_points,
         return learned_xforms
 
     if custom_xforms is not None:
-        learned_xforms = custom_xforms
+        if fixed_indices is not None:
+            learned_xforms[:, fixed_indices] = custom_xforms[fixed_indices]
+        else:
+            learned_xforms = custom_xforms
 
     # ------------ occ ------------
     if custom_xformed_points is not None:
@@ -400,7 +405,8 @@ def inference_network(masked_indices, query_points,
                       custom_xformed_points=None,
                       custom_flexi_verts=None,
                       custom_xformed_flexi_verts=None,
-                      just_bbox_info=False):
+                      just_bbox_info=False,
+                      fixed_indices=None):
     with torch.no_grad():
         learned_xforms, _, pred_values1, _, _, comp_sdf =\
             run_occ(1, masked_indices, query_points,
@@ -413,7 +419,8 @@ def inference_network(masked_indices, query_points,
                     custom_xformed_points=custom_xformed_points,
                     custom_flexi_verts=custom_flexi_verts,
                     custom_xformed_flexi_verts=custom_xformed_flexi_verts,
-                    just_bbox_info=just_bbox_info)
+                    just_bbox_info=just_bbox_info,
+                    fixed_indices=fixed_indices)
 
         _, flexi_vertices, flexi_faces =\
             run_flexi(torch.flatten(comp_sdf[0]).unsqueeze(0),
@@ -584,7 +591,8 @@ def infer_bbox_info(args, query_points, flexi_verts, fc_res, x_nx3, cube_fx8):
 def recon_one_shape(anno_id, results_dir, args,
                     batch_occ_embed, batch_adj, batch_part_nodes,
                     eval=True, custom_name_to_obbs=None,
-                    recon_gt=True, mask_gt=False, scales=None):
+                    recon_gt=True, mask_gt=False,
+                    scales=None, custom_xforms=None, fixed_indices=None):
     # ------------ gt bboxes ------------
     if custom_name_to_obbs is None:
         _, _, _, _, name_to_obbs, _, _, _, _, _ =\
@@ -650,6 +658,9 @@ def recon_one_shape(anno_id, results_dir, args,
             scaled_flexi_verts[0, i, :, 0] = flexi_verts[0][:, 0]/scales[i, 0]
             scaled_flexi_verts[0, i, :, 1] = flexi_verts[0][:, 1]/scales[i, 1]
             scaled_flexi_verts[0, i, :, 2] = flexi_verts[0][:, 2]/scales[i, 2]
+            # custom_xforms[i, 0] /= scales[i, 0]
+            # custom_xforms[i, 1] /= scales[i, 1]
+            # custom_xforms[i, 2] /= scales[i, 2]
 
     # ------------ run masked inference according to specs ------------
     if args.mask:
@@ -669,9 +680,11 @@ def recon_one_shape(anno_id, results_dir, args,
     if scales is None:
         learned_xforms, pred_values1, comp_sdf, flexi_vertices, flexi_faces =\
             inference_network(masked_indices, query_points,
-                            batch_occ_embed, 
-                            batch_adj, batch_part_nodes,
-                            flexi_verts, fc_res, x_nx3, cube_fx8)
+                              batch_occ_embed, 
+                              batch_adj, batch_part_nodes,
+                              flexi_verts, fc_res, x_nx3, cube_fx8,
+                              custom_xforms=custom_xforms,
+                              fixed_indices=fixed_indices)
     else:
         learned_xforms, pred_values1, comp_sdf, flexi_vertices, flexi_faces =\
             inference_network(masked_indices, None,
@@ -679,10 +692,12 @@ def recon_one_shape(anno_id, results_dir, args,
                               batch_adj, batch_part_nodes,
                               None, fc_res, x_nx3, cube_fx8,
                               custom_points=scaled_query_points,
-                              custom_flexi_verts=scaled_flexi_verts)
+                              custom_flexi_verts=scaled_flexi_verts,
+                              custom_xforms=custom_xforms,
+                              fixed_indices=fixed_indices)
                         #   custom_xforms=torch.from_numpy(
                         #       xforms[int(args.test_idx):int(args.test_idx)+1, :, :3, 3]).to(device, torch.float32))
-    
+
     # ------------ run all parts for bbox sizes ------------
     learned_geom = []
     for p in range(num_parts):
@@ -691,7 +706,12 @@ def recon_one_shape(anno_id, results_dir, args,
             inference_network(p_masked_indices, query_points,
                               batch_occ_embed,
                               batch_adj, batch_part_nodes,
-                              flexi_verts, fc_res, x_nx3, cube_fx8,)
+                              flexi_verts, fc_res, x_nx3, cube_fx8,
+                              custom_points=scaled_query_points if scales is not None else None,
+                              custom_flexi_verts=scaled_flexi_verts if scales is not None else None,
+                              custom_xforms=custom_xforms,
+                              fixed_indices=fixed_indices
+                              )
         sdf_grid = torch.reshape(
             pred_values,
             (1, pt_sample_res, pt_sample_res, pt_sample_res))
@@ -1866,16 +1886,16 @@ if args.comp_scaling:
         unfixed_occ_embed[:num_shapes, i*each_part_feat:(i+1)*each_part_feat] =\
             occ_embeddings.weight.data.cpu().numpy()[:num_shapes, idx*each_part_feat:(idx+1)*each_part_feat]
 
-    # ------------ define bbox_geom ------------
-    anchor_bbox_geom = torch.einsum('ijk, ikm -> ijm',
-                                    batch_part_nodes.to(torch.float32),
-                                    batch_node_feat)[0].cpu().numpy()
+    # # ------------ define bbox_geom ------------
+    # anchor_bbox_geom = torch.einsum('ijk, ikm -> ijm',
+    #                                 batch_part_nodes.to(torch.float32),
+    #                                 batch_node_feat)[0].cpu().numpy()
     # ------------ making query points ------------
     query_points = reconstruct.make_query_points(pt_sample_res)
     query_points = torch.from_numpy(query_points).to(device, torch.float32)
     query_points = query_points.unsqueeze(0)
     bs, num_points, _ = query_points.shape
-    # xfm, ext = infer_bbox_info(args, query_points, flexi_verts, fc_res, x_nx3, cube_fx8)
+    xfm, ext = infer_bbox_info(args, query_points, flexi_verts, fc_res, x_nx3, cube_fx8)
 
     # ------------ fit fixed part embeddings to nearest neighbors ------------
     from sklearn.decomposition import PCA
@@ -1954,13 +1974,17 @@ if args.comp_scaling:
         learned_geom = np.concatenate(learned_geom, axis=0)
 
         # ------------ scaling: compare to the shape w/ anchor part ------------
-        scales = anchor_bbox_geom / learned_geom
+        scales = ext / learned_geom
         # print(scales)
+        scales[fixed_parts] = 1.0
         scales = np.clip(scales, 0.8, 1.2)
 
         recon_one_shape(anno_id, samp_results_dir, args,
                         batch_occ_embed, batch_adj, batch_part_nodes,
-                        eval=False, mask_gt=True, scales=scales)
+                        eval=False, mask_gt=True,
+                        scales=scales,
+                        custom_xforms=torch.from_numpy(xfm).to(device),
+                        fixed_indices=torch.tensor(fixed_parts).to(device))
 
     exit(0)
 

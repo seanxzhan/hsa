@@ -5,8 +5,8 @@ rep = 'occflexi'
 expt = 19
 mode = 'comp_scaling'
 types = ['geom']
-start = 0
-end = 24
+start = 2
+end = 3
 
 module = importlib.import_module(f"run.{rep}.{rep}_{expt}")
 model_idx_to_anno_id = getattr(module, "model_idx_to_anno_id")
@@ -59,7 +59,7 @@ def generate_html(shape_indices,
                 padding: 10px;
                 box-sizing: border-box;
                 cursor: pointer;
-                width: 90%;
+                width: 100%;
             }
             img {
                 width: 100%;
