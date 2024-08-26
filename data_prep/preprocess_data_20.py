@@ -470,7 +470,7 @@ def merge_partnet_after_merging(anno_id, info=False):
             json.dump(parts_info, f)
 
     if cat_name == 'Chair':
-        with open('data_prep/further_merge_info_8.json', 'r') as f:
+        with open(f'data_prep/{cat_name}_further_merge_info_8.json', 'r') as f:
             further_merge_info = json.load(f)
     elif cat_name == 'Lamp':
         with open(f'data_prep/{cat_name}_further_merge_info_16.json', 'r') as f:
@@ -1151,8 +1151,8 @@ def get_info_from_voxels(anno_id, res, entire_mesh):
     entire_mesh.export(gt_mesh_path)
     vox_path = os.path.join(obj_dir, f'{anno_id}_{res}.binvox')
     vox_c_path = os.path.join(obj_dir, f'{anno_id}_{res}_c.binvox')
-    if not os.path.exists(vox_c_path):
-    # if True:
+    # if not os.path.exists(vox_c_path):
+    if True:
         ops.setup_vox(obj_dir)
         ops.voxelize_obj(
             obj_dir,

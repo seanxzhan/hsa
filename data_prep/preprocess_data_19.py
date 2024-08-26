@@ -470,7 +470,7 @@ def merge_partnet_after_merging(anno_id, info=False):
             json.dump(parts_info, f)
 
     if cat_name == 'Chair':
-        with open('data_prep/further_merge_info_8.json', 'r') as f:
+        with open(f'data_prep/{cat_name}_further_merge_info_8.json', 'r') as f:
             further_merge_info = json.load(f)
     elif cat_name == 'Lamp':
         with open(f'data_prep/{cat_name}_further_merge_info_16.json', 'r') as f:
@@ -1076,6 +1076,16 @@ def make_data_for_one(anno_id,
     # print("occ shape: ", occ.shape)
     # exit(0)
 
+    # from utils import polyvis
+    # print(fg_voxels.shape)
+    # polyvis.vis_occ(occ, [32]*3, show=True)
+    # polyvis.vis_sdf(flexi_values, [32]*3, show=True)
+    # # polyvis.vis_occ(fill_internal_voxels(
+    # #     torch.from_numpy(fg_voxels)).numpy(), [pt_sample_res]*3, show=True)
+    # # filled = fill_internal_voxels(torch.from_numpy(fg_voxels))
+    # # print(filled.shape)
+    # exit(0)
+
     pv_indices = np.arange(len(points))
     # np.random.seed(319)
     np.random.shuffle(pv_indices)
@@ -1260,7 +1270,7 @@ if __name__ == "__main__":
     # exit(0)
     
     # pass two to create the four_parts dataset
-    good_indices = np.load('data/chair_am_four_parts_16_0_4489.npy')
+    good_indices = np.load('data/chair_four_parts_16_0_4489.npy')
     data_pt = 'data/Chair_train_new_ids_to_objs_16_0_4489.json'
     # good_indices = np.load('data/chair_am_four_parts_19_0_1217.npy')
     # data_pt = 'data/Chair_test_new_ids_to_objs_19_0_1217.json'
@@ -1285,19 +1295,19 @@ if __name__ == "__main__":
     ids_w_four_parts = [ids_w_four_parts[x] for x in good_indices]
     just_ids = [just_ids[x] for x in good_indices]
 
-    print(just_ids)
-    with open(f'data/{cat_name}_train_{pt_sample_res}_19_{0}_{len(ids_w_four_parts)}.lst', 'w') as f:
-        for x in just_ids:
-            f.write(x+'\n')
-    print(f'data/{cat_name}_train_{pt_sample_res}_19_{0}_{len(ids_w_four_parts)}.lst')
-    exit(0)
+    # print(just_ids)
+    # with open(f'data/{cat_name}_train_{pt_sample_res}_19_{0}_{len(ids_w_four_parts)}.lst', 'w') as f:
+    #     for x in just_ids:
+    #         f.write(x+'\n')
+    # print(f'data/{cat_name}_train_{pt_sample_res}_19_{0}_{len(ids_w_four_parts)}.lst')
+    # exit(0)
 
-    export_data(ids_w_four_parts, save_data=True,
-                start=0, end=len(ids_w_four_parts))
+    # # export_data(ids_w_four_parts, save_data=True,
+    # #             start=0, end=len(ids_w_four_parts))
     # export_data(ids_w_four_parts, save_data=True,
-    #             start=0, end=3)
-    # print(ids_w_four_parts[:50])
-    exit(0)
+    #             start=0, end=10)
+    # # print(ids_w_four_parts[:50])
+    # exit(0)
 
     unique_name_to_new_id, all_entire_meshes, all_part_meshes,\
         all_ori_ids_to_new_ids, all_obbs, all_name_to_obbs =\
@@ -1307,7 +1317,7 @@ if __name__ == "__main__":
         all_obs = json.load(f)
     keys = list(all_obs.keys())
 
-    model_idx = 0
+    model_idx = 1
     anno_id = keys[model_idx]
     print(anno_id)
 

@@ -84,7 +84,7 @@ def save_fig(plt, title, img_path, rotate=False, transparent=False):
         im.save(img_path)
 
 def save_mesh_vis(trimesh_obj, out_path, mesh_y_rot=-45, mag=1,
-                  white_bg=False, save_img=True):
+                  white_bg=False, save_img=True, seg=False):
     mesh = pyrender.Mesh.from_trimesh(trimesh_obj, smooth=False)
 
     if white_bg:
@@ -122,17 +122,22 @@ def save_mesh_vis(trimesh_obj, out_path, mesh_y_rot=-45, mag=1,
     light_mat[:3, :3] = rot
     scene.add(light, pose=light_mat)
 
-    flags = RenderFlags.RGBA
+    if seg:
+        flags = RenderFlags.FLAT
+    else:
+        flags = RenderFlags.RGBA
     r = pyrender.OffscreenRenderer(viewport_width=500,
                                    viewport_height=500,
                                    point_size=1.0)
-    if white_bg:
-        color, _ = r.render(scene)
-    else:
-        color, _ = r.render(scene, flags=flags)
+    color, depth = r.render(scene, flags=flags)
     r.delete()
 
     im = Image.fromarray(color)
+    if seg:
+        color = np.array(color)
+        color[color == 255] = 0
+        color[color != 0] = 255
+        im = Image.fromarray(color)
     if save_img:
         im.save(out_path)
     return im

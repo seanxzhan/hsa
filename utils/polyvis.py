@@ -5,7 +5,7 @@ import trimesh
 
 # NOTE: polyscope doesn't work with headless display
 
-def vis_sdf(sdf, dims, img_path, plot_hist=False, hist_path=None, show=False):
+def vis_sdf(sdf, dims, img_path=None, plot_hist=False, hist_path=None, show=False):
     """sdf: numpy array
     """
     ps.init()

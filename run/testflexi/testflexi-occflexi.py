@@ -98,7 +98,7 @@ def my_load_mesh_part(model_idx, part_verts, part_faces, part):
 # ------------ init flexicubes ------------
 fc = FlexiCubes(device)
 x_nx3, cube_fx8 = fc.construct_voxel_grid(fc_res)
-x_nx3 *= 1.5
+x_nx3 *= 1.1
 flexi_verts = x_nx3.to(device).unsqueeze(0)
 def get_center_boundary_index(grid_res, device):
     v = torch.zeros((grid_res + 1, grid_res + 1, grid_res + 1),
@@ -116,8 +116,8 @@ def get_center_boundary_index(grid_res, device):
     return center_indices, boundary_indices
 center_indices, boundary_indices = get_center_boundary_index(fc_res, device)
 
-print(flexi_verts.shape)
-exit(0)
+# print(flexi_verts.shape)
+# exit(0)
 
 # flexi_verts = flexi_verts[0]
 # print(torch.min(flexi_verts[:, 0]), torch.max(flexi_verts[:, 0]))
@@ -137,8 +137,8 @@ timelapse.add_mesh_batch(category='gt_mesh',
                          faces_list=[gt_meshes[0].faces.cpu()])
 occ_pts = torch.from_numpy(
     torch.argwhere(
-        torch.from_numpy(occ[model_idx]).reshape([fc_res+1]*3) == 1.0).cpu().numpy())
-occ_pts = occ_pts/(fc_res+1) - 0.5
+        torch.from_numpy(occ[model_idx]).reshape([occ_res]*3) == 1.0).cpu().numpy())
+occ_pts = occ_pts/occ_res - 0.5
 timelapse.add_pointcloud_batch(category='gt_occ', pointcloud_list=[occ_pts])
 # np.save(os.path.join(results_dir, 'gt_occ.npy'), occ[model_idx]); exit(0)
 
@@ -230,6 +230,14 @@ def run_flexi(sdf, gt_mesh, pred_occ):
     mv, mvp = render.get_random_camera_batch(
         8, iter_res=train_res, device=device, use_kaolin=False)
     target = render.render_mesh_paper(gt_mesh, mv, mvp, train_res)
+
+    # print(torch.mean(gt_mesh.vertices, dim=0))
+    # exit(0)
+    gt_mean = torch.mean(gt_mesh.vertices, dim=0)
+    vertices = kaolin.ops.pointcloud.center_points(
+        flexicubes_mesh.vertices.unsqueeze(0), normalize=True).squeeze(0)
+    flexi_mean = torch.mean(vertices, dim=0)
+
     try: 
         buffers = render.render_mesh_paper(flexicubes_mesh, mv, mvp, train_res)
     except Exception as e:
@@ -246,7 +254,7 @@ def run_flexi(sdf, gt_mesh, pred_occ):
     mask_loss = (buffers['mask'] - target['mask']).abs().mean()
     depth_loss = (((((buffers['depth'] - (target['depth']))*
                      target['mask'])**2).sum(-1)+1e-8)).sqrt().mean() * 10
-    return mask_loss+depth_loss, vertices, faces
+    return mask_loss+depth_loss, vertices, faces, gt_mean, flexi_mean
 
 # ------------ training ------------
 if args.train:
@@ -266,12 +274,14 @@ if args.train:
         comp_sdf = ops.bin2sdf_torch_3(pred_verts_occ)
 
         mesh_loss = 0
+        center_loss = 0
         for s in range(batch_size):
-            one_mesh_loss, vertices, faces = run_flexi(
+            one_mesh_loss, vertices, faces, gt_mean, flexi_mean = run_flexi(
                 torch.flatten(comp_sdf[s]).unsqueeze(0), gt_meshes[s],
                 pred_verts_occ[s])
             mesh_loss += one_mesh_loss
-        total_loss = occ_loss + mesh_loss
+            center_loss += loss_f(gt_mean, flexi_mean)
+        total_loss = occ_loss + mesh_loss + center_loss
 
         total_loss.backward()
         optimizer.step()

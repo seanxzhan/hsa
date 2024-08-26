@@ -9,7 +9,7 @@ import scipy.ndimage as ndimage
 from utils import binvox_rw
 
 
-def export_mesh_norm(vertices, faces, path):
+def export_mesh_norm(vertices, faces, path=None):
     """vertices, faces: torch.Tensor
     """
     vertices = kaolin.ops.pointcloud.center_points(
@@ -17,7 +17,8 @@ def export_mesh_norm(vertices, faces, path):
     vertices = vertices.numpy()
     faces = faces.numpy()
     mesh = trimesh.Trimesh(vertices, faces)
-    mesh.export(path)
+    if path is not None:
+        mesh.export(path)
     return mesh
 
 

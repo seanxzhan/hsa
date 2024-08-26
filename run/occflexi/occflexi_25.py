@@ -292,6 +292,7 @@ def run_flexi(sdf, x_nx3, cube_fx8, fc_res, gt_mesh=None, pred_occ=None, one_img
         # mask = target["mask"][0].detach().cpu().expand(-1, -1, 3).numpy()
         # mask = (mask * 255).astype(np.uint8)
         # imageio.imwrite(os.path.join(results_dir, 'render_mask.png'), mask)
+        # exit(0)
 
         try: 
             buffers = render.render_mesh_paper(flexicubes_mesh, mv, mvp, train_res)
@@ -1555,7 +1556,10 @@ if args.inv:
     anno_id = model_idx_to_anno_id[model_idx]
     model_id = misc.anno_id_to_model_id(partnet_index_path)[anno_id]
     print(f"anno id: {anno_id}, model id: {model_id}")
-    results_dir = os.path.join(results_dir, f'inv_{mode}', anno_id)
+
+    inv_mode = 'one_img'
+
+    results_dir = os.path.join(results_dir, f'inv_{mode}_{inv_mode}', anno_id)
     misc.check_dir(results_dir)
     print("results dir: ", results_dir)
 
@@ -1589,7 +1593,6 @@ if args.inv:
 
     # ------------ optimize for embedding ------------
     # ['both', 'just_occ', 'just_flexi', 'one_img']
-    inv_mode = 'just_occ'
     if inv_mode == 'both':
         optimizer = torch.optim.Adam(
             [{"params": occ_embeddings.parameters(), "lr": 0.0075}])
@@ -1602,9 +1605,11 @@ if args.inv:
             [{"params": occ_embeddings.parameters(), "lr": 0.05}])
     if inv_mode == 'one_img':
         # for one image
+        # optimizer = torch.optim.Adam(
+        #     [{"params": occ_embeddings.parameters(), "lr": 0.075}])
         optimizer = torch.optim.Adam(
-            [{"params": occ_embeddings.parameters(), "lr": 0.075}])
-    num_iterations = 10001
+            [{"params": occ_embeddings.parameters(), "lr": 0.01}])
+    num_iterations = 5001
     if not os.path.exists(occ_embedding_fp):
         print("optimizing for embedding...")
         best_loss = float('inf')
