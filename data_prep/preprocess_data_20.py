@@ -39,7 +39,7 @@ name_to_cat = {
     'Table': '04379243',
     'Earphone': '03261776'
 }
-cat_name = 'Chair'
+cat_name = 'Table'
 cat_id = name_to_cat[cat_name]
 
 pt_sample_res = 64
@@ -745,7 +745,7 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
     for i, un in enumerate(all_unique_names):
         unique_name_to_new_id[un] = i
     with open(
-        f'data/{cat_name}_part_name_to_new_id_19_{start}_{end}.json',
+        f'data/{cat_name}_part_name_to_new_id_20_{start}_{end}.json',
         'w') as f:
         json.dump(unique_name_to_new_id, f)
     
@@ -766,7 +766,7 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
         all_new_ids_to_objs[all_valid_anno_ids[i]] = new_ids_to_objs
 
     with open(
-        f'data/{cat_name}_train_new_ids_to_objs_19_{start}_{end}.json',
+        f'data/{cat_name}_{mode}_new_ids_to_objs_20_{start}_{end}.json',
         'w') as f:
         json.dump(all_new_ids_to_objs, f)
 
@@ -785,7 +785,7 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
                       indent=0,
                       nodenamefunc=lambda node: node.name,
                       nodeattrfunc=lambda node: "shape=box",).to_picture(
-                          f"data_prep/tmp/tree_union_class_19_{start}_{end}.png")
+                          f"data_prep/tmp/tree_union_class_20_{start}_{end}.png")
     num_union_nodes_class = sum(1 for _ in PreOrderIter(union_root_part))
     print("num_union_nodes_class: ", num_union_nodes_class)
 
@@ -804,7 +804,7 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
             make_edges(child)
     make_edges(union_root_part)
 
-    np.save(f'data/{cat_name}_union_node_names_19_{start}_{end}.npy',
+    np.save(f'data/{cat_name}_union_node_names_20_{start}_{end}.npy',
             union_node_names)
     
     # reconstruct a tree from adj
@@ -814,7 +814,7 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
                       nodenamefunc=lambda node: node.name,
                       nodeattrfunc=lambda node: "shape=box",
                       ).to_picture(
-                          f"data_prep/tmp/recon_tree_union_19_{start}_{end}.png")
+                          f"data_prep/tmp/recon_tree_union_20_{start}_{end}.png")
 
     print("making dense graphs")
     all_node_features = []
@@ -847,7 +847,7 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
     
     # exit(0)
 
-    fn = f'data/{cat_name}_test_{pt_sample_res}_19_{start}_{end}.hdf5'
+    fn = f'data/{cat_name}_{mode}_{pt_sample_res}_20_{start}_{end}.hdf5'
     hdf5_file = h5py.File(fn, 'w')
     hdf5_file.create_dataset(
         'part_num_indices', [num_shapes, num_parts],
@@ -1151,8 +1151,8 @@ def get_info_from_voxels(anno_id, res, entire_mesh):
     entire_mesh.export(gt_mesh_path)
     vox_path = os.path.join(obj_dir, f'{anno_id}_{res}.binvox')
     vox_c_path = os.path.join(obj_dir, f'{anno_id}_{res}_c.binvox')
-    # if not os.path.exists(vox_c_path):
-    if True:
+    if not os.path.exists(vox_c_path):
+    # if True:
         ops.setup_vox(obj_dir)
         ops.voxelize_obj(
             obj_dir,
@@ -1251,19 +1251,24 @@ if __name__ == "__main__":
     fc = FlexiCubes('cpu')
     x_nx3, cube_fx8 = fc.construct_voxel_grid(31)
 
+    mode = 'train'
+
     # pass one to create the preprocess_16 dataset
     # export_data(train_ids, save_data=False, start=0, end=4489)
     # export_data(train_ids, save_data=True, start=0, end=1554)
     # export_data(train_ids, save_data=False, start=0, end=5707)
     # export_data(train_ids, save_data=False, start=0, end=147)
-    # export_data(test_ids, save_data=False, start=0, end=1217)
+    # print(len(train_ids) + len(val_ids))
     # exit(0)
+
+    export_data(train_ids + val_ids, save_data=True, start=0, end=5106)
+    exit(0)
     
     # pass two to create the four_parts dataset
-    good_indices = np.load('data/chair_am_four_parts_16_0_4489.npy')
-    data_pt = 'data/Chair_train_new_ids_to_objs_16_0_4489.json'
-    # good_indices = np.load('data/chair_am_four_parts_19_0_1217.npy')
-    # data_pt = 'data/Chair_test_new_ids_to_objs_19_0_1217.json'
+    # good_indices = np.load('data/chair_am_four_parts_16_0_4489.npy')
+    # data_pt = 'data/Chair_train_new_ids_to_objs_16_0_4489.json'
+    # good_indices = np.load('data/chair_am_four_parts_20_0_1217.npy')
+    # data_pt = 'data/Chair_test_new_ids_to_objs_20_0_1217.json'
     # good_indices = np.load('data/chair_four_parts_8_0_2000.npy')
     # data_pt = 'data/Chair_train_new_ids_to_objs_8_0_2000.json'
     # good_indices = np.load('data/lamp_am_five_parts_17_0_1554.npy')
@@ -1276,21 +1281,11 @@ if __name__ == "__main__":
         data: Dict = json.load(f)
     all_ids = np.array(list(data.keys()))
     ids_w_four_parts = []
-    just_ids = []
-    for x in train_ids:
-    # for x in test_ids:
+    # for x in train_ids:
+    for x in test_ids:
         if x['anno_id'] in all_ids:
             ids_w_four_parts.append(x)
-            just_ids.append(x['model_id'])
     ids_w_four_parts = [ids_w_four_parts[x] for x in good_indices]
-    just_ids = [just_ids[x] for x in good_indices]
-
-    print(just_ids)
-    with open(f'data/{cat_name}_train_{pt_sample_res}_19_{0}_{len(ids_w_four_parts)}.lst', 'w') as f:
-        for x in just_ids:
-            f.write(x+'\n')
-    print(f'data/{cat_name}_train_{pt_sample_res}_19_{0}_{len(ids_w_four_parts)}.lst')
-    exit(0)
 
     export_data(ids_w_four_parts, save_data=True,
                 start=0, end=len(ids_w_four_parts))
@@ -1303,7 +1298,7 @@ if __name__ == "__main__":
         all_ori_ids_to_new_ids, all_obbs, all_name_to_obbs =\
                 export_data(ids_w_four_parts, save_data=False, start=0, end=10)
 
-    with open('data/Chair_train_new_ids_to_objs_19_0_10.json', 'r') as f:
+    with open('data/Chair_train_new_ids_to_objs_20_0_10.json', 'r') as f:
         all_obs = json.load(f)
     keys = list(all_obs.keys())
 

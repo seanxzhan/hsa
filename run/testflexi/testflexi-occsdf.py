@@ -28,11 +28,11 @@ name_to_cat = {
 }
 cat_name = 'Chair'
 pt_sample_res = 64
-ds_start, ds_end = 0, 10
+ds_start, ds_end = 0, 508
 OVERFIT = args.of
 overfit_idx = args.of_idx
 device = 'cuda'
-lr = 0.01
+lr = 0.001
 iterations = 3000
 train_res = [512, 512]
 fc_voxel_grid_res = 31
@@ -53,7 +53,7 @@ timelapse_dir = os.path.join(results_dir, 'training_timelapse')
 print("timelapse dir: ", timelapse_dir)
 timelapse = kaolin.visualize.Timelapse(timelapse_dir)
 
-train_data_path = f'data/{cat_name}_train_{pt_sample_res}_18_{ds_start}_{ds_end}.hdf5'
+train_data_path = f'data/{cat_name}_train_{pt_sample_res}_19_{ds_start}_{ds_end}.hdf5'
 train_data = h5py.File(train_data_path, 'r')
 if OVERFIT:
     part_num_indices = train_data['part_num_indices'][overfit_idx:overfit_idx+1]
@@ -97,7 +97,7 @@ def my_load_mesh(model_idx, tri=False):
         gt_vertices_aligned.unsqueeze(0), normalize=True).squeeze(0)
     gt_vertices_aligned = gt_vertices_aligned.cpu().numpy()
     if not tri:
-        return util.load_mesh_vf(gt_vertices_aligned, gt_mesh.faces, device)
+        return util.load_mesh_vf_kaolin(gt_vertices_aligned, gt_mesh.faces, device)
     else:
         return trimesh.Trimesh(gt_vertices_aligned, gt_mesh.faces)
 
@@ -117,7 +117,7 @@ fc = FlexiCubes(device)
 x_nx3, cube_fx8 = fc.construct_voxel_grid(fc_voxel_grid_res)
 # NOTE: 2* is necessary! Dunno why
 batch_points = x_nx3.clone().to(device)
-x_nx3 = 2*x_nx3
+x_nx3 = 1*x_nx3
 x_nx3 = x_nx3.clone().detach().requires_grad_(True)
 
 # NOTE: testing network output

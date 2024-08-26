@@ -2,8 +2,8 @@ import os
 import importlib
 
 rep = 'occflexi'
-expt = 19
-mode = 'inv'; start = 475; end = 508
+expt = 26
+mode = 'inv'; start = 3000; end = 3272
 # batch_size = 10
 
 module = importlib.import_module(f"run.{rep}.{rep}_{expt}")

@@ -56,22 +56,28 @@ lr = 0.001
 iterations = 10000; iterations += 1
 train_res = [512, 512]
 fc_res = 31
-num_shapes = 475
 batch_size = 25
 each_part_feat = 32
 each_box_feat = 32
 embed_dim = 128
 ds_id = 19
-ds_start, ds_end = 0, 508
 expt_id = 19
 anchor_idx = -1
+
+mode = 'test'
+if mode == 'train':
+    ds_start, ds_end = 0, 508
+    num_shapes = 475
+else:
+    ds_start, ds_end = 0, 911
+    num_shapes = 50
 num_batches = num_shapes // batch_size
 
 # ------------ data dirs ------------
 partnet_dir = '/datasets/PartNet'
 partnet_index_path = '/sota/partnet_dataset/stats/all_valid_anno_info.txt'
 train_new_ids_to_objs_path = \
-    f'data/{cat_name}_train_new_ids_to_objs_{ds_id}_{ds_start}_{ds_end}.json'
+    f'data/{cat_name}_{mode}_new_ids_to_objs_{ds_id}_{ds_start}_{ds_end}.json'
 with open(train_new_ids_to_objs_path, 'r') as f:
     train_new_ids_to_objs: Dict = json.load(f)
 model_idx_to_anno_id = {}
@@ -94,7 +100,7 @@ writer = SummaryWriter(os.path.join(logs_path, 'summary'))
 
 # ------------ data loading ------------
 train_data_path = \
-    f'data/{cat_name}_train_{pt_sample_res}_{ds_id}_{ds_start}_{ds_end}.hdf5'
+    f'data/{cat_name}_{mode}_{pt_sample_res}_{ds_id}_{ds_start}_{ds_end}.hdf5'
 train_data = h5py.File(train_data_path, 'r')
 part_num_indices = train_data['part_num_indices']
 all_indices = train_data['all_indices']
@@ -1538,7 +1544,7 @@ if args.inv:
     anno_id = model_idx_to_anno_id[model_idx]
     model_id = misc.anno_id_to_model_id(partnet_index_path)[anno_id]
     print(f"anno id: {anno_id}, model id: {model_id}")
-    results_dir = os.path.join(results_dir, 'inv', anno_id)
+    results_dir = os.path.join(results_dir, f'inv_{mode}', anno_id)
     misc.check_dir(results_dir)
     print("results dir: ", results_dir)
 

@@ -52,22 +52,28 @@ lr = 0.001
 iterations = 5000; iterations += 1
 train_res = [512, 512]
 fc_res = 31
-num_shapes = 3000
 batch_size = 15
 each_part_feat = 32
 each_box_feat = 32
 embed_dim = 128
 ds_id = 19
-ds_start, ds_end = 0, 3272
 expt_id = 26
 anchor_idx = -1
+
+mode = 'test'
+if mode == 'train':
+    ds_start, ds_end = 0, 3272
+    num_shapes = 3000
+else:
+    ds_start, ds_end = 0, 911
+    num_shapes = 50
 num_batches = num_shapes // batch_size
 
 # ------------ data dirs ------------
 partnet_dir = '/datasets/PartNet'
 partnet_index_path = '/sota/partnet_dataset/stats/all_valid_anno_info.txt'
 train_new_ids_to_objs_path = \
-    f'data/{cat_name}_train_new_ids_to_objs_{ds_id}_{ds_start}_{ds_end}.json'
+    f'data/{cat_name}_{mode}_new_ids_to_objs_{ds_id}_{ds_start}_{ds_end}.json'
 with open(train_new_ids_to_objs_path, 'r') as f:
     train_new_ids_to_objs: Dict = json.load(f)
 model_idx_to_anno_id = {}
@@ -90,7 +96,7 @@ writer = SummaryWriter(os.path.join(logs_path, 'summary'))
 
 # ------------ data loading ------------
 train_data_path = \
-    f'data/{cat_name}_train_{pt_sample_res}_{ds_id}_{ds_start}_{ds_end}.hdf5'
+    f'data/{cat_name}_{mode}_{pt_sample_res}_{ds_id}_{ds_start}_{ds_end}.hdf5'
 train_data = h5py.File(train_data_path, 'r')
 part_num_indices = train_data['part_num_indices']
 all_indices = train_data['all_indices']
@@ -305,7 +311,6 @@ def run_flexi(sdf, x_nx3, cube_fx8, fc_res, gt_mesh=None, pred_occ=None, one_img
 def run_occ(batch_size, masked_indices, batch_points,
             batch_occ_embed,
             batch_adj, batch_part_nodes,
-            flexi_verts, fc_res,
             mask_flexi=False, custom_xforms=None,
             custom_xformed_points=None,
             custom_xformed_flexi_verts=None,
@@ -388,7 +393,6 @@ def run_occ(batch_size, masked_indices, batch_points,
 def inference_network(masked_indices, query_points,
                       batch_occ_embed,
                       batch_adj, batch_part_nodes,
-                      flexi_verts, fc_res, x_nx3, cube_fx8,
                       custom_xforms=None,
                       custom_xformed_points=None,
                       custom_xformed_flexi_verts=None,
@@ -398,7 +402,6 @@ def inference_network(masked_indices, query_points,
             run_occ(1, masked_indices, query_points,
                     batch_occ_embed, 
                     batch_adj, batch_part_nodes,
-                    flexi_verts, fc_res,
                     mask_flexi=True, 
                     custom_xforms=custom_xforms,
                     custom_xformed_points=custom_xformed_points,
@@ -608,7 +611,7 @@ def infer_bbox_info(args, query_points, flexi_verts, fc_res, x_nx3, cube_fx8):
     learned_geom = []
     for p in range(num_parts):
         p_masked_indices = list(set(range(num_parts)) - set([p]))
-        learned_xforms, _, _, part_flexi_vertices, part_flexi_faces =\
+        learned_xforms, _, =\
             inference_network(p_masked_indices, query_points,
                               batch_occ_embed, 
                               batch_adj, batch_part_nodes,
@@ -653,31 +656,24 @@ def recon_one_shape(anno_id, results_dir, args,
     mesh_gt_path = os.path.join(results_dir, 'mesh_gt.png')
     learned_obbs_path = os.path.join(results_dir, 'obbs_pred.png')
     obbs_path = os.path.join(results_dir, 'obbs_gt.png')
-    mesh_flexi_path = os.path.join(results_dir, 'mesh_flexi.png')
     if recon_gt:
         if not mask_gt:
             lst_paths = [
                 obbs_path, mesh_gt_path,
-                learned_obbs_path, mesh_occ_path, mesh_flexi_path]
+                learned_obbs_path, mesh_occ_path]
         else:
             mask_mesh_gt_path = os.path.join(results_dir, 'mask_mesh_gt.png')
             lst_paths = [
                 obbs_path, mesh_gt_path, mask_mesh_gt_path,
-                learned_obbs_path, mesh_occ_path, mesh_flexi_path]
+                learned_obbs_path, mesh_occ_path]
     else:
         lst_paths = [
-            learned_obbs_path, mesh_occ_path, mesh_flexi_path]
+            learned_obbs_path, mesh_occ_path]
 
     # ------------ making query points ------------
     query_points = reconstruct.make_query_points(pt_sample_res)
     query_points = torch.from_numpy(query_points).to(device, torch.float32)
     query_points = query_points.unsqueeze(0)
-
-    # ------------ make flexi verts higher resolution ------------
-    fc_res = 47
-    x_nx3, cube_fx8 = fc.construct_voxel_grid(fc_res)
-    x_nx3 *= 1.15
-    flexi_verts: torch.Tensor = x_nx3.to(device).unsqueeze(0).expand(1, -1, -1)
 
     # ------------ run masked inference according to specs ------------
     if args.mask:
@@ -694,49 +690,48 @@ def recon_one_shape(anno_id, results_dir, args,
     else:
         masked_indices = torch.Tensor([]).to(device, torch.long)
         print("reconstructing...")
-    learned_xforms, pred_values1, comp_sdf, flexi_vertices, flexi_faces =\
+    learned_xforms, pred_values1 =\
         inference_network(masked_indices, query_points,
                           batch_occ_embed, 
                           batch_adj, batch_part_nodes,
-                          flexi_verts, fc_res, x_nx3, cube_fx8,
         )
                         #   custom_xforms=torch.from_numpy(
                         #       xforms[int(args.test_idx):int(args.test_idx)+1, :, :3, 3]).to(device, torch.float32))
     
-    # ------------ run all parts for bbox sizes ------------
-    learned_geom = []
-    for p in range(num_parts):
-        p_masked_indices = list(set(range(num_parts)) - set([p]))
-        _, pred_values, _, part_flexi_vertices, part_flexi_faces =\
-            inference_network(p_masked_indices, query_points,
-                              batch_occ_embed,
-                              batch_adj, batch_part_nodes,
-                              flexi_verts, fc_res, x_nx3, cube_fx8,)
-        sdf_grid = torch.reshape(
-            pred_values,
-            (1, pt_sample_res, pt_sample_res, pt_sample_res))
-        sdf_grid = torch.permute(sdf_grid, (0, 2, 1, 3))
-        occ_vertices, occ_faces =\
-            kaolin.ops.conversions.voxelgrids_to_trianglemeshes(sdf_grid)
-        if occ_vertices[0].cpu().shape[0] == 0:
-            learned_geom.append(np.array([0.0, 0.0, 0.0]))
-            continue
-        part_mesh = trimesh.Trimesh(
-            part_flexi_vertices.cpu().numpy(),
-            part_flexi_faces.cpu().numpy())
-        bbox_geom = np.array(part_mesh.bounding_box.primitive.extents, dtype=np.float32)
-        learned_geom.append(bbox_geom)
+    # TODO: fix this
+    # # ------------ run all parts for bbox sizes ------------
+    # learned_geom = []
+    # for p in range(num_parts):
+    #     p_masked_indices = list(set(range(num_parts)) - set([p]))
+    #     _, pred_values =\
+    #         inference_network(p_masked_indices, query_points,
+    #                           batch_occ_embed,
+    #                           batch_adj, batch_part_nodes,)
+    #     sdf_grid = torch.reshape(
+    #         pred_values,
+    #         (1, pt_sample_res, pt_sample_res, pt_sample_res))
+    #     sdf_grid = torch.permute(sdf_grid, (0, 2, 1, 3))
+    #     occ_vertices, occ_faces =\
+    #         kaolin.ops.conversions.voxelgrids_to_trianglemeshes(sdf_grid)
+    #     if occ_vertices[0].cpu().shape[0] == 0:
+    #         learned_geom.append(np.array([0.0, 0.0, 0.0]))
+    #         continue
+    #     part_mesh = trimesh.Trimesh(
+    #         part_flexi_vertices.cpu().numpy(),
+    #         part_flexi_faces.cpu().numpy())
+    #     bbox_geom = np.array(part_mesh.bounding_box.primitive.extents, dtype=np.float32)
+    #     learned_geom.append(bbox_geom)
 
     # ------------ pred bboxes ------------
     learned_xforms = learned_xforms[0].cpu().numpy()
     learned_obbs_of_interest = [[]] * num_parts
     for i in range(num_parts):
-        # ext = extents[model_idx, i]
-        learned_ext = learned_geom[i]
+        ext = extents[model_idx, i]
+        # learned_ext = learned_geom[i]
         learned_xform = np.eye(4)
         learned_xform[:3, 3] = -learned_xforms[i]
-        # ext_xform = (ext, learned_xform)
-        ext_xform = (learned_ext, learned_xform)
+        ext_xform = (ext, learned_xform)
+        # ext_xform = (learned_ext, learned_xform)
         learned_obbs_of_interest[i] = [ext_xform]
 
     mag = 0.8
@@ -753,21 +748,6 @@ def recon_one_shape(anno_id, results_dir, args,
                                     os.path.join(results_dir, 'mesh_occ.obj'))
     visualize.save_mesh_vis(mesh_occ, mesh_occ_path,
                             mag=mag, white_bg=white_bg)
-    
-    # ------------ mesh from flexicubes ------------
-    print("exporting flexi mesh")
-    flexi_vertices = flexi_vertices.detach().cpu()
-    flexi_faces = flexi_faces.detach().cpu()
-    # flexi_mesh = trimesh.Trimesh(flexi_vertices.numpy(), flexi_faces.numpy())
-    # flexi_bbox_ext = flexi_mesh.bounding_box.primitive.extents
-    # print(flexi_bbox_ext)
-    mesh_flexi = ops.export_mesh_norm(flexi_vertices, flexi_faces,
-                                      os.path.join(results_dir, 'mesh_flexi.obj'))
-    visualize.save_mesh_vis(mesh_flexi, mesh_flexi_path,
-                            mag=mag, white_bg=white_bg)
-    print("saving flexi sdf")
-    np.save(os.path.join(results_dir, f'flexi_sdf.npy'),
-            comp_sdf[0].detach().cpu().numpy())
 
     # ------------ masked and unmasked indices ------------
     masked_indices = masked_indices.cpu().numpy().tolist()
@@ -837,14 +817,9 @@ def recon_one_shape(anno_id, results_dir, args,
         gt_samples = torch.from_numpy(gt_samples).to(device)
         occ_samples, _ = trimesh.sample.sample_surface(mesh_occ, 10000, seed=319)
         occ_samples = torch.from_numpy(occ_samples).to(device)
-        flexi_samples, _ = trimesh.sample.sample_surface(mesh_flexi, 10000, seed=319)
-        flexi_samples = torch.from_numpy(flexi_samples).to(device)
         occ_chamfer = kaolin.metrics.pointcloud.chamfer_distance(
             occ_samples.unsqueeze(0), gt_samples.unsqueeze(0)).mean()
-        flexi_chamfer = kaolin.metrics.pointcloud.chamfer_distance(
-            flexi_samples.unsqueeze(0), gt_samples.unsqueeze(0)).mean()
         print("chamfer distance, gt-occ: ", occ_chamfer.cpu().numpy())
-        print("chamfer distance, gt-flexi: ", flexi_chamfer.cpu().numpy())
 
     # ------------ obbs visualization ------------
     print("exporting obbs")
@@ -1538,7 +1513,7 @@ if args.inv:
     anno_id = model_idx_to_anno_id[model_idx]
     model_id = misc.anno_id_to_model_id(partnet_index_path)[anno_id]
     print(f"anno id: {anno_id}, model id: {model_id}")
-    results_dir = os.path.join(results_dir, 'inv', anno_id)
+    results_dir = os.path.join(results_dir, f'inv_{mode}', anno_id)
     misc.check_dir(results_dir)
     print("results dir: ", results_dir)
 
@@ -1564,29 +1539,9 @@ if args.inv:
         torch.nn.init.normal_(
             occ_embeddings.weight.data, 0.0, 1 / math.sqrt(num_parts*each_part_feat),)
 
-    # ------------ make flexi verts higher resolution ------------
-    fc_res = 31
-    x_nx3, cube_fx8 = fc.construct_voxel_grid(fc_res)
-    x_nx3 *= 1.15
-    flexi_verts: torch.Tensor = x_nx3.to(device).unsqueeze(0).expand(1, -1, -1)
-
     # ------------ optimize for embedding ------------
-    # ['both', 'just_occ', 'just_flexi', 'one_img']
-    inv_mode = 'just_occ'
-    if inv_mode == 'both':
-        optimizer = torch.optim.Adam(
-            [{"params": occ_embeddings.parameters(), "lr": 0.0075}])
-    if inv_mode == 'just_occ':
-        optimizer = torch.optim.Adam(
-            [{"params": occ_embeddings.parameters(), "lr": 0.01}])
-    if inv_mode == 'just_flexi':
-        # for just mesh
-        optimizer = torch.optim.Adam(
-            [{"params": occ_embeddings.parameters(), "lr": 0.05}])
-    if inv_mode == 'one_img':
-        # for one image
-        optimizer = torch.optim.Adam(
-            [{"params": occ_embeddings.parameters(), "lr": 0.075}])
+    optimizer = torch.optim.Adam(
+        [{"params": occ_embeddings.parameters(), "lr": 0.01}])
     num_iterations = 10001
     if not os.path.exists(occ_embedding_fp):
         print("optimizing for embedding...")
@@ -1611,36 +1566,13 @@ if args.inv:
                     batch_node_feat, batch_adj, batch_mask, batch_vec)
             # learned_xforms = batch_xforms
 
-            if inv_mode in ['both', 'just_occ']:
-                # ------------ occ ------------
-                transformed_points =\
-                    batch_points.unsqueeze(1).expand(-1, num_parts, -1, -1) +\
-                    learned_xforms.unsqueeze(2)
-                pred_values2, _ = torch.max(occ_model.forward(
-                    transformed_points, batch_occ_embed), dim=-1, keepdim=True)
-                loss2 = loss_f(pred_values2, batch_values)
-                if inv_mode != 'both':
-                    total_loss = loss2
-
-            if inv_mode in ['both', 'just_flexi', 'one_img']:
-                # ------------ flexi ------------
-                transformed_flexi_verts =\
-                    flexi_verts[0:1].unsqueeze(1).expand(-1, num_parts, -1, -1) +\
-                    learned_xforms.unsqueeze(2)
-                pred_verts_occ, _ = torch.max(occ_model.forward(
-                    transformed_flexi_verts, batch_occ_embed), dim=-1, keepdim=True)
-                comp_sdf = ops.bin2sdf_torch_3( 
-                    pred_verts_occ.view(-1, fc_res+1, fc_res+1, fc_res+1))
-                one_mesh_loss, _, _ = run_flexi(
-                    torch.flatten(comp_sdf[0]).unsqueeze(0),
-                    x_nx3, cube_fx8, fc_res,
-                    batch_gt_meshes[0], pred_verts_occ[0],
-                    one_img=inv_mode=='one_img')
-                if inv_mode != 'both':
-                    total_loss = one_mesh_loss
-
-            if inv_mode == 'both':
-                total_loss = loss2 + one_mesh_loss
+            # ------------ occ ------------
+            transformed_points =\
+                batch_points.unsqueeze(1).expand(-1, num_parts, -1, -1) +\
+                learned_xforms.unsqueeze(2)
+            pred_values2, _ = torch.max(occ_model.forward(
+                transformed_points, batch_occ_embed), dim=-1, keepdim=True)
+            total_loss = loss_f(pred_values2, batch_values)
 
             if i % 1000 == 0:  # Print loss every 100 iterations
                 # print('Iteration {}/{}, Loss: {:.8f}'.format(
