@@ -1584,7 +1584,7 @@ if args.inv:
             [{"params": occ_embeddings.parameters(), "lr": 0.0075}])
     if inv_mode == 'just_occ':
         optimizer = torch.optim.Adam(
-            [{"params": occ_embeddings.parameters(), "lr": 0.025}])
+            [{"params": occ_embeddings.parameters(), "lr": 0.02}])
     if inv_mode == 'just_flexi':
         # for just mesh
         optimizer = torch.optim.Adam(

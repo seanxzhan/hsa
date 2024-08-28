@@ -15,7 +15,7 @@ from flexi import render, util
 from occ_networks.occflexi_network_18 import SDFDecoder, get_embedder
 from utils import misc, ops, reconstruct, tree
 from anytree.exporter import UniqueDotExporter
-from data_prep import preprocess_data_19
+from data_prep import preprocess_data_20
 # from torchviz import make_dot
 
 parser = argparse.ArgumentParser()
@@ -129,7 +129,7 @@ num_points = normalized_points.shape[1]
 _, num_parts = part_num_indices.shape
 all_fg_part_indices = []
 for i in range(num_shapes):
-    indices = preprocess_data_19.convert_flat_list_to_fg_part_indices(
+    indices = preprocess_data_20.convert_flat_list_to_fg_part_indices(
         part_num_indices[i], all_indices[i])
     all_fg_part_indices.append(np.array(indices, dtype=object))
 
@@ -612,10 +612,10 @@ def recon_one_shape(anno_id, results_dir, args,
     # ------------ gt bboxes ------------
     if custom_name_to_obbs is None:
         _, _, _, _, name_to_obbs, _, _, _, _, _ =\
-            preprocess_data_19.merge_partnet_after_merging(anno_id)
+            preprocess_data_20.merge_partnet_after_merging(anno_id)
     else:
         name_to_obbs = custom_name_to_obbs
-    with open(f'data/{cat_name}_part_name_to_new_id_19_{ds_start}_{ds_end}.json', 'r') as f:
+    with open(f'data/{cat_name}_part_name_to_new_id_20_{ds_start}_{ds_end}.json', 'r') as f:
         unique_name_to_new_id = json.load(f)
     part_obbs = []
     unique_names = list(unique_name_to_new_id.keys())
@@ -1733,7 +1733,7 @@ if args.samp:
     samp_lat_occ_embeddings = torch.from_numpy(samp_lat_occ_embeddings)
     
     _, _, _, _, name_to_obbs, _, _, _, _, _ =\
-        preprocess_data_19.merge_partnet_after_merging(anno_id)
+        preprocess_data_20.merge_partnet_after_merging(anno_id)
 
     # ------------ reconstruct given a sampled geometry embedding ------------
     # given occ, network optimizes for bbox transformation given occ

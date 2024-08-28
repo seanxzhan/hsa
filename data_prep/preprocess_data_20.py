@@ -39,7 +39,7 @@ name_to_cat = {
     'Table': '04379243',
     'Earphone': '03261776'
 }
-cat_name = 'Table'
+cat_name = 'Chair'
 cat_id = name_to_cat[cat_name]
 
 pt_sample_res = 64

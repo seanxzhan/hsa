@@ -140,6 +140,14 @@ def align_xform(ext, xform):
     return ext_xform
 
 
+# mesh = trimesh.load_mesh('/projects/hsa/results/occflexi/occflexi_23_injection/flexi_part_meshed_during_training/part_mesh_1.obj')
+# verts = mesh.vertices
+# print(np.min(verts[:,0]), np.max(verts[:,0]))
+# print(np.min(verts[:,1]), np.max(verts[:,1]))
+# print(np.min(verts[:,2]), np.max(verts[:,2]))
+# exit(0)
+
+
 def build_obbs(anno_id, part_info: Dict):
     # first, normalize the mesh vertices
     all_mesh_verts = []
@@ -211,6 +219,22 @@ def build_obbs(anno_id, part_info: Dict):
         ext_xform = align_xform(ext, xform)
         obbs.append(ext_xform)
         name_to_obbs[name] = ext_xform
+
+    # # print(len(concat_part_meshes))
+    # # print(len(obbs))
+    # print(obbs[0])
+    # verts = concat_part_meshes[0].vertices
+    # print(np.min(verts[:,0]), np.max(verts[:,0]))
+    # print(np.min(verts[:,1]), np.max(verts[:,1]))
+    # print(np.min(verts[:,2]), np.max(verts[:,2]))
+    # verts = verts - obbs[0][1][:3, 3]
+    # print(np.min(verts[:,0]), np.max(verts[:,0]))
+    # print(np.min(verts[:,1]), np.max(verts[:,1]))
+    # print(np.min(verts[:,2]), np.max(verts[:,2]))
+    # faces = concat_part_meshes[0].faces
+    # mesh = trimesh.Trimesh(verts, faces)
+    # mesh.export('out.obj')
+    # exit(0)
     
     entire_mesh_orig = trimesh.util.concatenate(all_mesh_parts)
 
@@ -1270,7 +1294,7 @@ if __name__ == "__main__":
     # exit(0)
     
     # pass two to create the four_parts dataset
-    good_indices = np.load('data/chair_four_parts_16_0_4489.npy')
+    good_indices = np.load('data/chair_am_four_parts_16_0_4489.npy')
     data_pt = 'data/Chair_train_new_ids_to_objs_16_0_4489.json'
     # good_indices = np.load('data/chair_am_four_parts_19_0_1217.npy')
     # data_pt = 'data/Chair_test_new_ids_to_objs_19_0_1217.json'
@@ -1300,14 +1324,15 @@ if __name__ == "__main__":
     #     for x in just_ids:
     #         f.write(x+'\n')
     # print(f'data/{cat_name}_train_{pt_sample_res}_19_{0}_{len(ids_w_four_parts)}.lst')
-    # exit(0)
+    np.save(f'data/{cat_name}_train_{pt_sample_res}_19_{0}_{len(ids_w_four_parts)}.npy', just_ids[:3000])
+    exit(0)
 
-    # # export_data(ids_w_four_parts, save_data=True,
-    # #             start=0, end=len(ids_w_four_parts))
     # export_data(ids_w_four_parts, save_data=True,
-    #             start=0, end=10)
-    # # print(ids_w_four_parts[:50])
-    # exit(0)
+    #             start=0, end=len(ids_w_four_parts))
+    export_data(ids_w_four_parts, save_data=True,
+                start=0, end=10)
+    # print(ids_w_four_parts[:50])
+    exit(0)
 
     unique_name_to_new_id, all_entire_meshes, all_part_meshes,\
         all_ori_ids_to_new_ids, all_obbs, all_name_to_obbs =\

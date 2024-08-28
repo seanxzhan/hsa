@@ -7,6 +7,7 @@ import subprocess
 import numpy as np
 import scipy.ndimage as ndimage
 from utils import binvox_rw
+from data_prep import gather_hdf5
 
 
 def export_mesh_norm(vertices, faces, path=None):
@@ -86,6 +87,84 @@ def voxelize_obj(obj_dir, obj_filename, res,
     )
     subprocess.call([mv_nc], shell=True)
 
+
+def get_vox_from_one_mesh(mesh_name, mesh_dir, res):
+    """returns voxels, points, values
+    """
+    vox_path = os.path.join(mesh_dir, f'{mesh_name}_{res}.binvox')
+    vox_c_path = os.path.join(mesh_dir, f'{mesh_name}_{res}_c.binvox')
+    if not os.path.exists(vox_c_path):
+    # if True:
+        setup_vox(mesh_dir)
+        voxelize_obj(
+            mesh_dir,
+            f'{mesh_name}.obj',
+            res,
+            vox_c_path,
+            vox_path)
+        teardown_vox(mesh_dir)
+    voxels = load_voxels(vox_c_path)
+    voxels = fill_internal_voxels(torch.from_numpy(voxels)).numpy()
+    points, values = gather_hdf5.sample_points_values(voxels, res)
+    return voxels, points, values
+
+
+def fill_internal_voxels(voxel_grid):
+    """
+    Fill the internal voxels of a 3D voxel grid.
+
+    Parameters:
+    voxel_grid (torch.Tensor): A 3D tensor of shape (D, H, W) with boolean values where
+                               True indicates a voxel is filled.
+
+    Returns:
+    torch.Tensor: A 3D tensor of the same shape as voxel_grid with internal voxels filled.
+    """
+    D, H, W = voxel_grid.shape
+
+    # Create a copy of the voxel grid to mark visited and filled voxels
+    filled_grid = voxel_grid.clone()
+
+    # Stack for depth-first search (DFS)
+    stack = []
+
+    # Use advanced indexing to mark boundary voxels as outside
+    def mark_outside(indices):
+        filled_grid[indices] = True
+        stack.extend(zip(*[idx.tolist() for idx in indices]))
+
+    # Mark boundary voxels
+    # Mark the faces along the Z-axis
+    mark_outside((torch.arange(D), torch.arange(H), torch.zeros(H, dtype=torch.long)))
+    mark_outside((torch.arange(D), torch.arange(H), torch.full((H,), W-1, dtype=torch.long)))
+
+    # Mark the faces along the Y-axis
+    mark_outside((torch.arange(D), torch.zeros(W, dtype=torch.long), torch.arange(W)))
+    mark_outside((torch.arange(D), torch.full((W,), H-1, dtype=torch.long), torch.arange(W)))
+
+    # Mark the faces along the X-axis
+    mark_outside((torch.zeros(H, dtype=torch.long), torch.arange(H), torch.arange(W)))
+    mark_outside((torch.full((H,), D-1, dtype=torch.long), torch.arange(H), torch.arange(W)))
+
+    # Perform DFS to mark all outside connected components
+    while stack:
+        x, y, z = stack.pop()
+        # Check all 6 neighbors
+        for dx, dy, dz in [(-1, 0, 0), (1, 0, 0), (0, -1, 0), (0, 1, 0), (0, 0, -1), (0, 0, 1)]:
+            nx, ny, nz = x + dx, y + dy, z + dz
+            if 0 <= nx < D and 0 <= ny < H and 0 <= nz < W and not filled_grid[nx, ny, nz]:
+                filled_grid[nx, ny, nz] = True
+                stack.append((nx, ny, nz))
+
+    # Fill the internal voxels (the unvisited ones)
+    internal_voxels_filled = ~filled_grid & ~voxel_grid
+
+    # Combine the original voxel grid with the filled internal voxels
+    result_grid = voxel_grid | internal_voxels_filled
+
+    result_grid += 2
+
+    return result_grid
 
 def parse_labels_txt(in_path):
     """Returns partnet labels, unique labels, remapped labels,

@@ -5,6 +5,15 @@ import importlib
 base_path = f"final"
 image_pattern = "sdfusion/{shape_idx}/{shape_idx}-vs.png"
 
+rep = 'occflexi'
+expt = 25
+mode = 'inv_test_one_img'; start = 0; end = 50
+# batch_size = 10
+
+module = importlib.import_module(f"run.{rep}.{rep}_{expt}")
+model_idx_to_anno_id = getattr(module, "model_idx_to_anno_id")
+shape_indices = [model_idx_to_anno_id[i] for i in range(start, end)]
+
 # Function to generate HTML content
 def generate_html(image_indices,
                   output_file=os.path.join(
@@ -70,5 +79,5 @@ def generate_html(image_indices,
     print(f"HTML file '{output_file}' generated successfully.")
 
 # Generate the HTML file
-shape_indices = os.listdir('final/sdfusion')
+# shape_indices = os.listdir('final/sdfusion')
 generate_html(shape_indices)
