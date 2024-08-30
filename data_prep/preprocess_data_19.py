@@ -215,8 +215,16 @@ def build_obbs(anno_id, part_info: Dict):
             print(f"{anno_id} has bad parts")
             continue
         ext = np.array(obb.primitive.extents)
+        # mesh.export(f'{name}.obj')
+        # verts = mesh.vertices
+        # xmin, xmax = np.min(verts[:,0]), np.max(verts[:,0])
+        # ymin, ymax = np.min(verts[:,1]), np.max(verts[:,1])
+        # zmin, zmax = np.min(verts[:,2]), np.max(verts[:,2])
+        # vmid = np.array([(xmin+xmax)/2, (ymin+ymax)/2, (zmin+zmax)/2])
+        # print(vmid)
         xform = np.array(obb.primitive.transform)
         ext_xform = align_xform(ext, xform)
+        # print(ext_xform[1][:3, 3])
         obbs.append(ext_xform)
         name_to_obbs[name] = ext_xform
 
@@ -1185,8 +1193,8 @@ def get_info_from_voxels(anno_id, res, entire_mesh):
     entire_mesh.export(gt_mesh_path)
     vox_path = os.path.join(obj_dir, f'{anno_id}_{res}.binvox')
     vox_c_path = os.path.join(obj_dir, f'{anno_id}_{res}_c.binvox')
-    # if not os.path.exists(vox_c_path):
-    if True:
+    if not os.path.exists(vox_c_path):
+    # if True:
         ops.setup_vox(obj_dir)
         ops.voxelize_obj(
             obj_dir,
@@ -1294,7 +1302,7 @@ if __name__ == "__main__":
     # exit(0)
     
     # pass two to create the four_parts dataset
-    good_indices = np.load('data/chair_am_four_parts_16_0_4489.npy')
+    good_indices = np.load('data/chair_four_parts_16_0_4489.npy')
     data_pt = 'data/Chair_train_new_ids_to_objs_16_0_4489.json'
     # good_indices = np.load('data/chair_am_four_parts_19_0_1217.npy')
     # data_pt = 'data/Chair_test_new_ids_to_objs_19_0_1217.json'
@@ -1324,8 +1332,8 @@ if __name__ == "__main__":
     #     for x in just_ids:
     #         f.write(x+'\n')
     # print(f'data/{cat_name}_train_{pt_sample_res}_19_{0}_{len(ids_w_four_parts)}.lst')
-    np.save(f'data/{cat_name}_train_{pt_sample_res}_19_{0}_{len(ids_w_four_parts)}.npy', just_ids[:3000])
-    exit(0)
+    # np.save(f'data/{cat_name}_train_{pt_sample_res}_19_{0}_{len(ids_w_four_parts)}.npy', just_ids[:3000])
+    # exit(0)
 
     # export_data(ids_w_four_parts, save_data=True,
     #             start=0, end=len(ids_w_four_parts))
@@ -1338,11 +1346,13 @@ if __name__ == "__main__":
         all_ori_ids_to_new_ids, all_obbs, all_name_to_obbs =\
                 export_data(ids_w_four_parts, save_data=False, start=0, end=10)
 
+    exit(0)
+
     with open('data/Chair_train_new_ids_to_objs_19_0_10.json', 'r') as f:
         all_obs = json.load(f)
     keys = list(all_obs.keys())
 
-    model_idx = 1
+    model_idx = 2
     anno_id = keys[model_idx]
     print(anno_id)
 

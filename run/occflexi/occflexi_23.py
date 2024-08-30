@@ -48,19 +48,23 @@ pt_sample_res = 64
 occ_res = int(pt_sample_res / 2)
 device = 'cuda'
 lr = 0.001
-iterations = 10000; iterations += 1
+iterations = 400; iterations += 1
 train_res = [512, 512]
-fc_res = 48
-num_shapes = 1
-batch_size = 1
+fc_res = 31
+num_shapes = 10
+batch_size = 10
 each_part_feat = 32
 each_box_feat = 32
 embed_dim = 128
 ds_id = 19
-ds_start, ds_end = 0, 10
+ds_start, ds_end = 0, 508
 expt_id = 23
 anchor_idx = -1
 num_batches = num_shapes // batch_size
+
+REFINE = True
+if REFINE:
+    iterations = 2400
 
 # ------------ data dirs ------------
 partnet_dir = '/datasets/PartNet'
@@ -235,6 +239,7 @@ def load_meshes(batch_idx, batch_size):
     end = start + batch_size
     return [gt_meshes[i] for i in range(start, end)]
 
+# ------------ fixing bad sdf ------------
 def fix_sdf(sdf, fc_res):
     # NOTE: this chunk is crucial to keep training upon flexi injection!
     sdf_bxnxnxn = sdf.reshape((sdf.shape[0], fc_res+1, fc_res+1, fc_res+1))
@@ -256,41 +261,13 @@ def fix_sdf(sdf, fc_res):
         sdf = sdf * update_mask + new_sdf * (1 - update_mask)
     return sdf
 
-def get_vmid_den(points: torch.FloatTensor, eps=1e-6):
-    assert len(points.shape) == 3, f'Points have unexpected shape {points.shape}'
 
-    # vmin = points.min(dim=1, keepdim=True)[0]
-    # vmax = points.max(dim=1, keepdim=True)[0]
-    # vmid = (vmin + vmax) / 2
-    # res = points - vmid
-    # if normalize:e
-    #     den = (vmax - vmin).max(dim=-1, keepdim=True)[0].clip(min=eps)
-    #     res = res / den
+# ------------ getting bbox and center from point cloud ------------
+def get_bbox_geom(points):
     vmin = points.min(dim=1, keepdim=True)[0]
     vmax = points.max(dim=1, keepdim=True)[0]
-    vmid = (vmin + vmax) / 2
-    den = (vmax - vmin).max(dim=-1, keepdim=True)[0].clip(min=eps)
-    return vmid, den
-
-def get_xform(points, vmid, den):
-    assert len(points.shape) == 3, f'Points have unexpected shape {points.shape}'
-    res = points - vmid
-    res = res / den
-    vmin = points.min(dim=1, keepdim=True)[0]
-    vmax = points.max(dim=1, keepdim=True)[0]
-    vmid = (vmin + vmax) / 2
-    return vmid
-
-
-def get_geom(points, den):
-    assert len(points.shape) == 3, f'Points have unexpected shape {points.shape}'
-    scaled = points / den
-    vmin = scaled.min(dim=1, keepdim=True)[0]
-    vmax = scaled.max(dim=1, keepdim=True)[0]
     geom = vmax - vmin
     return geom
-
-
 def get_vmid(points):
     assert len(points.shape) == 3, f'Points have unexpected shape {points.shape}'
     vmin = points.min(dim=1, keepdim=True)[0]
@@ -302,86 +279,28 @@ def get_vmid(points):
 # ------------ flexicubes ------------
 def run_flexi(sdf, x_nx3, cube_fx8, fc_res,
               gt_mesh=None, pred_occ=None, one_img=False):
-    # vertices, faces, L_dev = fc(
-    #     x_nx3.unsqueeze(0), fix_sdf(sdf), cube_fx8.unsqueeze(0), fc_res, training=True)
-    # exit(0)
     vertices, faces, L_dev = fc(
         x_nx3, fix_sdf(sdf, fc_res)[0], cube_fx8, fc_res, training=True)
-    # print(torch.min(vertices).detach().cpu().numpy(),
-    #       torch.max(vertices).detach().cpu().numpy())
-    # print(torch.min(gt_mesh.vertices).detach().cpu().numpy(),
-    #       torch.max(gt_mesh.vertices).detach().cpu().numpy())
     flexicubes_mesh = util.Mesh(vertices, faces)
-
-    # scalex = (torch.max(vertices[:,0])-torch.min(vertices[:,0]))/(torch.max(vertices[:,0])-torch.min(vertices[:,0]))
-    # scaley = (torch.max(vertices[:,1])-torch.min(vertices[:,1]))/(torch.max(vertices[:,1])-torch.min(vertices[:,1]))
-    # scalez = (torch.max(vertices[:,2])-torch.min(vertices[:,2]))/(torch.max(vertices[:,2])-torch.min(vertices[:,2]))
-    # scales = (scalex, scaley, scalez)
-
-    # print(torch.min(flexicubes_mesh.vertices[:,0]).item(), torch.max(flexicubes_mesh.vertices[:,0]).item())
-    # print(torch.min(flexicubes_mesh.vertices[:,1]).item(), torch.max(flexicubes_mesh.vertices[:,1]).item())
-    # print(torch.min(flexicubes_mesh.vertices[:,2]).item(), torch.max(flexicubes_mesh.vertices[:,2]).item())
-
-    vmid, den = get_vmid_den(vertices.unsqueeze(0))
 
     if gt_mesh is not None:
         mv, mvp = render.get_random_camera_batch(
             8, iter_res=train_res, device=device, use_kaolin=False, one_img=one_img)
         target = render.render_mesh_paper(gt_mesh, mv, mvp, train_res)
 
-        # print(torch.min(gt_mesh.vertices[:,0]).item(), torch.max(gt_mesh.vertices[:,0]).item())
-        # print(torch.min(gt_mesh.vertices[:,1]).item(), torch.max(gt_mesh.vertices[:,1]).item())
-        # print(torch.min(gt_mesh.vertices[:,2]).item(), torch.max(gt_mesh.vertices[:,2]).item())
-
-        # import imageio
-        # # gt_mesh = flexicubes_mesh
-        # gt_mesh.auto_normals()
-        # gt_buffers = render.render_mesh_paper(gt_mesh, mv[:1], mvp[:1],
-        #                                       train_res, return_types=["normal"], white_bg=True)
-        # normal = gt_buffers["normal"][0].detach().cpu().numpy()
-        # normal = ((normal+1)/2*255).astype(np.uint8)
-        # imageio.imwrite(os.path.join(results_dir, 'render_normal.png'), normal)
-        # depth = target["depth"][0].detach().cpu().numpy()
-        # depth_normalized = ((depth - depth.min()) / (depth.max() - depth.min()) * 255).astype(np.uint8)
-        # imageio.imwrite(os.path.join(results_dir, 'render_depth.png'), depth_normalized)
-        # mask = target["mask"][0].detach().cpu().expand(-1, -1, 3).numpy()
-        # mask = (mask * 255).astype(np.uint8)
-        # imageio.imwrite(os.path.join(results_dir, 'render_mask.png'), mask)
-
-        # gt_mesh = flexicubes_mesh
-        # target = render.render_mesh_paper(gt_mesh, mv, mvp, train_res)
-        # gt_mesh.auto_normals()
-        # gt_buffers = render.render_mesh_paper(gt_mesh, mv[:1], mvp[:1],
-        #                                       train_res, return_types=["normal"], white_bg=True)
-        # normal = gt_buffers["normal"][0].detach().cpu().numpy()
-        # normal = ((normal+1)/2*255).astype(np.uint8)
-        # imageio.imwrite(os.path.join(results_dir, 'render_normal_flexi.png'), normal)
-        # depth = target["depth"][0].detach().cpu().numpy()
-        # depth_normalized = ((depth - depth.min()) / (depth.max() - depth.min()) * 255).astype(np.uint8)
-        # imageio.imwrite(os.path.join(results_dir, 'render_depth_flexi.png'), depth_normalized)
-        # mask = target["mask"][0].detach().cpu().expand(-1, -1, 3).numpy()
-        # mask = (mask * 255).astype(np.uint8)
-        # imageio.imwrite(os.path.join(results_dir, 'render_mask_flexi.png'), mask)
-        # exit(0)
-
         try: 
             buffers = render.render_mesh_paper(flexicubes_mesh, mv, mvp, train_res)
         except Exception as e:
             import logging, traceback
             logging.error(traceback.format_exc())
-            print(torch.min(sdf))
-            print(torch.max(sdf))
-            np.save(os.path.join(results_dir, 'badsdfout.npy'),
-                    sdf.detach().cpu().numpy())
-            np.save(os.path.join(results_dir, 'badoccout.npy'),
-                    pred_occ.detach().cpu().numpy())
+            print(torch.min(sdf), torch.max(sdf))
             exit(0)
         mask_loss = (buffers['mask'] - target['mask']).abs().mean()
         depth_loss = (((((buffers['depth'] - (target['depth']))*
                         target['mask'])**2).sum(-1)+1e-8)).sqrt().mean() * 10
-        return mask_loss+depth_loss, vertices, faces, vmid, den
+        return mask_loss+depth_loss, vertices, faces
     else:
-        return None, vertices, faces, vmid, den
+        return None, vertices, faces
 
 # ------------ occupancy ------------
 def run_occ(batch_size, masked_indices, batch_points,
@@ -491,7 +410,7 @@ def inference_network(masked_indices, query_points,
                     custom_xformed_flexi_verts=custom_xformed_flexi_verts,
                     just_bbox_info=just_bbox_info)
 
-        _, flexi_vertices, flexi_faces, _, _ =\
+        _, flexi_vertices, flexi_faces =\
             run_flexi(torch.flatten(entire_sdf[0]).unsqueeze(0),
                       x_nx3, cube_fx8, fc_res)
         
@@ -561,63 +480,29 @@ if args.train:
 
             # ------------ flexi loss ------------
             mesh_loss = 0
-            # if it >= 1000:
-            mesh_xforms = torch.zeros_like(batch_xforms).to(device)
-            mesh_geom = torch.zeros_like(batch_geom).to(device)
+            # print(batch_xforms.detach().cpu().numpy())
+            # print(batch_geom.detach().cpu().numpy())
+            if REFINE:
+                mesh_xforms = torch.zeros_like(batch_xforms).to(device)
+                mesh_geom = torch.zeros_like(batch_geom).to(device)
             for s in range(batch_size):
-                one_mesh_loss, vertices, faces, _, _ = run_flexi(
+                one_mesh_loss, vertices, faces = run_flexi(
                     torch.flatten(entire_sdf[s]).unsqueeze(0),
                     x_nx3, cube_fx8, fc_res,
                     batch_gt_meshes[s],
                     entire_verts_values[s])
                 mesh_loss += one_mesh_loss
-                # if it >= 1000:
-                # print(part_sdf.shape)
-                for p in range(num_parts):
-                    # part_verts, part_faces, _ = fc(
-                    #     x_nx3, fix_sdf(part_sdf[s:s+1,:,p], fc_res)[0],
-                    #     cube_fx8, fc_res, training=True)
-                    part_verts, part_faces, _ = fc(
-                        x_nx3, fix_sdf(torch.flatten(part_sdf[s,:,:,:,p]).unsqueeze(0), fc_res)[0],
-                        cube_fx8, fc_res, training=True)
-                    # print(torch.min(part_verts))
-                    # print(torch.max(part_verts))
-                    part_vmid = get_vmid(part_verts.unsqueeze(0))
-                    mesh_xforms[s,p] = part_vmid
-                    # condition = lambda x: x >= 0.5
-                    # pts = get_condition_satisfying_coordinates(part_sdf[s:s+1,:,p],
-                    #                                            condition)
-                    # pts = pts / occ_res - 0.5
-                    # part_vmid = get_vmid(pts.unsqueeze(0))
-                    # mesh_xforms[s,p] = part_vmid
-
-                    # if torch.sum(part_sdf[s:s+1,:,p] < 0) < 10:
-                    #     mesh_xforms[s,p] = 0
-                        # mesh_geom[s,p,0] = 0
-                        # mesh_geom[s,p,1] = 0
-                        # mesh_geom[s,p,2] = 0
-                    # else:
-                        # mesh_xforms[s,p,0] = -torch.mean(part_verts[:,0])
-                        # mesh_xforms[s,p,1] = -torch.mean(part_verts[:,1])
-                        # mesh_xforms[s,p,2] = -torch.mean(part_verts[:,2])
-                        # mesh_xforms[s,p] = get_xform(part_verts.unsqueeze(0), vmid, den)
-                        # mesh_geom[s,p,0] = torch.max(part_verts[:,0])-torch.min(part_verts[:,0])
-                        # mesh_geom[s,p,1] = torch.max(part_verts[:,1])-torch.min(part_verts[:,1])
-                        # mesh_geom[s,p,2] = torch.max(part_verts[:,2])-torch.min(part_verts[:,2])
-                # print(learned_xforms)
-                # print(batch_xforms)
-                # exit(0)
-            # print("gt")
-            # print(batch_xforms)
-            # print("out")
-            # print(mesh_xforms)
-            # print("out2")
-            # print(learned_xforms)
+                if REFINE:
+                    for p in range(num_parts):
+                        part_verts, part_faces, _ = fc(
+                            x_nx3, fix_sdf(torch.flatten(part_sdf[s,:,:,:,p]).unsqueeze(0), fc_res)[0],
+                            cube_fx8, fc_res, training=True)
+                        part_vmid = get_vmid(part_verts.unsqueeze(0))
+                        part_geom = get_bbox_geom(part_verts.unsqueeze(0))
+                        mesh_xforms[s,p] = part_vmid
+                        mesh_geom[s,p] = part_geom
             mesh_loss /= batch_size
-
-            # if it >= 1000:
-            # pairwise_xforms = mesh_xforms[:, connectivity]
-            # mesh_relations = pairwise_xforms[:, :, 1] - pairwise_xforms[:, :, 0]
+            # exit(0)
 
             # ------------ occ loss ------------
             loss1 = loss_f(pred_values1, modified_values)
@@ -628,50 +513,16 @@ if args.train:
             loss_relations = loss_f(
                 embed_fn(learned_relations.view(-1, 3)),
                 embed_fn(batch_relations.view(-1, 3)))
-            # total_loss = loss1 + loss2 + mesh_loss +\
-            #              10 * loss_xform + 10 * loss_relations
-            # if it >= 1000:
-            # loss_mesh_xform = loss_f(
-            #     embed_fn(mesh_xforms.view(-1, 3)),
-            #     embed_fn(batch_xforms.view(-1, 3)))
-            loss_mesh_xform = torch.mean(torch.square(mesh_xforms))
-            # loss_mesh_relations = loss_f(
-            #     embed_fn(mesh_relations.view(-1, 3)),
-            #     embed_fn(batch_relations.view(-1, 3)))
-            # loss_bbox_geom = loss_f(
-            #     embed_fn(mesh_geom.view(-1, 3)),
-            #     embed_fn(batch_geom.view(-1, 3)),)
-            # loss_xform = loss_f(
-            #     learned_xforms.view(-1, 3),
-            #     batch_xforms.view(-1, 3))
-            # loss_relations = loss_f(
-            #     learned_relations.view(-1, 3),
-            #     batch_relations.view(-1, 3))
-            # if it >= 1000:
-            #     loss_mesh_xform = loss_f(
-            #         mesh_xforms.view(-1, 3),
-            #         batch_xforms.view(-1, 3))
-            #     loss_mesh_relations = loss_f(
-            #         mesh_relations.view(-1, 3),
-            #         batch_relations.view(-1, 3))
-            #     loss_bbox_geom = loss_f(
-            #         mesh_geom.view(-1, 3),
-            #         batch_geom.view(-1, 3))
             total_loss = loss1 + loss2 + mesh_loss + 10*loss_xform + 10*loss_relations
-
-            # print(mesh_xforms)
-            # print(batch_xforms)
-            # exit(0)
-
-            # if it >= 1000:
-            # total_loss += 10 * loss_mesh_xform + 10 * loss_mesh_relations + 1 * loss_bbox_geom
-            # total_loss += loss_mesh_xform
-            total_loss += mesh_loss_schedule(it) * loss_mesh_xform
-            # total_loss = loss1 + loss2 + mesh_loss + loss_xform + loss_relations +\
-            #              1 * loss_mesh_xform + 1 * loss_mesh_relations + loss_bbox_geom
-            # total_loss = loss1 + loss2 + mesh_loss +\
-            #              1 * loss_xform + 1 * loss_relations +\
-            #              1 * loss_mesh_xform + 1 * loss_mesh_relations + loss_bbox_geom
+            
+            if REFINE:
+                loss_mesh_xform = loss_f(
+                    embed_fn(-mesh_xforms.view(-1, 3)),
+                    embed_fn(batch_xforms.view(-1, 3)))
+                loss_bbox_geom = loss_f(
+                    embed_fn(mesh_geom.view(-1, 3)),
+                    embed_fn(batch_geom.view(-1, 3)),)
+                total_loss += 10*loss_mesh_xform + loss_bbox_geom
 
             total_loss.backward()
             optimizer.step()
@@ -687,10 +538,9 @@ if args.train:
         writer.add_scalar('xform', loss_xform, it)
         writer.add_scalar('relations', loss_relations, it)
         writer.add_scalar('mesh', mesh_loss, it)
-        # if it >= 1000:
-        writer.add_scalar('mesh_xform', loss_mesh_xform, it)
-        # writer.add_scalar('mesh_relations', loss_mesh_relations, it)
-        # writer.add_scalar('geom', loss_bbox_geom, it)
+        if REFINE:
+            writer.add_scalar('mesh_xform', loss_mesh_xform, it)
+            writer.add_scalar('mesh_geom', loss_bbox_geom, it)
 
         # ------------ print loss & saves occflexi ------------
         if (it) % 50 == 0 or it == (iterations - 1): 
@@ -1576,7 +1426,7 @@ if args.asb_scaling:
                     mask_flexi=True,
                     custom_xformed_points=xformed_query_points,
                     custom_xformed_flexi_verts=xformed_flexi_verts)
-        _, flexi_vertices, flexi_faces, _ =\
+        _, flexi_vertices, flexi_faces =\
             run_flexi(torch.flatten(comp_sdf[0]).unsqueeze(0),
                       x_nx3, cube_fx8, fc_res)
 
@@ -1770,7 +1620,7 @@ if args.inv:
                     transformed_flexi_verts, batch_occ_embed), dim=-1, keepdim=True)
                 comp_sdf = ops.bin2sdf_torch_3( 
                     pred_verts_occ.view(-1, fc_res+1, fc_res+1, fc_res+1))
-                one_mesh_loss, _, _, _ = run_flexi(
+                one_mesh_loss, _, _ = run_flexi(
                     torch.flatten(comp_sdf[0]).unsqueeze(0),
                     x_nx3, cube_fx8, fc_res,
                     batch_gt_meshes[0], pred_verts_occ[0],
