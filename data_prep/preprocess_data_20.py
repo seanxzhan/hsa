@@ -42,7 +42,7 @@ name_to_cat = {
 cat_name = 'Chair'
 cat_id = name_to_cat[cat_name]
 
-pt_sample_res = 64
+pt_sample_res = 128
 
 partnet_dir = '/datasets/PartNet'
 partnet_index_path = '/sota/partnet_dataset/stats/all_valid_anno_info.txt'
@@ -315,7 +315,9 @@ def build_dense_graph(union_root: AnyNode, name_to_obbs: Dict, obbs,
     # connected_xforms = connectivity @ xforms[:, :3, 3]
 
     if cat_name == 'Chair':
-        connectivity = [(0, 1), (0, 2), (1, 2), (2, 3)]
+        # connectivity = [(0, 1), (0, 2), (1, 2), (2, 3)]
+        connectivity = [(0, 1), (0, 4), (1, 3), (1, 4), (4, 2), (4, 5), (4, 6), (4, 7), (4, 8), (4, 9)]
+        # connectivity = [(0, 1), (1, 2)]
     if cat_name == 'Lamp':
         connectivity = [(0, 1), (0, 2), (0, 3), (1, 2)]
     if cat_name == 'Table':
@@ -861,10 +863,9 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
     hdf5_file.create_dataset(
         'values', [num_shapes, (pt_sample_res/2)**3, 1],
         dtype=np.float32)
-    hdf5_file.create_dataset(
-        'occ', [num_shapes, x_nx3.shape[0], 1],
-        dtype=np.float32)
-    # print("dataset occ shape: ", (pt_sample_res/2)**3)
+    # hdf5_file.create_dataset(
+    #     'occ', [num_shapes, x_nx3.shape[0], 1],
+    #     dtype=np.float32)
     hdf5_file.create_dataset(
         'node_features', [num_shapes, num_union_nodes_class, OBB_REP_SIZE],
         dtype=np.float32)
@@ -880,40 +881,9 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
     hdf5_file.create_dataset(
         'extents', [num_shapes, num_parts, 3],
         dtype=np.float32)
-    # hdf5_file.create_dataset(
-    #     'transformed_points', [num_shapes, num_parts, (pt_sample_res/2)**3, 3],
-    #     dtype=np.float32)
-    # hdf5_file.create_dataset(
-    #     'empty_parts', [num_shapes, (pt_sample_res/2)**3, num_parts],
-    #     dtype=np.uint8)
     hdf5_file.create_dataset(
-        'relations', [num_shapes, 4, 4, 4],
-        # 'relations', [num_shapes, 3, 4, 4],
+        'relations', [num_shapes, 10, 4, 4],
         dtype=np.float32)
-    # hdf5_file.create_dataset(
-    #     'part_verts_0', [num_shapes, ],
-    #     dtype=h5py.vlen_dtype(np.float32))
-    # hdf5_file.create_dataset(
-    #     'part_faces_0', [num_shapes, ],
-    #     dtype=h5py.vlen_dtype(np.float32))
-    # hdf5_file.create_dataset(
-    #     'part_verts_1', [num_shapes, ],
-    #     dtype=h5py.vlen_dtype(np.float32))
-    # hdf5_file.create_dataset(
-    #     'part_faces_1', [num_shapes, ],
-    #     dtype=h5py.vlen_dtype(np.float32))
-    # hdf5_file.create_dataset(
-    #     'part_verts_2', [num_shapes, ],
-    #     dtype=h5py.vlen_dtype(np.float32))
-    # hdf5_file.create_dataset(
-    #     'part_faces_2', [num_shapes, ],
-    #     dtype=h5py.vlen_dtype(np.float32))
-    # hdf5_file.create_dataset(
-    #     'part_verts_3', [num_shapes, ],
-    #     dtype=h5py.vlen_dtype(np.float32))
-    # hdf5_file.create_dataset(
-    #     'part_faces_3', [num_shapes, ],
-    #     dtype=h5py.vlen_dtype(np.float32))
     hdf5_file.create_dataset(
         'verts', [num_shapes, ],
         dtype=h5py.vlen_dtype(np.float32))
@@ -935,7 +905,7 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
         hdf5_file['all_indices'][i] = out['all_indices']
         hdf5_file['normalized_points'][i] = out['normalized_points']
         hdf5_file['values'][i] = out['values']
-        hdf5_file['occ'][i] = out['occ']
+        # hdf5_file['occ'][i] = out['occ']
         hdf5_file['node_features'][i] = all_node_features[i]
         hdf5_file['adj'][i] = all_adj[i]
         hdf5_file['part_nodes'][i] = all_part_nodes[i]
@@ -1063,18 +1033,18 @@ def make_data_for_one(anno_id,
     # random.seed(319)
     points, values = gather_hdf5.sample_points_values(fg_voxels, pt_sample_res)
     
-    flexi_points = pt_sample_res * x_nx3 + pt_sample_res / 2
+    # flexi_points = pt_sample_res * x_nx3 + pt_sample_res / 2
     sdf_grid = torch.from_numpy(sdf_grid)
-    flexi_values = ops.vectorized_trilinear_interpolate(
-        sdf_grid.expand(1, 1, -1, -1, -1), flexi_points.expand(1, -1, -1),
-        pt_sample_res)
-    # points = points.numpy()
-    flexi_values = np.squeeze(flexi_values.numpy())[:, None]
-    occ = np.where(flexi_values <= 0, 1, 0)
-    # np.save('data_prep/values_occ.npy', occ)
-    # print("points shape: ", points.shape)
-    # print("occ shape: ", occ.shape)
-    # exit(0)
+    # flexi_values = ops.vectorized_trilinear_interpolate(
+    #     sdf_grid.expand(1, 1, -1, -1, -1), flexi_points.expand(1, -1, -1),
+    #     pt_sample_res)
+    # # points = points.numpy()
+    # flexi_values = np.squeeze(flexi_values.numpy())[:, None]
+    # occ = np.where(flexi_values <= 0, 1, 0)
+    # # np.save('data_prep/values_occ.npy', occ)
+    # # print("points shape: ", points.shape)
+    # # print("occ shape: ", occ.shape)
+    # # exit(0)
 
     pv_indices = np.arange(len(points))
     # np.random.seed(319)
@@ -1128,14 +1098,14 @@ def make_data_for_one(anno_id,
     normalized_points = kaolin.ops.pointcloud.center_points(points, normalize=True)
     normalized_points = normalized_points.cpu().numpy()
     values = values[None, :]
-    occ = occ[None, :]
+    # occ = occ[None, :]
 
     return {
         'part_num_indices': [part_num_indices],     # 1, num_parts
         'all_indices': [all_indices],               # 1, variable length
         'normalized_points': normalized_points,     # 1, num_points, 3
         'values': values,                           # 1, num_points, 1
-        'occ': occ,                           # 1, num_points, 1
+        # 'occ': occ,                           # 1, num_points, 1
         # 'pts_data': pts_data,
         # 'pts_whole_data': pts_data_whole
     }
@@ -1261,7 +1231,9 @@ if __name__ == "__main__":
     # print(len(train_ids) + len(val_ids))
     # exit(0)
 
-    export_data(train_ids + val_ids, save_data=True, start=0, end=5106)
+    # export_data(train_ids + val_ids, save_data=True, start=0, end=5106)
+    train_and_val = train_ids + val_ids
+    export_data(train_and_val, save_data=True, start=0, end=5106)
     exit(0)
     
     # pass two to create the four_parts dataset

@@ -61,7 +61,7 @@ def generate_html(image_indices,
             </tr>
     """
 
-    for idx in image_indices:
+    for i, idx in enumerate(image_indices):
         image_path = image_pattern.format(shape_idx=idx)
         disentang_pattern0_path = disentang_pattern0.format(shape_idx=idx)
         disentang_pattern1_path = disentang_pattern1.format(shape_idx=idx)
@@ -74,7 +74,7 @@ def generate_html(image_indices,
         if not os.path.exists(os.path.join(base_path, disentang_pattern3_path)): disentang_pattern3_path = placeholder_path
         html_content += f"""
             <tr>
-                <td class="fixed-width">{idx}</td>
+                <td class="fixed-width">{idx}-{i}</td>
                 <td>
                 <img src="{image_path}" alt="Shape {idx} results" width="200">
                 <br>

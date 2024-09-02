@@ -62,7 +62,8 @@ def save_four_parts_further_merged_am():
     # data_pt = 'data/Lamp_train_new_ids_to_objs_17_0_1554.json'
     # data_pt = 'data/Table_train_new_ids_to_objs_17_0_5707.json'
     # data_pt = 'data/Earphone_train_new_ids_to_objs_17_0_147.json'
-    data_pt = 'data/Chair_test_new_ids_to_objs_19_0_1217.json'
+    # data_pt = 'data/Chair_test_new_ids_to_objs_19_0_1217.json'
+    data_pt = 'data/Chair_train_new_ids_to_objs_20_0_5106.json'
     with open(data_pt, 'r') as f:
         data: Dict = json.load(f)
     all_ids = np.array(list(data.keys()))
