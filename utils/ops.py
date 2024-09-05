@@ -18,6 +18,9 @@ def export_mesh_norm(vertices, faces, path=None):
     vertices = vertices.numpy()
     faces = faces.numpy()
     mesh = trimesh.Trimesh(vertices, faces)
+    trimesh.repair.fix_inversion(mesh)
+    trimesh.repair.fix_normals(mesh)
+    trimesh.repair.fix_winding(mesh)
     if path is not None:
         mesh.export(path)
     return mesh

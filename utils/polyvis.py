@@ -97,9 +97,9 @@ def vis_occ(occ, dims, img_path=None, plot_hist=False, hist_path=None, show=Fals
                                 enabled=True,
                                 cmap='rainbow')
     
-    ps.screenshot(filename=img_path, transparent_bg=False)
     if show: ps.show()
     if not show:
+        ps.screenshot(filename=img_path, transparent_bg=False)
         ps.remove_all_structures()
         ps.remove_last_scene_slice_plane()
     # ps.remove_volume_grid("sdf grid")

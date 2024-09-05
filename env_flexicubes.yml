@@ -112,6 +112,7 @@ dependencies:
       - jupyter-client==7.4.9
       - jupyter-core==5.7.2
       - jupyterlab-widgets==3.0.11
+      - kaolin==0.15.0
       - kiwisolver==1.4.5
       - lazy-loader==0.4
       - markdown==3.6
@@ -124,6 +125,7 @@ dependencies:
       - nest-asyncio==1.6.0
       - networkx==3.2.1
       - ninja==1.11.1.1
+      - nvdiffrast==0.3.1
       - packaging==24.1
       - parso==0.8.4
       - pexpect==4.9.0
@@ -143,6 +145,7 @@ dependencies:
       - pyparsing==3.1.2
       - pyrender==0.1.45
       - python-dateutil==2.9.0.post0
+      - python-graphviz==0.20.3
       - pyzmq==24.0.1
       - scikit-image==0.24.0
       - scikit-learn==1.5.0

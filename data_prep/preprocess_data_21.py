@@ -649,25 +649,25 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
             anno_id = pair['anno_id']
             book[anno_id] = None
 
-    set_dict(dict_each_shape_unique_names, split_ids[start:end])
-    set_dict(dict_all_names_to_ori_ids_and_objs, split_ids[start:end])
-    set_dict(dict_all_obbs, split_ids[start:end])
-    set_dict(dict_all_entire_meshes, split_ids[start:end])
-    set_dict(dict_all_part_meshes, split_ids[start:end])
-    set_dict(dict_all_norm_meshes, split_ids[start:end])
-    set_dict(dict_all_name_to_obbs, split_ids[start:end])
-    set_dict(dict_all_root_nodes, split_ids[start:end])
-    set_dict(dict_all_valid_anno_ids, split_ids[start:end])
+    set_dict(dict_each_shape_unique_names, split_ids)
+    set_dict(dict_all_names_to_ori_ids_and_objs, split_ids)
+    set_dict(dict_all_obbs, split_ids)
+    set_dict(dict_all_entire_meshes, split_ids)
+    set_dict(dict_all_part_meshes, split_ids)
+    set_dict(dict_all_norm_meshes, split_ids)
+    set_dict(dict_all_name_to_obbs, split_ids)
+    set_dict(dict_all_root_nodes, split_ids)
+    set_dict(dict_all_valid_anno_ids, split_ids)
 
-    num_workers = 16
-    list_of_lists = misc.chunks(split_ids[start:end], num_workers)
+    num_workers = 12
+    list_of_lists = misc.chunks(split_ids, num_workers)
     q = Queue()
     workers = [
         Process(target=merge_partnet_after_merging_mp, args=(q, lst))
         for lst in list_of_lists]
     for p in workers:
         p.start()
-    pbar = tqdm(total=len(split_ids[start:end]))
+    pbar = tqdm(total=len(split_ids))
     while True:
         flag = True
         try:
@@ -844,11 +844,6 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
         all_extents.append(extents)
         all_relations.append(relations)
     
-    valid_anno_id_to_idx = {}
-    for i, x in enumerate(all_valid_anno_ids):
-        valid_anno_id_to_idx[x] = i
-    with open(f'data/{cat_name}_{mode}_{pt_sample_res}_20_valid_anno_id_to_idx.json', 'w') as f:
-        json.dump(valid_anno_id_to_idx, f)
 
     if not save_data:
         return unique_name_to_new_id, all_entire_meshes, all_part_meshes,\
@@ -898,9 +893,9 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
         'faces', [num_shapes, ],
         dtype=h5py.vlen_dtype(np.int64))
 
-    # valid_anno_id_to_idx = {}
-    # for i, x in enumerate(all_valid_anno_ids):
-    #     valid_anno_id_to_idx[x] = i
+    valid_anno_id_to_idx = {}
+    for i, x in enumerate(all_valid_anno_ids):
+        valid_anno_id_to_idx[x] = i
 
     # # lol: list of lists 
     # num_workers = 2
@@ -970,6 +965,7 @@ def export_data(split_ids: Dict, save_data=True, start=0, end=0,
         out = make_data_for_one(anno_id, unique_name_to_new_id,
                                 all_entire_meshes[i],
                                 all_ori_ids_to_new_ids[i])
+        idx = valid_anno_id_to_idx[anno_id]
         hdf5_file['part_num_indices'][i] = out['part_num_indices']
         hdf5_file['all_indices'][i] = out['all_indices']
         hdf5_file['normalized_points'][i] = out['normalized_points']
@@ -1307,7 +1303,7 @@ if __name__ == "__main__":
 
     # # export_data(train_ids + val_ids, save_data=True, start=0, end=5106)
     train_and_val = train_ids + val_ids
-    export_data(train_and_val, save_data=False, start=0, end=5106)
+    export_data(train_and_val, save_data=True, start=0, end=24)
     exit(0)
     
     # pass two to create the four_parts dataset
